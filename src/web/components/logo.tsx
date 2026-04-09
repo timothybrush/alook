@@ -12,9 +12,11 @@ const sizes = {
 export function Logo({
   size = "sm",
   className,
+  iconOnly = false,
 }: {
   size?: "sm" | "lg";
   className?: string;
+  iconOnly?: boolean;
 }) {
   const { icon, text } = sizes[size];
   const { resolvedTheme, setTheme } = useTheme();
@@ -56,12 +58,14 @@ export function Logo({
       ) : (
         <span style={{ width: icon, height: icon }} />
       )}
-      <span
-        className={cn(text, "font-black tracking-tight")}
-        style={{ fontFamily: "var(--font-brand)" }}
-      >
-        Alook
-      </span>
+      {!iconOnly && (
+        <span
+          className={cn(text, "font-black tracking-tight")}
+          style={{ fontFamily: "var(--font-brand)" }}
+        >
+          Alook
+        </span>
+      )}
     </button>
   );
 }

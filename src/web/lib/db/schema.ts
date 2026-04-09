@@ -126,7 +126,7 @@ export const agentTaskQueue = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     agentId: uuid("agent_id")
       .notNull()
-      .references(() => agent.id),
+      .references(() => agent.id, { onDelete: "cascade" }),
     runtimeId: uuid("runtime_id")
       .notNull()
       .references(() => agentRuntime.id),

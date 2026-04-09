@@ -1,5 +1,5 @@
 import { eq, and, desc, sql } from "drizzle-orm";
-import { agent } from "../schema";
+import { agent, agentTaskQueue } from "../schema";
 import type { Database } from "../index";
 
 export async function getAgent(db: Database, id: string) {
@@ -71,11 +71,16 @@ export async function deleteAgent(
   id: string,
   workspaceId: string
 ) {
-  const rows = await db
-    .delete(agent)
-    .where(and(eq(agent.id, id), eq(agent.workspaceId, workspaceId)))
-    .returning();
-  return rows[0] ?? null;
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(agentTaskQueue)
+      .where(eq(agentTaskQueue.agentId, id));
+    const rows = await tx
+      .delete(agent)
+      .where(and(eq(agent.id, id), eq(agent.workspaceId, workspaceId)))
+      .returning();
+    return rows[0] ?? null;
+  });
 }
 
 export async function updateAgent(

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DashboardNavbar } from "@/components/dashboard-navbar";
+import { AgentProvider } from "@/contexts/agent-context";
+import { AppSidebar } from "@/components/app-sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -24,9 +25,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!ready) return null;
 
   return (
-    <>
-      <DashboardNavbar />
-      {children}
-    </>
+    <AgentProvider>
+      <div className="flex h-screen bg-background overflow-hidden">
+        {/* Sidebar rail — stable across route changes */}
+        <AppSidebar />
+
+        {/* Floating content panel */}
+        <div className="flex-1 min-w-0 p-2 pl-0">
+          <main className="h-full rounded-xl bg-card shadow-sm ring-1 ring-border/50 overflow-hidden flex flex-col">
+            {children}
+          </main>
+        </div>
+      </div>
+    </AgentProvider>
   );
 }

@@ -58,7 +58,7 @@ describe("DELETE /api/agents/[id]", () => {
   });
 
   it("returns 404 for non-existent agent", async () => {
-    mockDelete.mockResolvedValue(null);
+    mockDelete.mockResolvedValue(null as any);
     const { DELETE } = await import("./route");
     const res = await DELETE(
       new NextRequest("http://localhost/api/agents/nope", { method: "DELETE" }),
@@ -86,7 +86,7 @@ describe("PATCH /api/agents/[id]", () => {
   });
 
   it("returns 404 for non-existent agent", async () => {
-    mockUpdate.mockResolvedValue(null);
+    mockUpdate.mockResolvedValue(null as any);
     const { PATCH } = await import("./route");
     const res = await PATCH(
       new NextRequest("http://localhost/api/agents/nope", {

@@ -24,7 +24,7 @@ beforeEach(() => {
 describe("TaskService", () => {
   describe("enqueueTask", () => {
     it("throws when agent not found", async () => {
-      mockAgentQueries.getAgent.mockResolvedValue(null);
+      mockAgentQueries.getAgent.mockResolvedValue(null as any);
       const svc = makeService();
       await expect(
         svc.enqueueTask("a1", "c1", "w1", "do stuff")
@@ -72,7 +72,7 @@ describe("TaskService", () => {
 
   describe("claimTask", () => {
     it("returns null when agent not found", async () => {
-      mockAgentQueries.getAgent.mockResolvedValue(null);
+      mockAgentQueries.getAgent.mockResolvedValue(null as any);
       const svc = makeService();
       expect(await svc.claimTask("a1")).toBeNull();
     });
@@ -137,7 +137,7 @@ describe("TaskService", () => {
         { agentId: "a2", runtimeId: "rt1" },
       ] as any);
 
-      mockAgentQueries.getAgent.mockResolvedValue(null);
+      mockAgentQueries.getAgent.mockResolvedValue(null as any);
 
       const svc = makeService();
       await svc.claimTaskForRuntime("rt1");
@@ -149,7 +149,7 @@ describe("TaskService", () => {
 
   describe("startTask", () => {
     it("throws when not in dispatched status", async () => {
-      mockTaskQueries.startTask.mockResolvedValue(null);
+      mockTaskQueries.startTask.mockResolvedValue(null as any);
       const svc = makeService();
       await expect(svc.startTask("t1")).rejects.toThrow(
         "task not in dispatched status"

@@ -25,8 +25,8 @@ vi.stubGlobal("fetch", mockFetch);
 // Prevent 401 redirect from blowing up
 Object.defineProperty(globalThis, "window", {
   value: {
+    ...(globalThis.window || {}),
     location: { href: "" },
-    ...globalThis.window,
   },
   writable: true,
 });

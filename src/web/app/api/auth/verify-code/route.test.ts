@@ -124,7 +124,7 @@ describe("POST /api/auth/verify-code", () => {
       code: "123456",
       email: "new@example.com",
     } as any);
-    mockGetUserByEmail.mockResolvedValue(null);
+    mockGetUserByEmail.mockResolvedValue(null as any);
     const createdUser = {
       id: "u2",
       name: "new",

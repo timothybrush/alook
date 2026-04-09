@@ -53,7 +53,7 @@ describe("withAuth", () => {
   });
 
   it("authenticates valid JWT and passes userId/email to handler", async () => {
-    mockVerifyJWT.mockResolvedValue({ sub: "u1", email: "a@b.com", iat: 0, exp: 0 });
+    mockVerifyJWT.mockResolvedValue({ sub: "u1", email: "a@b.com", name: "" });
     const wrapped = withAuth(handler);
     const res = await wrapped(makeReq({ Authorization: "Bearer valid-jwt" }));
     expect(res.status).toBe(200);
@@ -120,7 +120,7 @@ describe("withAuth", () => {
   });
 
   it("resolves dynamic params from context", async () => {
-    mockVerifyJWT.mockResolvedValue({ sub: "u1", email: "a@b.com", iat: 0, exp: 0 });
+    mockVerifyJWT.mockResolvedValue({ sub: "u1", email: "a@b.com", name: "" });
     const paramHandler = vi.fn(async (_req, ctx) =>
       NextResponse.json({ taskId: ctx.params?.taskId }),
     );

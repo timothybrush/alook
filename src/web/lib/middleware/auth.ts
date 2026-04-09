@@ -11,7 +11,7 @@ export interface AuthContext {
 export type AuthenticatedHandler = (
   req: NextRequest,
   ctx: AuthContext & { params?: Record<string, string> }
-) => Promise<NextResponse>;
+) => Promise<NextResponse | Response>;
 
 export function withAuth(handler: AuthenticatedHandler) {
   return async (

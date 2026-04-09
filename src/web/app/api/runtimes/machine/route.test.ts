@@ -19,10 +19,10 @@ vi.mock("@/lib/middleware/auth", () => ({
 
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/db/queries/runtime", () => ({
-  deleteRuntimesByDaemonId: (...args: any[]) => mockDeleteRuntimes(...args),
+  deleteRuntimesByDaemonId: (...args: Parameters<typeof mockDeleteRuntimes>) => mockDeleteRuntimes(...args),
 }));
 vi.mock("@/lib/db/queries/member", () => ({
-  getMemberByUserAndWorkspace: (...args: any[]) => mockGetMember(...args),
+  getMemberByUserAndWorkspace: (...args: Parameters<typeof mockGetMember>) => mockGetMember(...args),
 }));
 
 describe("DELETE /api/runtimes/machine", () => {
@@ -56,7 +56,7 @@ describe("DELETE /api/runtimes/machine", () => {
   });
 
   it("returns 404 when user is not a workspace member", async () => {
-    mockGetMember.mockResolvedValueOnce(null);
+    mockGetMember.mockResolvedValueOnce(null as any);
     const res = await DELETE(
       new NextRequest(
         "http://localhost/api/runtimes/machine?workspace_id=w1&daemon_id=d1",
