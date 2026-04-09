@@ -12,8 +12,8 @@ export const GET = withAuth(async (req, ctx) => {
   const ws = await withWorkspaceMember(req, ctx);
   if (ws instanceof Response) return ws;
 
-  // Mark runtimes that haven't sent a heartbeat in >2 minutes as offline
-  await markStaleRuntimesOffline(db);
+  // Mark runtimes that haven't sent a heartbeat in >45s as offline
+  await markStaleRuntimesOffline(db, ws.workspaceId);
 
   const runtimes = await listAgentRuntimes(db, ws.workspaceId);
   return writeJSON(runtimes.map(runtimeToResponse));

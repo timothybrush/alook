@@ -110,8 +110,13 @@ export async function startDaemon(
     `Daemon started. ${allRuntimeIds.length} runtime(s) registered across ${workspaces.length} workspace(s).`,
   );
 
+  let heartbeatTimer: NodeJS.Timeout;
+  let pollTimer: NodeJS.Timeout;
+
   const shutdown = async () => {
     console.log("Shutting down...");
+    clearInterval(heartbeatTimer);
+    clearInterval(pollTimer);
     const timeout = setTimeout(() => process.exit(1), 5000);
     try {
       await client.deregister(allRuntimeIds);
@@ -125,7 +130,7 @@ export async function startDaemon(
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 
-  setInterval(async () => {
+  heartbeatTimer = setInterval(async () => {
     for (const rid of allRuntimeIds) {
       try {
         await client.heartbeat(rid);
@@ -158,7 +163,7 @@ export async function startDaemon(
     }
   };
 
-  setInterval(poll, config.pollInterval);
+  pollTimer = setInterval(poll, config.pollInterval);
   await poll();
 }
 

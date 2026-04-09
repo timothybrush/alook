@@ -43,6 +43,6 @@ describe("GET /api/runtimes", () => {
     await GET(
       new NextRequest("http://localhost/api/runtimes?workspace_id=w1"),
     );
-    expect(mockMarkStale).toHaveBeenCalledOnce();
+    expect(mockMarkStale).toHaveBeenCalledWith({}, "w1");
   });
 });

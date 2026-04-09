@@ -137,14 +137,21 @@ export async function deleteRuntimesByDaemonId(
     );
 }
 
-export async function markStaleRuntimesOffline(db: Database) {
+export async function markStaleRuntimesOffline(
+  db: Database,
+  workspaceId: string
+) {
   await db
     .update(agentRuntime)
     .set({ status: "offline", updatedAt: sql`now()` })
     .where(
       and(
+        eq(agentRuntime.workspaceId, workspaceId),
         eq(agentRuntime.status, "online"),
-        sql`${agentRuntime.lastSeenAt} < now() - interval '2 minutes'`
+        or(
+          sql`${agentRuntime.lastSeenAt} < now() - interval '45 seconds'`,
+          sql`${agentRuntime.lastSeenAt} IS NULL`
+        )
       )
     );
 }

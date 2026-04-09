@@ -16,7 +16,7 @@ vi.mock("@/lib/middleware/auth", () => ({
           ? await context.params
           : context.params
         : undefined;
-      return handler(req, { userId: "u1", email: "u@test.com", params });
+      return handler(req, { userId: "u1", email: "u@test.com", workspaceId: "w1", params });
     };
   },
 }));
@@ -32,6 +32,8 @@ vi.mock("@/lib/db/queries/runtime", () => ({
   })),
   setAgentRuntimeOffline: vi.fn(async () => {}),
   updateAgentRuntimeHeartbeat: vi.fn(async () => {}),
+  getAgentRuntimeForWorkspace: vi.fn(async () => ({ id: "rt1" })),
+  markStaleRuntimesOffline: vi.fn(async () => {}),
 }));
 vi.mock("@/lib/db/queries/task", () => ({
   failStaleDispatchedTasks: vi.fn(async () => []),
