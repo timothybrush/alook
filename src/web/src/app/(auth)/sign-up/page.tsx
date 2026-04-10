@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { redirect } from "next/navigation"
 import { signUp } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,8 +14,9 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 
-export default function SignUpPage() {
-  const [name, setName] = useState("")
+const isProd = process.env.NEXTJS_ENV === "production"
+
+function SignUpForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
@@ -25,7 +27,7 @@ export default function SignUpPage() {
     setError("")
     setLoading(true)
     const { error } = await signUp.email(
-      { name, email, password },
+      { name: "", email, password },
       { onError: (ctx) => setError(ctx.error.message) },
     )
     if (error) {
@@ -54,16 +56,6 @@ export default function SignUpPage() {
                   {error && (
                     <FieldError>{error}</FieldError>
                   )}
-                  <Field>
-                    <FieldLabel htmlFor="name">Name</FieldLabel>
-                    <Input
-                      id="name"
-                      placeholder="Your name"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      required
-                    />
-                  </Field>
                   <Field>
                     <FieldLabel htmlFor="email">Email</FieldLabel>
                     <Input
@@ -111,4 +103,9 @@ export default function SignUpPage() {
       </div>
     </div>
   )
+}
+
+export default function SignUpPage() {
+  if (isProd) redirect("/sign-in")
+  return <SignUpForm />
 }
