@@ -49,7 +49,13 @@ export function useAgentContext() {
   return ctx;
 }
 
-export function AgentProvider({ children }: { children: ReactNode }) {
+export function AgentProvider({
+  workspaceId,
+  children,
+}: {
+  workspaceId: string;
+  children: ReactNode;
+}) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [runtimes, setRuntimes] = useState<Runtime[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +63,10 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
   const reload = useCallback(async () => {
     try {
-      const [a, r] = await Promise.all([listAgents(), listRuntimes()]);
+      const [a, r] = await Promise.all([
+        listAgents(workspaceId),
+        listRuntimes(workspaceId),
+      ]);
       setAgents(a);
       setRuntimes(r);
     } catch (err) {
@@ -66,7 +75,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       loadedRef.current = true;
     }
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     reload();
@@ -75,7 +84,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const handleCreateAgent = useCallback(
     async (req: CreateAgentRequest): Promise<Agent | null> => {
       try {
-        const agent = await createAgent(req);
+        const agent = await createAgent(req, workspaceId);
         await reload();
         return agent;
       } catch (err) {
@@ -85,13 +94,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         return null;
       }
     },
-    [reload]
+    [reload, workspaceId]
   );
 
   const handleUpdateAgent = useCallback(
     async (id: string, req: UpdateAgentRequest): Promise<boolean> => {
       try {
-        await updateAgent(id, req);
+        await updateAgent(id, req, workspaceId);
         await reload();
         return true;
       } catch (err) {
@@ -101,13 +110,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [reload]
+    [reload, workspaceId]
   );
 
   const handleDeleteAgent = useCallback(
     async (id: string): Promise<boolean> => {
       try {
-        await deleteAgent(id);
+        await deleteAgent(id, workspaceId);
         await reload();
         return true;
       } catch (err) {
@@ -117,13 +126,13 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [reload]
+    [reload, workspaceId]
   );
 
   const chatWithAgent = useCallback(
     async (agentId: string): Promise<string | null> => {
       try {
-        const conversation = await createConversation(agentId);
+        const conversation = await createConversation(agentId, workspaceId);
         return conversation.id;
       } catch (err) {
         toast.error(
@@ -132,7 +141,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         return null;
       }
     },
-    []
+    [workspaceId]
   );
 
   const getFirstOnlineRuntimeId = useCallback(() => {
@@ -142,7 +151,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
   const handleGenerateToken = useCallback(async (): Promise<string | null> => {
     try {
-      const res = await createMachineToken("cli");
+      const res = await createMachineToken("cli", workspaceId);
       return res.token;
     } catch (err) {
       toast.error(
@@ -150,12 +159,12 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       );
       return null;
     }
-  }, []);
+  }, [workspaceId]);
 
   const handleDeleteMachine = useCallback(
     async (daemonId: string): Promise<boolean> => {
       try {
-        await deleteMachine(daemonId);
+        await deleteMachine(daemonId, workspaceId);
         await reload();
         return true;
       } catch (err) {
@@ -165,7 +174,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [reload]
+    [reload, workspaceId]
   );
 
   return (

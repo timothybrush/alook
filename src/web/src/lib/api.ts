@@ -20,11 +20,6 @@ export type Task = AgentTask;
 const API_BASE = "";
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const workspaceId =
-    typeof window !== "undefined"
-      ? localStorage.getItem("alook_workspace_id")
-      : null;
-
   let res: Response;
   try {
     res = await fetch(API_BASE + path, {
@@ -32,7 +27,6 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
-        ...(workspaceId && { "X-Workspace-ID": workspaceId }),
         ...options?.headers,
       },
     });
@@ -45,7 +39,6 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (res.status === 401) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("alook_workspace_id");
       window.location.href = "/sign-in";
     }
     throw new ApiError("Unauthorized", 401);
@@ -97,57 +90,66 @@ export const createWorkspace = (name: string) =>
     body: JSON.stringify({ name }),
   });
 
-// Agents
-export const listAgents = () => apiFetch<Agent[]>("/api/agents");
+// Helper to build query strings with workspace_id
+function wsQuery(workspaceId: string, extra?: Record<string, string>): string {
+  const params = new URLSearchParams({ workspace_id: workspaceId, ...extra });
+  return `?${params.toString()}`;
+}
 
-export const createAgent = (req: CreateAgentRequest) =>
-  apiFetch<Agent>("/api/agents", {
+// Agents
+export const listAgents = (workspaceId: string) =>
+  apiFetch<Agent[]>(`/api/agents${wsQuery(workspaceId)}`);
+
+export const createAgent = (req: CreateAgentRequest, workspaceId: string) =>
+  apiFetch<Agent>(`/api/agents${wsQuery(workspaceId)}`, {
     method: "POST",
     body: JSON.stringify(req),
   });
 
-export const updateAgent = (id: string, req: UpdateAgentRequest) =>
-  apiFetch<Agent>(`/api/agents/${id}`, {
+export const updateAgent = (id: string, req: UpdateAgentRequest, workspaceId: string) =>
+  apiFetch<Agent>(`/api/agents/${id}${wsQuery(workspaceId)}`, {
     method: "PATCH",
     body: JSON.stringify(req),
   });
 
-export const deleteAgent = (id: string) =>
-  apiFetch<void>(`/api/agents/${id}`, { method: "DELETE" });
+export const deleteAgent = (id: string, workspaceId: string) =>
+  apiFetch<void>(`/api/agents/${id}${wsQuery(workspaceId)}`, { method: "DELETE" });
 
 // Runtimes
-export const listRuntimes = () => apiFetch<Runtime[]>("/api/runtimes");
+export const listRuntimes = (workspaceId: string) =>
+  apiFetch<Runtime[]>(`/api/runtimes${wsQuery(workspaceId)}`);
 
-export const deleteMachine = (daemonId: string) =>
-  apiFetch<void>(`/api/runtimes/machine?daemon_id=${encodeURIComponent(daemonId)}`, {
-    method: "DELETE",
-  });
+export const deleteMachine = (daemonId: string, workspaceId: string) =>
+  apiFetch<void>(
+    `/api/runtimes/machine${wsQuery(workspaceId, { daemon_id: daemonId })}`,
+    { method: "DELETE" }
+  );
 
 // Conversations
-export const listConversations = () =>
-  apiFetch<Conversation[]>("/api/conversations");
+export const listConversations = (workspaceId: string) =>
+  apiFetch<Conversation[]>(`/api/conversations${wsQuery(workspaceId)}`);
 
-export const createConversation = (agentId: string) =>
-  apiFetch<Conversation>("/api/conversations", {
+export const createConversation = (agentId: string, workspaceId: string) =>
+  apiFetch<Conversation>(`/api/conversations${wsQuery(workspaceId)}`, {
     method: "POST",
     body: JSON.stringify({ agent_id: agentId }),
   });
 
-export const getConversation = (id: string) =>
-  apiFetch<Conversation>(`/api/conversations/${id}`);
+export const getConversation = (id: string, workspaceId: string) =>
+  apiFetch<Conversation>(`/api/conversations/${id}${wsQuery(workspaceId)}`);
 
-export const listAgentConversations = (agentId: string) =>
-  apiFetch<Conversation[]>(`/api/agents/${agentId}/conversations`);
+export const listAgentConversations = (agentId: string, workspaceId: string) =>
+  apiFetch<Conversation[]>(`/api/agents/${agentId}/conversations${wsQuery(workspaceId)}`);
 
-export const deleteConversation = (id: string) =>
-  apiFetch<void>(`/api/conversations/${id}`, { method: "DELETE" });
+export const deleteConversation = (id: string, workspaceId: string) =>
+  apiFetch<void>(`/api/conversations/${id}${wsQuery(workspaceId)}`, { method: "DELETE" });
 
-export const listMessages = (conversationId: string) =>
-  apiFetch<Message[]>(`/api/conversations/${conversationId}/messages`);
+export const listMessages = (conversationId: string, workspaceId: string) =>
+  apiFetch<Message[]>(`/api/conversations/${conversationId}/messages${wsQuery(workspaceId)}`);
 
-export const sendMessage = (conversationId: string, content: string) =>
+export const sendMessage = (conversationId: string, content: string, workspaceId: string) =>
   apiFetch<{ message: Message; task: Task }>(
-    `/api/conversations/${conversationId}/messages`,
+    `/api/conversations/${conversationId}/messages${wsQuery(workspaceId)}`,
     {
       method: "POST",
       body: JSON.stringify({ content }),
@@ -155,9 +157,9 @@ export const sendMessage = (conversationId: string, content: string) =>
   );
 
 // Machine tokens
-export const createMachineToken = (name?: string) =>
+export const createMachineToken = (name?: string, workspaceId?: string) =>
   apiFetch<{ token: string; id: string; name: string; created_at: string }>(
-    "/api/machine-tokens",
+    `/api/machine-tokens${workspaceId ? wsQuery(workspaceId) : ""}`,
     {
       method: "POST",
       body: JSON.stringify({ name: name || "default" }),
@@ -165,17 +167,17 @@ export const createMachineToken = (name?: string) =>
   );
 
 // Tasks (polling)
-export const getTask = (id: string) => apiFetch<Task>(`/api/tasks/${id}`);
+export const getTask = (id: string, workspaceId: string) =>
+  apiFetch<Task>(`/api/tasks/${id}${wsQuery(workspaceId)}`);
 
-export const getTaskMessages = (id: string, since?: number) =>
+export const getTaskMessages = (id: string, workspaceId: string, since?: number) =>
   apiFetch<TaskMessage[]>(
-    `/api/tasks/${id}/messages${since ? `?since=${since}` : ""}`
+    `/api/tasks/${id}/messages${wsQuery(workspaceId, since ? { since: String(since) } : undefined)}`
   );
 
 // Auth (Better Auth — redirect helpers only, actual auth via Better Auth client)
 export const signOut = async () => {
   if (typeof window !== "undefined") {
-    localStorage.removeItem("alook_workspace_id");
     window.location.href = "/sign-in";
   }
 };

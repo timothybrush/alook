@@ -172,14 +172,18 @@ export function DashboardNavbar() {
     }
   };
 
+  // NOTE: This component is currently unused. The workspaceId is hardcoded
+  // as a placeholder — if this component is revived it needs a workspace prop.
+  const workspaceId = ""
   const loadRuntimes = useCallback(async () => {
+    if (!workspaceId) return
     try {
-      const r = await listRuntimes();
+      const r = await listRuntimes(workspaceId);
       setRuntimes(r);
     } catch {
       // silent — runtimes are supplementary
     }
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     loadRuntimes();
@@ -189,7 +193,7 @@ export function DashboardNavbar() {
     setGeneratingToken(true);
     setTokenCopied(false);
     try {
-      const res = await createMachineToken("cli");
+      const res = await createMachineToken("cli", workspaceId);
       setGeneratedToken(res.token);
     } catch (err) {
       toast.error(
@@ -287,8 +291,8 @@ export function DashboardNavbar() {
                                         `This will remove "${displayName}" and all its runtimes. Agents using these runtimes will be unlinked.`,
                                         async () => {
                                           try {
-                                            await deleteMachine(daemonId);
-                                            const r = await listRuntimes();
+                                            await deleteMachine(daemonId, workspaceId);
+                                            const r = await listRuntimes(workspaceId);
                                             setRuntimes(r);
                                           } catch (err) {
                                             toast.error(
