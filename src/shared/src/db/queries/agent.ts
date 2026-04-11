@@ -43,6 +43,7 @@ export async function createAgent(
     ownerId?: string | null;
     tools?: unknown;
     triggers?: unknown;
+    emailHandle?: string | null;
   }
 ) {
   const rows = await db
@@ -61,6 +62,7 @@ export async function createAgent(
       ownerId: data.ownerId ?? null,
       tools: data.tools ?? null,
       triggers: data.triggers ?? null,
+      emailHandle: data.emailHandle ?? null,
     })
     .returning();
   return rows[0]!;
