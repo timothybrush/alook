@@ -45,6 +45,9 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      BETTER_AUTH_SECRET: ci-e2e-secret
+      BETTER_AUTH_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -54,22 +57,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Apply D1 migration
-        run: pnpm run db:migrate
+      - run: pnpm run db:migrate
       - name: Start dev server
         run: |
-          BETTER_AUTH_SECRET=ci-e2e-secret BETTER_AUTH_URL=http://localhost:8787 \
-            pnpm --filter @alook/web exec next dev --port 8787 &
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8787/api/health > /dev/null 2>&1; then
-              echo "Server ready"
-              break
-            fi
-            echo "Waiting for server... ($i)"
-            sleep 2
-          done
-      - name: Run e2e tests
-        run: pnpm test:e2e
+          pnpm --filter @alook/web dev &
+          until curl -sf http://localhost:3000/api/health; do sleep 2; done
+      - run: pnpm test:e2e
 
   build:
     name: Build

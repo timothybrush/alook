@@ -86,7 +86,7 @@ describe("daemon lifecycle", () => {
   })
 
   it("POST /api/daemon/heartbeat rejects without machine token", async () => {
-    const APP_URL = process.env.APP_URL ?? "http://localhost:8787"
+    const APP_URL = process.env.APP_URL ?? "http://localhost:3000"
     const res = await fetch(`${APP_URL}/api/daemon/heartbeat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

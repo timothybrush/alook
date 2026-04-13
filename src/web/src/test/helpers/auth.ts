@@ -1,4 +1,4 @@
-const APP_URL = process.env.APP_URL ?? "http://localhost:8787"
+const APP_URL = process.env.APP_URL ?? "http://localhost:3000"
 
 /**
  * Sign up a new user via Better Auth.
