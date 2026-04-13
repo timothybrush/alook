@@ -16,6 +16,7 @@ import type { Conversation, Message, TaskMessage } from "@alook/shared";
 import type { Task } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { Streamdown } from "streamdown";
 
@@ -174,9 +175,40 @@ export default function AgentChatDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-      </div>
+      <>
+        <div className="flex-1 overflow-y-auto px-5">
+          <div className="mx-auto max-w-2xl py-6 space-y-4">
+            {/* Skeleton user message */}
+            <div className="flex justify-end">
+              <Skeleton className="h-10 w-48 rounded-lg" />
+            </div>
+            {/* Skeleton assistant message */}
+            <div className="flex justify-start">
+              <div className="space-y-2 px-1 py-1">
+                <Skeleton className="h-4 w-72" />
+                <Skeleton className="h-4 w-56" />
+                <Skeleton className="h-4 w-64" />
+              </div>
+            </div>
+            {/* Another pair */}
+            <div className="flex justify-end">
+              <Skeleton className="h-10 w-36 rounded-lg" />
+            </div>
+            <div className="flex justify-start">
+              <div className="space-y-2 px-1 py-1">
+                <Skeleton className="h-4 w-64" />
+                <Skeleton className="h-4 w-48" />
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* Skeleton input area */}
+        <div className="px-5 py-3">
+          <div className="mx-auto max-w-2xl">
+            <Skeleton className="h-[72px] w-full rounded-xl" />
+          </div>
+        </div>
+      </>
     );
   }
 

@@ -9,6 +9,7 @@ import type { Email } from "@alook/shared";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2, Mail } from "lucide-react";
 
 function relativeTime(dateStr: string): string {
@@ -79,8 +80,24 @@ export default function AgentEmailPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center flex-1">
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      <div className="flex flex-1 min-h-0">
+        {/* Skeleton email list panel */}
+        <div className="w-2/5 min-w-[240px] max-w-[400px] border-r border-border/40">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="px-4 py-3 border-b border-border/30">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <Skeleton className="h-3.5 w-32" />
+                <Skeleton className="h-2.5 w-10" />
+              </div>
+              <Skeleton className="h-3.5 w-48 mb-1.5" />
+              <Skeleton className="h-4 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
+        {/* Skeleton detail panel */}
+        <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+          Select an email to view
+        </div>
       </div>
     );
   }
@@ -88,7 +105,7 @@ export default function AgentEmailPage() {
   if (emails.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 animate-[fade-up_400ms_ease-out_both]">
-        <Mail className="size-8 text-muted-foreground/40 mb-3" />
+        <Mail className="size-8 text-muted-foreground mb-3" />
         <p className="text-sm text-muted-foreground">No emails yet.</p>
         <p className="text-xs text-muted-foreground/60 mt-1">
           Emails sent to this agent will appear here.

@@ -58,7 +58,7 @@ export function AgentEditForm({
   const effectiveHandle = emailHandle || derivedHandle;
   const handleError =
     effectiveHandle && !isValidHandle(effectiveHandle)
-      ? "Must be 4+ characters, letters/numbers/hyphens only"
+      ? "Must be 3+ characters, letters/numbers/hyphens only"
       : "";
 
   const handleSubmit = async (e: React.FormEvent) => {

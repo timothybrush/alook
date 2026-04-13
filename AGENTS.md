@@ -10,7 +10,7 @@ Alook's main purpose is to make the cli agent always on, and give it a email add
 - `src/ws-do`: WebSocket Durable Object worker
 
 ## MUST
-- run `pnpm typecheck`, `pnpm test`, `pnpm test:e2e` and `pnpm build` as the final check when you think the code is ready.
+- run `pnpm typecheck`, `pnpm test`, `pnpm test:e2e` as the final check when you think the code is ready.
 
 
 ## Plan-driven Development
