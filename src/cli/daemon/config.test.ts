@@ -8,7 +8,6 @@ const DAEMON_ENV_KEYS = [
   "ALOOK_SERVER_URL",
   "ALOOK_PROJECT_ROOT",
   "ALOOK_DAEMON_POLL_INTERVAL",
-  "ALOOK_DAEMON_HEARTBEAT_INTERVAL",
   "ALOOK_AGENT_TIMEOUT",
   "ALOOK_DAEMON_MAX_CONCURRENT_TASKS",
   "ALOOK_CLAUDE_PATH",
@@ -36,7 +35,6 @@ describe("loadDaemonConfig defaults", () => {
 
     expect(cfg.serverURL).toBe("https://alook.ai");
     expect(cfg.pollInterval).toBe(3000);
-    expect(cfg.heartbeatInterval).toBe(15000);
     expect(cfg.agentTimeout).toBe(7200000);
     expect(cfg.maxConcurrentTasks).toBe(20);
     expect(cfg.claudePath).toBe("claude");

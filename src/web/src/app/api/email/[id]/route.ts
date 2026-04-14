@@ -15,11 +15,8 @@ export const GET = withAuth(async (req, ctx) => {
   const id = ctx.params?.id;
   if (!id) return writeError("email id is required", 400);
 
-  const email = await queries.email.getEmailById(db, id);
+  const email = await queries.email.getEmailById(db, id, ws.workspaceId);
   if (!email) return writeError("email not found", 404);
-
-  const agent = await queries.agent.getAgent(db, email.agentId, ws.workspaceId);
-  if (!agent) return writeError("email not found", 404);
 
   return writeJSON(emailToResponse(email));
 });
@@ -34,13 +31,10 @@ export const DELETE = withAuth(async (req, ctx) => {
   const id = ctx.params?.id;
   if (!id) return writeError("email id is required", 400);
 
-  const email = await queries.email.getEmailById(db, id);
+  const email = await queries.email.getEmailById(db, id, ws.workspaceId);
   if (!email) return writeError("email not found", 404);
 
-  const agent = await queries.agent.getAgent(db, email.agentId, ws.workspaceId);
-  if (!agent) return writeError("email not found", 404);
-
-  await queries.email.deleteEmail(db, id);
+  await queries.email.deleteEmail(db, id, ws.workspaceId);
 
   return new Response(null, { status: 204 });
 });

@@ -30,19 +30,23 @@ export async function createTask(
   return rows[0]!;
 }
 
-export async function getTask(db: Database, id: string) {
+export async function getTask(db: Database, id: string, workspaceId?: string) {
+  const conditions = [eq(agentTaskQueue.id, id)];
+  if (workspaceId) conditions.push(eq(agentTaskQueue.workspaceId, workspaceId));
   const rows = await db
     .select()
     .from(agentTaskQueue)
-    .where(eq(agentTaskQueue.id, id));
+    .where(and(...conditions));
   return rows[0] ?? null;
 }
 
-export async function getTaskStatus(db: Database, id: string) {
+export async function getTaskStatus(db: Database, id: string, workspaceId?: string) {
+  const conditions = [eq(agentTaskQueue.id, id)];
+  if (workspaceId) conditions.push(eq(agentTaskQueue.workspaceId, workspaceId));
   const rows = await db
     .select({ status: agentTaskQueue.status })
     .from(agentTaskQueue)
-    .where(eq(agentTaskQueue.id, id));
+    .where(and(...conditions));
   return rows[0]?.status ?? null;
 }
 
@@ -148,16 +152,19 @@ export async function failTask(
 }
 
 
-export async function listPendingTasksByRuntime(
+export async function listPendingTasksByRuntimes(
   db: Database,
-  runtimeId: string
+  runtimeIds: string[],
+  workspaceId: string
 ) {
+  if (runtimeIds.length === 0) return [];
   return db
     .select()
     .from(agentTaskQueue)
     .where(
       and(
-        eq(agentTaskQueue.runtimeId, runtimeId),
+        eq(agentTaskQueue.workspaceId, workspaceId),
+        inArray(agentTaskQueue.runtimeId, runtimeIds),
         inArray(agentTaskQueue.status, ["queued", "dispatched"])
       )
     )
@@ -197,7 +204,7 @@ export async function cancelTask(db: Database, id: string) {
 
 const DEFAULT_STALE_SECONDS = Number(process.env.ALOOK_STALE_DISPATCH_TIMEOUT_S) || 20;
 
-export async function failStaleDispatchedTasks(db: Database, staleSeconds = DEFAULT_STALE_SECONDS) {
+export async function failStaleDispatchedTasks(db: Database, workspaceId: string, staleSeconds = DEFAULT_STALE_SECONDS) {
   const threshold = new Date(Date.now() - staleSeconds * 1000).toISOString();
   const rows = await db
     .update(agentTaskQueue)
@@ -208,6 +215,7 @@ export async function failStaleDispatchedTasks(db: Database, staleSeconds = DEFA
     })
     .where(
       and(
+        eq(agentTaskQueue.workspaceId, workspaceId),
         eq(agentTaskQueue.status, "dispatched"),
         lt(agentTaskQueue.dispatchedAt, threshold)
       )
@@ -218,11 +226,12 @@ export async function failStaleDispatchedTasks(db: Database, staleSeconds = DEFA
 
 export async function deleteTasksByConversation(
   db: Database,
-  conversationId: string
+  conversationId: string,
+  workspaceId: string
 ) {
   return db
     .delete(agentTaskQueue)
-    .where(eq(agentTaskQueue.conversationId, conversationId))
+    .where(and(eq(agentTaskQueue.conversationId, conversationId), eq(agentTaskQueue.workspaceId, workspaceId)))
     .returning({ id: agentTaskQueue.id });
 }
 

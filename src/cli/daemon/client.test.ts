@@ -1,17 +1,17 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { fromApiTask } from "./types.js";
 import type { TaskApi } from "@alook/shared";
-import { ClaimTaskResponseSchema } from "@alook/shared";
+import { PollResponseSchema } from "@alook/shared";
 import { DaemonClient } from "./client.js";
 
 // ---------------------------------------------------------------------------
-// Schema-level validation tests (existing)
+// Schema-level validation tests
 // ---------------------------------------------------------------------------
 
-describe("DaemonClient claimTask schema validation", () => {
-  it("parses valid response correctly", () => {
+describe("PollResponseSchema validation", () => {
+  it("parses valid response with tasks", () => {
     const raw = {
-      task: {
+      tasks: [{
         id: "t1",
         agent_id: "a1",
         runtime_id: "r1",
@@ -28,33 +28,33 @@ describe("DaemonClient claimTask schema validation", () => {
         created_at: "2024-01-01T00:00:00Z",
         type: "user_dm_message",
         agent: { instructions: "help", name: "bot", runtime_config: {} },
-      },
+      }],
     };
 
-    const parsed = ClaimTaskResponseSchema.parse(raw);
-    expect(parsed.task?.id).toBe("t1");
-    expect(parsed.task?.agent?.name).toBe("bot");
+    const parsed = PollResponseSchema.parse(raw);
+    expect(parsed.tasks).toHaveLength(1);
+    expect(parsed.tasks[0].id).toBe("t1");
+    expect(parsed.tasks[0].agent?.name).toBe("bot");
   });
 
-  it("throws ZodError when response is missing required fields", () => {
-    const raw = {
-      task: {
-        id: "t1",
-        // missing agent_id, runtime_id, etc.
-      },
-    };
+  it("parses empty tasks array", () => {
+    const parsed = PollResponseSchema.parse({ tasks: [] });
+    expect(parsed.tasks).toEqual([]);
+  });
 
-    expect(() => ClaimTaskResponseSchema.parse(raw)).toThrow();
+  it("throws ZodError when tasks contains invalid items", () => {
+    const raw = { tasks: [{ id: "t1" }] }; // missing required fields
+    expect(() => PollResponseSchema.parse(raw)).toThrow();
   });
 });
 
 // ---------------------------------------------------------------------------
-// DaemonClient integration tests with mocked fetch
+// DaemonClient.poll() integration tests with mocked fetch
 // ---------------------------------------------------------------------------
 
-function validClaimResponse() {
+function validPollResponse() {
   return {
-    task: {
+    tasks: [{
       id: "t1",
       agent_id: "a1",
       runtime_id: "r1",
@@ -70,53 +70,76 @@ function validClaimResponse() {
       error: null,
       created_at: "2024-01-01T00:00:00Z",
       type: "user_dm_message",
-    },
+    }],
   };
 }
 
-describe("DaemonClient.claimTask() with mocked fetch", () => {
+describe("DaemonClient.poll() with mocked fetch", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  it("returns parsed ClaimTaskResponse on valid response", async () => {
+  it("sends correct POST body to /api/daemon/tasks/poll", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve(validClaimResponse()),
+      json: () => Promise.resolve({ tasks: [] }),
     });
 
     const client = new DaemonClient("http://localhost:8080", "tok");
-    const resp = await client.claimTask("r1");
-    expect(resp.task?.id).toBe("t1");
-    expect(resp.task?.agent_id).toBe("a1");
+    await client.poll(["r1", "r2"], 3);
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:8080/api/daemon/tasks/poll",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ runtime_ids: ["r1", "r2"], max_tasks: 3 }),
+      }),
+    );
   });
 
-  it("throws ZodError when API returns response with wrong shape", async () => {
+  it("returns TaskApi[] on valid response", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ task: { id: "t1" } }), // missing required fields
+      json: () => Promise.resolve(validPollResponse()),
     });
 
     const client = new DaemonClient("http://localhost:8080", "tok");
-    await expect(client.claimTask("r1")).rejects.toThrow();
+    const tasks = await client.poll(["r1"], 1);
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].id).toBe("t1");
   });
 
-  it("returns { task: null } when no task available", async () => {
+  it("returns empty array when no tasks", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ task: null }),
+      json: () => Promise.resolve({ tasks: [] }),
     });
 
     const client = new DaemonClient("http://localhost:8080", "tok");
-    const resp = await client.claimTask("r1");
-    expect(resp.task).toBeNull();
+    const tasks = await client.poll(["r1"], 1);
+    expect(tasks).toEqual([]);
+  });
+
+  it("throws ZodError when API returns wrong shape", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ unexpected: "data" }),
+    });
+
+    const client = new DaemonClient("http://localhost:8080", "tok");
+    await expect(client.poll(["r1"], 1)).rejects.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// DaemonClient.register() tests (unchanged)
+// ---------------------------------------------------------------------------
 
 describe("DaemonClient.register() with mocked fetch", () => {
   const originalFetch = globalThis.fetch;
@@ -142,29 +165,26 @@ describe("DaemonClient.register() with mocked fetch", () => {
     });
     expect(resp.runtimes[0].id).toBe("rt1");
   });
+});
 
-  it("throws ZodError when API returns unexpected shape", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ unexpected: "data" }),
-    });
+// ---------------------------------------------------------------------------
+// DaemonClient has no heartbeat() or claimTask() methods
+// ---------------------------------------------------------------------------
 
+describe("DaemonClient removed methods", () => {
+  it("does not have heartbeat method", () => {
     const client = new DaemonClient("http://localhost:8080", "tok");
-    await expect(
-      client.register({
-        workspace_id: "w1",
-        daemon_id: "d1",
-        device_name: "mac",
-        cli_version: "1.0",
-        runtimes: [{ name: "claude", type: "claude", version: "1.0", status: "online" }],
-      }),
-    ).rejects.toThrow();
+    expect((client as any).heartbeat).toBeUndefined();
+  });
+
+  it("does not have claimTask method", () => {
+    const client = new DaemonClient("http://localhost:8080", "tok");
+    expect((client as any).claimTask).toBeUndefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// fromApiTask tests
+// fromApiTask tests (unchanged)
 // ---------------------------------------------------------------------------
 
 function validApiTask(): TaskApi {

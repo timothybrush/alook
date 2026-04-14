@@ -5,17 +5,20 @@ vi.mock("@opennextjs/cloudflare", () => ({
   getCloudflareContext: vi.fn(() => ({ env: { DB: {} } })),
 }));
 
-const mockMarkStaleRuntimesOffline = vi.fn();
 const mockListAgentRuntimes = vi.fn();
+const mockSweepStaleState = vi.fn();
 
 vi.mock("@alook/shared", () => ({
   createDb: vi.fn(() => ({})),
   queries: {
     runtime: {
-      markStaleRuntimesOffline: (...args: unknown[]) => mockMarkStaleRuntimesOffline(...args),
       listAgentRuntimes: (...args: unknown[]) => mockListAgentRuntimes(...args),
     },
   },
+}));
+
+vi.mock("@/lib/services/sweep", () => ({
+  sweepStaleState: (...args: unknown[]) => mockSweepStaleState(...args),
 }));
 
 vi.mock("@/lib/middleware/auth", () => ({
@@ -47,7 +50,7 @@ describe("GET /api/runtimes", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("lists runtimes in workspace", async () => {
-    mockMarkStaleRuntimesOffline.mockResolvedValue(undefined);
+    mockSweepStaleState.mockResolvedValue(undefined);
     mockListAgentRuntimes.mockResolvedValue([
       { id: "r1", name: "Runtime 1", status: "online" },
       { id: "r2", name: "Runtime 2", status: "offline" },
@@ -64,14 +67,14 @@ describe("GET /api/runtimes", () => {
     expect(mockListAgentRuntimes).toHaveBeenCalledWith({}, "w1");
   });
 
-  it("marks stale runtimes offline before listing", async () => {
-    mockMarkStaleRuntimesOffline.mockResolvedValue(undefined);
+  it("calls sweepStaleState before listing", async () => {
+    mockSweepStaleState.mockResolvedValue(undefined);
     mockListAgentRuntimes.mockResolvedValue([]);
 
     const req = new NextRequest("http://localhost/api/runtimes");
     await GET(req, {} as any);
 
-    expect(mockMarkStaleRuntimesOffline).toHaveBeenCalledWith({}, "w1");
-    expect(mockMarkStaleRuntimesOffline).toHaveBeenCalledBefore(mockListAgentRuntimes);
+    expect(mockSweepStaleState).toHaveBeenCalledWith({}, "w1");
+    expect(mockSweepStaleState).toHaveBeenCalledBefore(mockListAgentRuntimes);
   });
 });

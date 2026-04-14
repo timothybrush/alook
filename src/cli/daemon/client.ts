@@ -1,8 +1,9 @@
 import {
-  ClaimTaskResponseSchema,
+  PollResponseSchema,
   RegisterResponseSchema,
-  type ClaimTaskResponse,
+  type PollResponse,
   type RegisterResponse,
+  type TaskApi,
 } from "@alook/shared";
 
 export class DaemonClient {
@@ -56,18 +57,14 @@ export class DaemonClient {
     });
   }
 
-  heartbeat(runtimeId: string) {
-    return this.request("POST", "/api/daemon/heartbeat", {
-      runtime_id: runtimeId,
-    });
-  }
-
-  async claimTask(runtimeId: string): Promise<ClaimTaskResponse> {
+  async poll(runtimeIds: string[], maxTasks: number): Promise<TaskApi[]> {
     const raw = await this.request<unknown>(
       "POST",
-      `/api/daemon/runtimes/${runtimeId}/tasks/claim`,
+      "/api/daemon/tasks/poll",
+      { runtime_ids: runtimeIds, max_tasks: maxTasks },
     );
-    return ClaimTaskResponseSchema.parse(raw);
+    const resp: PollResponse = PollResponseSchema.parse(raw);
+    return resp.tasks;
   }
 
   startTask(taskId: string) {

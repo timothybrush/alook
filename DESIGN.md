@@ -13,7 +13,7 @@ Emotional goals: confidence, calm focus, quiet delight in small details.
 ### Aesthetic Direction
 **Visual tone**: Notion-inspired warmth meets developer-tool precision. Soft neutral palette (warm grays, cream tints) with crisp typography and intentional micro-interactions. Light and airy in light mode, cozy and focused in dark mode.
 
-**References**: Notion (polished, warm, delightful micro-interactions)
+**References**: Notion (polished, warm, delightful micro-interactions), vintage Macintosh product photography (warm object on cool ground, generous negative space, matte textures)
 
 **Anti-references**:
 - Generic SaaS dashboards (blue buttons, card grids, cookie-cutter layouts)
@@ -41,6 +41,18 @@ Never show all options at once. Complexity exists but stays one interaction away
 - **Hover to preview** — hovering a linked page shows a preview without navigating. Tooltips appear contextually, not eagerly.
 - **Click to expand** — sidebar tree nodes, dropdown menus, and kanban column options are collapsed by default. Expanded state is driven by user action, not by default.
 - **Scrolling reveals depth** — additional features and settings appear as the user scrolls or explores. The first screen is always clean.
+
+## Color & Texture Philosophy
+
+Inspired by vintage Macintosh product photography — a warm cream object on a dusty periwinkle ground, matte textures, even lighting, and nothing competing for attention.
+
+### Lessons
+
+- **Temperature contrast over color variety** — One warm tone (cream/beige) against one cool tone (muted blue) creates more visual interest than five harmonious colors. Limit the palette, let temperature do the work.
+- **Desaturated > saturated** — Dusty, powdery, slightly muted tones feel confident and timeless. Fully saturated colors feel loud and cheap. When picking any accent, pull it 20-30% toward gray.
+- **Matte everything** — Avoid glossy effects, specular highlights, and glass-morphism. Matte surfaces feel tactile, calm, and honest. Shadows should be soft and diffuse, never sharp or dramatic.
+- **Generous negative space is the luxury** — One element with room to breathe feels more expensive than ten elements packed together. When in doubt, add space, not content.
+- **Nostalgia as warmth, not kitsch** — Reference the feeling of early personal computing (optimism, simplicity, human scale) without literal retro styling. Warm tints and rounded-but-not-bubbly shapes evoke this without cosplaying the past.
 
 ## Visual Harmony
 

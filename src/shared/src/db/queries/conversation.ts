@@ -23,11 +23,11 @@ export async function createConversation(
   return rows[0]!;
 }
 
-export async function getConversation(db: Database, id: string) {
+export async function getConversation(db: Database, id: string, workspaceId: string) {
   const rows = await db
     .select()
     .from(conversation)
-    .where(eq(conversation.id, id));
+    .where(and(eq(conversation.id, id), eq(conversation.workspaceId, workspaceId)));
   return rows[0] ?? null;
 }
 
@@ -90,10 +90,10 @@ export async function updateConversationTitle(
   return rows[0] ?? null;
 }
 
-export async function deleteConversation(db: Database, id: string) {
+export async function deleteConversation(db: Database, id: string, workspaceId: string) {
   const rows = await db
     .delete(conversation)
-    .where(eq(conversation.id, id))
+    .where(and(eq(conversation.id, id), eq(conversation.workspaceId, workspaceId)))
     .returning();
   return rows[0] ?? null;
 }

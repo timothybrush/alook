@@ -10,13 +10,11 @@ vi.mock("@opennextjs/cloudflare", () => ({
 }));
 
 const mockGetEmailById = vi.fn();
-const mockGetAgent = vi.fn();
 
 vi.mock("@alook/shared", () => ({
   createDb: vi.fn(() => ({})),
   queries: {
     email: { getEmailById: (...args: unknown[]) => mockGetEmailById(...args) },
-    agent: { getAgent: (...args: unknown[]) => mockGetAgent(...args) },
   },
 }));
 
@@ -50,26 +48,25 @@ describe("GET /api/email/[id]/body", () => {
 
   it("strips RFC822 headers (CRLF) and returns only body text", async () => {
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1", r2Key: "emails/abc/raw" });
-    mockGetAgent.mockResolvedValue({ id: "a1" });
     mockR2Get.mockResolvedValue(
       makeR2Object("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\n\r\nHello world")
     );
 
-    const req = new NextRequest("http://localhost/api/email/e1/body?workspace_id=ws1");
+    const req = new NextRequest("http://localhost/api/email/e1/body");
     const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("Hello world");
+    expect(mockGetEmailById).toHaveBeenCalledWith({}, "e1", "ws1");
   });
 
   it("strips RFC822 headers (LF) and returns only body text", async () => {
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1", r2Key: "emails/abc/raw" });
-    mockGetAgent.mockResolvedValue({ id: "a1" });
     mockR2Get.mockResolvedValue(
       makeR2Object("From: a@b.com\nTo: c@d.com\nSubject: Test\n\nHello world")
     );
 
-    const req = new NextRequest("http://localhost/api/email/e1/body?workspace_id=ws1");
+    const req = new NextRequest("http://localhost/api/email/e1/body");
     const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(200);
@@ -78,10 +75,9 @@ describe("GET /api/email/[id]/body", () => {
 
   it("returns full content if no header/body separator found", async () => {
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1", r2Key: "emails/abc/raw" });
-    mockGetAgent.mockResolvedValue({ id: "a1" });
     mockR2Get.mockResolvedValue(makeR2Object("Just plain text with no headers"));
 
-    const req = new NextRequest("http://localhost/api/email/e1/body?workspace_id=ws1");
+    const req = new NextRequest("http://localhost/api/email/e1/body");
     const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(200);
@@ -90,10 +86,18 @@ describe("GET /api/email/[id]/body", () => {
 
   it("returns 404 when R2 object not found", async () => {
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1", r2Key: "emails/abc/raw" });
-    mockGetAgent.mockResolvedValue({ id: "a1" });
     mockR2Get.mockResolvedValue(null);
 
-    const req = new NextRequest("http://localhost/api/email/e1/body?workspace_id=ws1");
+    const req = new NextRequest("http://localhost/api/email/e1/body");
+    const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when email not found in workspace", async () => {
+    mockGetEmailById.mockResolvedValue(null);
+
+    const req = new NextRequest("http://localhost/api/email/e1/body");
     const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(404);

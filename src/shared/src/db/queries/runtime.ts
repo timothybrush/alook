@@ -1,4 +1,4 @@
-import { eq, and, asc, or, lt, isNull } from "drizzle-orm";
+import { eq, and, asc, or, lt, isNull, inArray } from "drizzle-orm";
 import { agentRuntime, agent, agentTaskQueue } from "../schema";
 import type { Database } from "../index";
 
@@ -79,16 +79,6 @@ export async function getAgentRuntimeForWorkspace(
   return rows[0] ?? null;
 }
 
-export async function updateAgentRuntimeHeartbeat(db: Database, id: string) {
-  const now = new Date().toISOString();
-  const rows = await db
-    .update(agentRuntime)
-    .set({ lastSeenAt: now, status: "online", updatedAt: now })
-    .where(eq(agentRuntime.id, id))
-    .returning();
-  return rows[0] ?? null;
-}
-
 export async function setAgentRuntimeOffline(db: Database, id: string) {
   await db
     .update(agentRuntime)
@@ -137,6 +127,23 @@ export async function deleteRuntimesByDaemonId(
         eq(agentRuntime.workspaceId, workspaceId)
       )
     );
+}
+
+export async function updateRuntimesLastSeen(
+  db: Database,
+  ids: string[],
+  workspaceId: string
+) {
+  if (ids.length === 0) return [];
+  const now = new Date().toISOString();
+  const result = await db
+    .update(agentRuntime)
+    .set({ lastSeenAt: now, status: "online", updatedAt: now })
+    .where(
+      and(inArray(agentRuntime.id, ids), eq(agentRuntime.workspaceId, workspaceId))
+    )
+    .returning({ id: agentRuntime.id });
+  return result.map(r => r.id);
 }
 
 export async function markStaleRuntimesOffline(

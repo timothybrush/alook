@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const mockGetEmailById = vi.fn();
-const mockGetAgent = vi.fn();
 const mockDeleteEmail = vi.fn();
 
 vi.mock("@opennextjs/cloudflare", () => ({
@@ -17,9 +16,6 @@ vi.mock("@alook/shared", () => ({
     email: {
       getEmailById: (...args: unknown[]) => mockGetEmailById(...args),
       deleteEmail: (...args: unknown[]) => mockDeleteEmail(...args),
-    },
-    agent: {
-      getAgent: (...args: unknown[]) => mockGetAgent(...args),
     },
   },
 }));
@@ -43,37 +39,53 @@ vi.mock("@/lib/middleware/helpers", () => {
   };
 });
 
+vi.mock("@/lib/api/responses", () => ({
+  emailToResponse: (e: any) => ({ id: e.id }),
+}));
+
 import { GET, DELETE } from "./route";
+
+describe("GET /api/email/[id]", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns email scoped by workspaceId", async () => {
+    mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1" });
+
+    const req = new NextRequest("http://localhost/api/email/e1");
+    const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(200);
+    expect(mockGetEmailById).toHaveBeenCalledWith({}, "e1", "ws1");
+  });
+
+  it("returns 404 when email not found (wrong workspace)", async () => {
+    mockGetEmailById.mockResolvedValue(null);
+
+    const req = new NextRequest("http://localhost/api/email/e1");
+    const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(404);
+  });
+});
 
 describe("DELETE /api/email/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("deletes an email and returns 204", async () => {
+  it("deletes an email scoped by workspaceId and returns 204", async () => {
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1" });
-    mockGetAgent.mockResolvedValue({ id: "a1" });
     mockDeleteEmail.mockResolvedValue(undefined);
 
-    const req = new NextRequest("http://localhost/api/email/e1?workspace_id=ws1", { method: "DELETE" });
+    const req = new NextRequest("http://localhost/api/email/e1", { method: "DELETE" });
     const res = await DELETE(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(204);
-    expect(mockDeleteEmail).toHaveBeenCalledWith({}, "e1");
+    expect(mockDeleteEmail).toHaveBeenCalledWith({}, "e1", "ws1");
   });
 
   it("returns 404 when email not found", async () => {
     mockGetEmailById.mockResolvedValue(null);
 
-    const req = new NextRequest("http://localhost/api/email/e1?workspace_id=ws1", { method: "DELETE" });
-    const res = await DELETE(req, { params: Promise.resolve({ id: "e1" }) } as any);
-
-    expect(res.status).toBe(404);
-  });
-
-  it("returns 404 when agent not in workspace", async () => {
-    mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1" });
-    mockGetAgent.mockResolvedValue(null);
-
-    const req = new NextRequest("http://localhost/api/email/e1?workspace_id=ws1", { method: "DELETE" });
+    const req = new NextRequest("http://localhost/api/email/e1", { method: "DELETE" });
     const res = await DELETE(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(404);

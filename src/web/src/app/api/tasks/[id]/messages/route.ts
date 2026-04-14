@@ -17,8 +17,8 @@ export const GET = withAuth(async (req, ctx) => {
     return writeError("task id is required", 400);
   }
 
-  const task = await queries.task.getTask(db, id);
-  if (!task || task.workspaceId !== ws.workspaceId) {
+  const task = await queries.task.getTask(db, id, ws.workspaceId);
+  if (!task) {
     return writeError("task not found", 404);
   }
 

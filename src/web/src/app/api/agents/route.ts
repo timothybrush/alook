@@ -6,6 +6,7 @@ import { withWorkspaceMember } from "@/lib/middleware/workspace";
 import { writeJSON, writeError } from "@/lib/middleware/helpers";
 import { agentToResponse } from "@/lib/api/responses";
 import { TaskService } from "@/lib/services/task";
+import { sweepStaleState } from "@/lib/services/sweep";
 
 export const GET = withAuth(async (req, ctx) => {
   const ws = await withWorkspaceMember(req, ctx);
@@ -13,6 +14,9 @@ export const GET = withAuth(async (req, ctx) => {
 
   const { env } = getCloudflareContext()
   const db = createDb((env as Env).DB)
+
+  // Sweep stale state: catches stuck tasks even when all daemons are dead
+  await sweepStaleState(db, ws.workspaceId);
 
   const agents = await queries.agent.listAgents(db, ws.workspaceId);
   return writeJSON(agents.map(agentToResponse));

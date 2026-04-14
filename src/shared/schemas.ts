@@ -82,13 +82,19 @@ export const TaskApiSchema = TaskApiBaseSchema.extend({
 export type TaskApi = z.infer<typeof TaskApiSchema>;
 
 // ---------------------------------------------------------------------------
-// Claim task response
+// Poll request/response (replaces heartbeat + per-runtime claim)
 // ---------------------------------------------------------------------------
 
-export const ClaimTaskResponseSchema = z.object({
-  task: TaskApiSchema.nullable(),
+export const PollRequestSchema = z.object({
+  runtime_ids: z.array(z.string().min(1)).min(1),
+  max_tasks: z.number().int().min(1).default(1),
 });
-export type ClaimTaskResponse = z.infer<typeof ClaimTaskResponseSchema>;
+export type PollRequest = z.infer<typeof PollRequestSchema>;
+
+export const PollResponseSchema = z.object({
+  tasks: z.array(TaskApiSchema),
+});
+export type PollResponse = z.infer<typeof PollResponseSchema>;
 
 // ---------------------------------------------------------------------------
 // Register response
@@ -114,6 +120,19 @@ export const DaemonRuntimeItemSchema = z.object({
 });
 export type DaemonRuntimeItem = z.infer<typeof DaemonRuntimeItemSchema>;
 
+export const ActivateTokenRuntimeSchema = z.object({
+  type: z.string().min(1),
+  version: z.string().optional().default(""),
+});
+export type ActivateTokenRuntime = z.infer<typeof ActivateTokenRuntimeSchema>;
+
+export const ActivateTokenRequestSchema = z.object({
+  token: z.string().min(1),
+  hostname: z.string().min(1),
+  runtimes: z.array(ActivateTokenRuntimeSchema).min(1),
+});
+export type ActivateTokenRequest = z.infer<typeof ActivateTokenRequestSchema>;
+
 export const RegisterDaemonRequestSchema = z.object({
   workspace_id: z.string().min(1),
   daemon_id: z.string().min(1),
@@ -128,10 +147,6 @@ export const DeregisterRequestSchema = z.object({
 });
 export type DeregisterRequest = z.infer<typeof DeregisterRequestSchema>;
 
-export const HeartbeatRequestSchema = z.object({
-  runtime_id: z.string().min(1, "runtime_id is required"),
-});
-export type HeartbeatRequest = z.infer<typeof HeartbeatRequestSchema>;
 
 export const CompleteTaskRequestSchema = z.object({
   output: z.string().optional(),
@@ -149,6 +164,7 @@ export const MessageItemSchema = z.object({
   seq: z.number(),
   type: z.string(),
   tool: z.string().optional(),
+  call_id: z.string().optional(),
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),

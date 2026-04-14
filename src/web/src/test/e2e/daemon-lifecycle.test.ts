@@ -68,15 +68,15 @@ describe("daemon lifecycle", () => {
     expect(data.runtimes[0].id).toBe(registeredRuntimeId)
   })
 
-  it("POST /api/daemon/heartbeat updates last_seen_at", async () => {
-    const res = await tokenRequest("/api/daemon/heartbeat", seed.machineToken, {
+  it("POST /api/daemon/tasks/poll updates last_seen_at", async () => {
+    const res = await tokenRequest("/api/daemon/tasks/poll", seed.machineToken, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runtime_id: registeredRuntimeId }),
+      body: JSON.stringify({ runtime_ids: [registeredRuntimeId] }),
     })
     expect(res.status).toBe(200)
-    const data = await res.json() as { status: string }
-    expect(data.status).toBe("ok")
+    const data = await res.json() as { tasks: unknown[] }
+    expect(data.tasks).toEqual([])
 
     // Verify last_seen_at was set in DB
     const rows = sqlQuery<{ last_seen_at: string }>(
@@ -85,12 +85,12 @@ describe("daemon lifecycle", () => {
     expect(rows[0]?.last_seen_at).toBeTruthy()
   })
 
-  it("POST /api/daemon/heartbeat rejects without machine token", async () => {
+  it("POST /api/daemon/tasks/poll rejects without machine token", async () => {
     const APP_URL = process.env.APP_URL ?? "http://localhost:3000"
-    const res = await fetch(`${APP_URL}/api/daemon/heartbeat`, {
+    const res = await fetch(`${APP_URL}/api/daemon/tasks/poll`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ runtime_id: registeredRuntimeId }),
+      body: JSON.stringify({ runtime_ids: [registeredRuntimeId] }),
     })
     expect(res.status).toBe(401)
   })

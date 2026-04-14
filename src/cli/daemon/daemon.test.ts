@@ -5,9 +5,8 @@ const mockClientInstance = {
   register: vi.fn(async () => ({
     runtimes: [{ id: "rt1" }],
   })),
-  heartbeat: vi.fn(async () => {}),
   deregister: vi.fn(async () => {}),
-  claimTask: vi.fn(async () => ({ task: null })),
+  poll: vi.fn(async () => []),
 };
 vi.mock("./client.js", () => {
   function MockDaemonClient() { return mockClientInstance; }
@@ -24,7 +23,6 @@ vi.mock("./config.js", () => ({
     codexModel: "",
     opencodeModel: "",
     pollInterval: 3000,
-    heartbeatInterval: 15000,
     agentTimeout: 7200000,
     maxConcurrentTasks: 20,
     daemonId: "d1",
@@ -171,12 +169,12 @@ describe("daemon timeline integration", () => {
     };
 
     let claimed = false;
-    mockClientInstance.claimTask.mockImplementation(async () => {
+    mockClientInstance.poll.mockImplementation(async () => {
       if (!claimed) {
         claimed = true;
-        return { task: fakeTask };
+        return [fakeTask];
       }
-      return { task: null };
+      return [];
     });
 
     // Mock startTask and completeTask
@@ -342,13 +340,12 @@ describe("daemon shutdown", () => {
     for (const t of intervalTimers) realClearInterval(t);
   });
 
-  it("clears heartbeat and poll intervals before calling deregister", async () => {
+  it("clears poll interval before calling deregister", async () => {
     await startDaemon();
 
-    // startDaemon should have created 2 intervals (heartbeat + poll)
-    expect(intervalTimers.length).toBe(2);
-    const heartbeatTimer = intervalTimers[0];
-    const pollTimer = intervalTimers[1];
+    // startDaemon should have created 1 interval (poll only, no heartbeat)
+    expect(intervalTimers.length).toBe(1);
+    const pollTimer = intervalTimers[0];
 
     const deregisterMock = mockClientInstance.deregister;
 
@@ -371,11 +368,10 @@ describe("daemon shutdown", () => {
     expect(shutdownHandler).toBeDefined();
     await shutdownHandler!();
 
-    // Both intervals should have been cleared
-    expect(clearedTimers).toContain(heartbeatTimer);
+    // Poll interval should have been cleared
     expect(clearedTimers).toContain(pollTimer);
 
     // clearInterval should have been called before deregister
-    expect(deregisterCalledAt).toBe(2); // both clearInterval calls happened before deregister
+    expect(deregisterCalledAt).toBe(1); // clearInterval call happened before deregister
   });
 });

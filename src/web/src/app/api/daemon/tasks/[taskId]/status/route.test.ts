@@ -47,7 +47,7 @@ describe("GET /api/daemon/tasks/[taskId]/status", () => {
 
     expect(res.status).toBe(200);
     expect(body).toEqual({ status: "running" });
-    expect(mockGetTaskStatus).toHaveBeenCalledWith({}, "t1");
+    expect(mockGetTaskStatus).toHaveBeenCalledWith({}, "t1", "w1");
   });
 
   it("returns 404 when task not found", async () => {

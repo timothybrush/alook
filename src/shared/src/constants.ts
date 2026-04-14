@@ -34,7 +34,7 @@ export const MessageRole = {
 export type MessageRoleType = (typeof MessageRole)[keyof typeof MessageRole];
 
 // Timing constants
-export const HEARTBEAT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS) || 3_000;
+export const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || 3_000;
 export const OFFLINE_THRESHOLD_MS = Number(process.env.OFFLINE_THRESHOLD_MS) || 9_000;
 export const EVENT_POLL_INTERVAL_MS = Number(process.env.EVENT_POLL_INTERVAL_MS) || 2_000;
 export const AGENT_HANDLE_MIN_LENGTH = 4;

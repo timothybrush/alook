@@ -186,10 +186,14 @@ describe("POST /api/conversations/[id]/messages", () => {
     expect(body.error).toBe("conversation not found");
   });
 
-  it("returns 404 when conversation workspace doesn't match", async () => {
-    mockGetConversation.mockResolvedValue({ id: "c1", workspaceId: "other", agentId: "a1" });
+  it("passes workspaceId to getConversation", async () => {
+    const conv = { id: "c1", workspaceId: "w1", agentId: "a1" };
+    mockGetConversation.mockResolvedValue(conv);
+    mockCreateMessage.mockResolvedValue({ id: "m1", content: "hello" });
+    mockUpdateConversationTitle.mockResolvedValue(undefined);
+    mockEnqueueTask.mockResolvedValue({ id: "t1", status: "pending" });
 
-    const res = await POST(
+    await POST(
       new NextRequest("http://localhost/api/conversations/c1/messages", {
         method: "POST",
         body: JSON.stringify({ content: "hello" }),
@@ -197,9 +201,7 @@ describe("POST /api/conversations/[id]/messages", () => {
       }),
       withParams("c1")
     );
-    const body = await res.json();
 
-    expect(res.status).toBe(404);
-    expect(body.error).toBe("conversation not found");
+    expect(mockGetConversation).toHaveBeenCalledWith({}, "c1", "w1");
   });
 });

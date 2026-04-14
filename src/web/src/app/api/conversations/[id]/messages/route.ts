@@ -30,8 +30,8 @@ export const GET = withAuth(async (req, ctx) => {
     return writeError("conversation id is required", 400);
   }
 
-  const conversation = await queries.conversation.getConversation(db, id);
-  if (!conversation || conversation.workspaceId !== ws.workspaceId) {
+  const conversation = await queries.conversation.getConversation(db, id, ws.workspaceId);
+  if (!conversation) {
     return writeError("conversation not found", 404);
   }
 
@@ -63,8 +63,8 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeError("content is required", 400);
   }
 
-  const conversation = await queries.conversation.getConversation(db, id);
-  if (!conversation || conversation.workspaceId !== ws.workspaceId) {
+  const conversation = await queries.conversation.getConversation(db, id, ws.workspaceId);
+  if (!conversation) {
     return writeError("conversation not found", 404);
   }
 

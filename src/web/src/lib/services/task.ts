@@ -55,27 +55,30 @@ export class TaskService {
     return task;
   }
 
-  async claimTaskForRuntime(runtimeId: string) {
-    const tasks = await taskQueries.listPendingTasksByRuntime(
+  async claimTasksForRuntimes(runtimeIds: string[], maxTasks: number, workspaceId: string) {
+    const tasks = await taskQueries.listPendingTasksByRuntimes(
       this.db,
-      runtimeId
+      runtimeIds,
+      workspaceId
     );
+    const runtimeIdSet = new Set(runtimeIds);
     const triedAgents = new Set<string>();
+    const claimed: NonNullable<Awaited<ReturnType<typeof this.claimTask>>>[] = [];
 
     for (const candidate of tasks) {
+      if (claimed.length >= maxTasks) break;
+
       const key = `${candidate.agentId}:${candidate.workspaceId}`;
-      if (triedAgents.has(key)) {
-        continue;
-      }
+      if (triedAgents.has(key)) continue;
       triedAgents.add(key);
 
       const task = await this.claimTask(candidate.agentId, candidate.workspaceId);
-      if (task && task.runtimeId === runtimeId) {
-        return task;
+      if (task && runtimeIdSet.has(task.runtimeId)) {
+        claimed.push(task);
       }
     }
 
-    return null;
+    return claimed;
   }
 
   async startTask(taskId: string) {

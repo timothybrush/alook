@@ -111,4 +111,4 @@ pnpm dev:send <from> <to> [subject] [body]   # simulate inbound email
 
 **Task execution:** CLI receives event -> creates task record -> runs Claude/Codex agent with prompt -> streams output chunks to API -> marks complete -> dashboard updates in real time
 
-**Runtime registration:** CLI `register <token>` -> detects local runtimes (claude, codex) -> registers with Web API -> starts daemon (heartbeat, polling)
+**Runtime registration:** CLI `register <token>` -> detects local runtimes (claude, codex) -> registers with Web API -> starts daemon (polling)

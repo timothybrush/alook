@@ -41,7 +41,7 @@ const withParams = (id: string) => ({ params: Promise.resolve({ id }) });
 describe("GET /api/conversations/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns conversation", async () => {
+  it("returns conversation scoped by workspaceId", async () => {
     const conv = { id: "c1", title: "Test", workspaceId: "w1" };
     mockGetConversation.mockResolvedValue(conv);
 
@@ -53,24 +53,11 @@ describe("GET /api/conversations/[id]", () => {
 
     expect(res.status).toBe(200);
     expect(body).toEqual({ id: "c1", title: "Test" });
-    expect(mockGetConversation).toHaveBeenCalledWith({}, "c1");
+    expect(mockGetConversation).toHaveBeenCalledWith({}, "c1", "w1");
   });
 
   it("returns 404 when not found", async () => {
     mockGetConversation.mockResolvedValue(null);
-
-    const res = await GET(
-      new NextRequest("http://localhost/api/conversations/c1"),
-      withParams("c1")
-    );
-    const body = await res.json();
-
-    expect(res.status).toBe(404);
-    expect(body.error).toBe("conversation not found");
-  });
-
-  it("returns 404 when workspace mismatch", async () => {
-    mockGetConversation.mockResolvedValue({ id: "c1", workspaceId: "other" });
 
     const res = await GET(
       new NextRequest("http://localhost/api/conversations/c1"),
@@ -86,7 +73,7 @@ describe("GET /api/conversations/[id]", () => {
 describe("DELETE /api/conversations/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns 204 and removes conversation + tasks", async () => {
+  it("returns 204 and removes conversation + tasks with workspace scoping", async () => {
     mockGetConversation.mockResolvedValue({ id: "c1", workspaceId: "w1" });
     mockDeleteTasksByConversation.mockResolvedValue(undefined);
     mockDeleteConversation.mockResolvedValue(undefined);
@@ -97,8 +84,8 @@ describe("DELETE /api/conversations/[id]", () => {
     );
 
     expect(res.status).toBe(204);
-    expect(mockDeleteTasksByConversation).toHaveBeenCalled();
-    expect(mockDeleteConversation).toHaveBeenCalled();
+    expect(mockDeleteTasksByConversation).toHaveBeenCalledWith({}, "c1", "w1");
+    expect(mockDeleteConversation).toHaveBeenCalledWith({}, "c1", "w1");
   });
 
   it("deletes tasks before conversation", async () => {
@@ -121,19 +108,6 @@ describe("DELETE /api/conversations/[id]", () => {
 
   it("returns 404 when conversation not found", async () => {
     mockGetConversation.mockResolvedValue(null);
-
-    const res = await DELETE(
-      new NextRequest("http://localhost/api/conversations/c1", { method: "DELETE" }),
-      withParams("c1")
-    );
-    const body = await res.json();
-
-    expect(res.status).toBe(404);
-    expect(body.error).toBe("conversation not found");
-  });
-
-  it("returns 404 when workspace mismatch", async () => {
-    mockGetConversation.mockResolvedValue({ id: "c1", workspaceId: "other" });
 
     const res = await DELETE(
       new NextRequest("http://localhost/api/conversations/c1", { method: "DELETE" }),

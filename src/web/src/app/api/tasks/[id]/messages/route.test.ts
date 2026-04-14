@@ -57,6 +57,17 @@ import { GET } from "./route";
 describe("GET /api/tasks/[id]/messages", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it("passes workspaceId to getTask", async () => {
+    const task = { id: "t1", workspaceId: "w1" };
+    mockGetTask.mockResolvedValue(task);
+    mockListTaskMessages.mockResolvedValue([]);
+    await GET(
+      new NextRequest("http://localhost/api/tasks/t1/messages"),
+      { params: Promise.resolve({ id: "t1" }) }
+    );
+    expect(mockGetTask).toHaveBeenCalledWith({}, "t1", "w1");
+  });
+
   it("lists all messages", async () => {
     const task = { id: "t1", workspaceId: "w1" };
     const messages = [

@@ -5,11 +5,11 @@ import {
   TaskApiBaseSchema,
   TaskApiSchema,
   TaskAgentDataApiSchema,
-  ClaimTaskResponseSchema,
+  PollRequestSchema,
+  PollResponseSchema,
   RegisterDaemonRequestSchema,
   DaemonRuntimeItemSchema,
   DeregisterRequestSchema,
-  HeartbeatRequestSchema,
   CompleteTaskRequestSchema,
   FailTaskRequestSchema,
   ReportMessagesRequestSchema,
@@ -154,20 +154,44 @@ describe("TaskAgentDataApiSchema", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ClaimTaskResponseSchema
+// PollRequestSchema
 // ---------------------------------------------------------------------------
 
-describe("ClaimTaskResponseSchema", () => {
-  it("accepts { task: null }", () => {
-    const parsed = ClaimTaskResponseSchema.parse({ task: null });
-    expect(parsed.task).toBeNull();
+describe("PollRequestSchema", () => {
+  it("rejects empty runtime_ids array", () => {
+    expect(() => PollRequestSchema.parse({ runtime_ids: [] })).toThrow();
   });
 
-  it("accepts { task: { ...validTask } }", () => {
-    const parsed = ClaimTaskResponseSchema.parse({
-      task: validTaskApiBase(),
+  it("accepts valid array and defaults max_tasks to 1", () => {
+    const parsed = PollRequestSchema.parse({ runtime_ids: ["r1"] });
+    expect(parsed.runtime_ids).toEqual(["r1"]);
+    expect(parsed.max_tasks).toBe(1);
+  });
+
+  it("rejects max_tasks: 0", () => {
+    expect(() => PollRequestSchema.parse({ runtime_ids: ["r1"], max_tasks: 0 })).toThrow();
+  });
+
+  it("rejects array with empty strings", () => {
+    expect(() => PollRequestSchema.parse({ runtime_ids: [""] })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PollResponseSchema
+// ---------------------------------------------------------------------------
+
+describe("PollResponseSchema", () => {
+  it("accepts empty tasks array", () => {
+    const parsed = PollResponseSchema.parse({ tasks: [] });
+    expect(parsed.tasks).toEqual([]);
+  });
+
+  it("accepts tasks with valid task objects", () => {
+    const parsed = PollResponseSchema.parse({
+      tasks: [validTaskApiBase()],
     });
-    expect(parsed.task?.id).toBe("t1");
+    expect(parsed.tasks[0].id).toBe("t1");
   });
 });
 
@@ -237,15 +261,6 @@ describe("DeregisterRequestSchema", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// HeartbeatRequestSchema
-// ---------------------------------------------------------------------------
-
-describe("HeartbeatRequestSchema", () => {
-  it("requires non-empty runtime_id", () => {
-    expect(() => HeartbeatRequestSchema.parse({ runtime_id: "" })).toThrow();
-  });
-});
 
 // ---------------------------------------------------------------------------
 // CompleteTaskRequestSchema

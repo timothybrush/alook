@@ -75,31 +75,11 @@ describe("GET /api/tasks/[id]", () => {
       status: "completed",
       prompt: "hello",
     });
-    expect(mockGetTask).toHaveBeenCalledWith({}, "t1");
+    expect(mockGetTask).toHaveBeenCalledWith({}, "t1", "w1");
   });
 
-  it("returns 404 when not found", async () => {
+  it("returns 404 when not found (scoped by workspace)", async () => {
     mockGetTask.mockResolvedValue(null);
-
-    const res = await GET(
-      new NextRequest("http://localhost/api/tasks/t1"),
-      { params: Promise.resolve({ id: "t1" }) }
-    );
-    const body = await res.json();
-
-    expect(res.status).toBe(404);
-    expect(body.error).toBe("task not found");
-  });
-
-  it("returns 404 when workspace mismatch", async () => {
-    const task = {
-      id: "t1",
-      agentId: "a1",
-      workspaceId: "other-workspace",
-      status: "completed",
-      prompt: "hello",
-    };
-    mockGetTask.mockResolvedValue(task);
 
     const res = await GET(
       new NextRequest("http://localhost/api/tasks/t1"),

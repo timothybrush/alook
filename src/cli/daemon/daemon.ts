@@ -116,40 +116,27 @@ export async function startDaemon(
   const activeTasks = new Set<string>();
 
   const poll = async () => {
-    if (activeTasks.size >= config.maxConcurrentTasks) return;
+    const remaining = config.maxConcurrentTasks - activeTasks.size;
+    if (remaining <= 0) return;
 
-    for (const rid of allRuntimeIds) {
-      if (activeTasks.size >= config.maxConcurrentTasks) break;
-
-      try {
-        const resp = await client.claimTask(rid);
-        if (resp.task) {
-          const task = fromApiTask(resp.task);
-          activeTasks.add(task.id);
-          handleTask(client, config, runtimeIndex, task)
-            .catch((e) => log.error("Task error", e))
-            .finally(() => activeTasks.delete(task.id));
-        }
-      } catch (e) {
-        log.debug("Poll error", e);
+    try {
+      const tasks = await client.poll(allRuntimeIds, remaining);
+      for (const apiTask of tasks) {
+        const task = fromApiTask(apiTask);
+        activeTasks.add(task.id);
+        handleTask(client, config, runtimeIndex, task)
+          .catch((e) => log.error("Task error", e))
+          .finally(() => activeTasks.delete(task.id));
       }
+    } catch (e) {
+      log.debug("Poll error", e);
     }
   };
 
-  const heartbeatTimer = setInterval(async () => {
-    for (const rid of allRuntimeIds) {
-      try {
-        await client.heartbeat(rid);
-      } catch (e) {
-        log.debug("Heartbeat failed", e);
-      }
-    }
-  }, config.heartbeatInterval);
   const pollTimer = setInterval(poll, config.pollInterval);
 
   const shutdown = async () => {
     log.info("Shutting down...");
-    clearInterval(heartbeatTimer);
     clearInterval(pollTimer);
     const shutdownMs = Number(process.env.ALOOK_SHUTDOWN_TIMEOUT_MS) || 5000;
     const timeout = setTimeout(() => process.exit(1), shutdownMs);

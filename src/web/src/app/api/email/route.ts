@@ -24,9 +24,9 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
 
   let emailList;
   if (folder === "inbox" && agentEmail) {
-    emailList = await queries.email.getInboxEmails(db, agentId, agentEmail);
+    emailList = await queries.email.getInboxEmails(db, agentId, agentEmail, ws.workspaceId);
   } else if (folder === "sent" && agentEmail) {
-    emailList = await queries.email.getSentEmails(db, agentId, agentEmail);
+    emailList = await queries.email.getSentEmails(db, agentId, agentEmail, ws.workspaceId);
   } else {
     emailList = await queries.email.getEmailsByAgent(db, agentId, ws.workspaceId);
   }

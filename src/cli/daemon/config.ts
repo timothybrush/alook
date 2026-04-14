@@ -43,7 +43,6 @@ export interface DaemonConfig {
   codexModel: string;
   opencodeModel: string;
   pollInterval: number;
-  heartbeatInterval: number;
   agentTimeout: number;
   maxConcurrentTasks: number;
   daemonId: string;
@@ -79,9 +78,6 @@ export function loadDaemonConfig(profile?: string): DaemonConfig {
     opencodeModel: process.env.ALOOK_OPENCODE_MODEL || "",
     pollInterval: parseDuration(
       process.env.ALOOK_DAEMON_POLL_INTERVAL || "3s",
-    ),
-    heartbeatInterval: parseDuration(
-      process.env.ALOOK_DAEMON_HEARTBEAT_INTERVAL || "15s",
     ),
     agentTimeout: parseDuration(process.env.ALOOK_AGENT_TIMEOUT || "2h"),
     maxConcurrentTasks: parseInt(

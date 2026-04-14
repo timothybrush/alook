@@ -10,7 +10,7 @@ vi.mock("@alook/shared", () => ({
       failTask: vi.fn(),
       getTask: vi.fn(),
       countRunningTasks: vi.fn(),
-      listPendingTasksByRuntime: vi.fn(),
+      listPendingTasksByRuntimes: vi.fn(),
     },
     agent: {
       getAgent: vi.fn(),
@@ -135,20 +135,20 @@ describe("TaskService", () => {
     });
   });
 
-  // ── claimTaskForRuntime ──────────────────────────────────────────
+  // ── claimTasksForRuntimes ─────────────────────────────────────────
 
-  describe("claimTaskForRuntime", () => {
-    it("returns null when no pending tasks", async () => {
-      taskQ.listPendingTasksByRuntime.mockResolvedValue([]);
+  describe("claimTasksForRuntimes", () => {
+    it("returns empty array when no pending tasks", async () => {
+      taskQ.listPendingTasksByRuntimes.mockResolvedValue([]);
 
-      const result = await service.claimTaskForRuntime("r1");
-      expect(result).toBeNull();
+      const result = await service.claimTasksForRuntimes(["r1"], 1, "w1");
+      expect(result).toEqual([]);
     });
 
     it("deduplicates by agent ID and workspace ID", async () => {
-      taskQ.listPendingTasksByRuntime.mockResolvedValue([
-        { agentId: "a1", workspaceId: "w1", id: "t1" },
-        { agentId: "a1", workspaceId: "w1", id: "t2" },
+      taskQ.listPendingTasksByRuntimes.mockResolvedValue([
+        { agentId: "a1", workspaceId: "w1", id: "t1", runtimeId: "r1" },
+        { agentId: "a1", workspaceId: "w1", id: "t2", runtimeId: "r1" },
       ]);
       agentQ.getAgent.mockResolvedValue({
         id: "a1",
@@ -161,12 +161,64 @@ describe("TaskService", () => {
         runtimeId: "r1",
       });
 
-      const result = await service.claimTaskForRuntime("r1");
+      const result = await service.claimTasksForRuntimes(["r1"], 5, "w1");
 
-      expect(result).toEqual({ id: "t1", agentId: "a1", runtimeId: "r1" });
-      // claimTask on the service calls agentQ internally, but the key point
-      // is taskQ.claimTask should only have been called once (dedup by agentId)
+      expect(result).toEqual([{ id: "t1", agentId: "a1", runtimeId: "r1" }]);
       expect(taskQ.claimTask).toHaveBeenCalledTimes(1);
+    });
+
+    it("respects maxTasks limit", async () => {
+      taskQ.listPendingTasksByRuntimes.mockResolvedValue([
+        { agentId: "a1", workspaceId: "w1", id: "t1", runtimeId: "r1" },
+        { agentId: "a2", workspaceId: "w1", id: "t2", runtimeId: "r1" },
+        { agentId: "a3", workspaceId: "w1", id: "t3", runtimeId: "r1" },
+      ]);
+      agentQ.getAgent.mockResolvedValue({ id: "a1", maxConcurrentTasks: 5 });
+      taskQ.countRunningTasks.mockResolvedValue(0);
+
+      let callCount = 0;
+      taskQ.claimTask.mockImplementation(async () => {
+        callCount++;
+        return { id: `t${callCount}`, agentId: `a${callCount}`, runtimeId: "r1" };
+      });
+
+      const result = await service.claimTasksForRuntimes(["r1"], 2, "w1");
+      expect(result).toHaveLength(2);
+    });
+
+    it("skips claimed task whose runtimeId is not in the provided set", async () => {
+      taskQ.listPendingTasksByRuntimes.mockResolvedValue([
+        { agentId: "a1", workspaceId: "w1", id: "t1", runtimeId: "r1" },
+      ]);
+      agentQ.getAgent.mockResolvedValue({ id: "a1", maxConcurrentTasks: 5 });
+      taskQ.countRunningTasks.mockResolvedValue(0);
+      taskQ.claimTask.mockResolvedValue({
+        id: "t1",
+        agentId: "a1",
+        runtimeId: "r2", // different runtime than provided
+      });
+
+      const result = await service.claimTasksForRuntimes(["r1"], 5, "w1");
+      expect(result).toEqual([]);
+    });
+
+    it("returns tasks across multiple runtimes", async () => {
+      taskQ.listPendingTasksByRuntimes.mockResolvedValue([
+        { agentId: "a1", workspaceId: "w1", id: "t1", runtimeId: "r1" },
+        { agentId: "a2", workspaceId: "w1", id: "t2", runtimeId: "r2" },
+      ]);
+      agentQ.getAgent.mockResolvedValue({ id: "a1", maxConcurrentTasks: 5 });
+      taskQ.countRunningTasks.mockResolvedValue(0);
+
+      let callCount = 0;
+      taskQ.claimTask.mockImplementation(async () => {
+        callCount++;
+        const rid = callCount === 1 ? "r1" : "r2";
+        return { id: `t${callCount}`, agentId: `a${callCount}`, runtimeId: rid };
+      });
+
+      const result = await service.claimTasksForRuntimes(["r1", "r2"], 5, "w1");
+      expect(result).toHaveLength(2);
     });
   });
 

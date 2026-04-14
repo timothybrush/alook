@@ -46,6 +46,10 @@ vi.mock("@/lib/services/task", () => {
   return { TaskService: Svc };
 });
 
+vi.mock("@/lib/services/sweep", () => ({
+  sweepStaleState: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { GET, POST } from "./route";
 
 beforeEach(() => vi.clearAllMocks());

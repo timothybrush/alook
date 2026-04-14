@@ -224,11 +224,11 @@ describe("daemon route body validation", () => {
   });
 
   // -----------------------------------------------------------------------
-  // POST /daemon/heartbeat
+  // POST /daemon/tasks/poll
   // -----------------------------------------------------------------------
 
-  describe("POST /daemon/heartbeat", () => {
-    async function loadHeartbeat() {
+  describe("POST /daemon/tasks/poll", () => {
+    async function loadPoll() {
       vi.resetModules();
       applyBase();
 
@@ -241,39 +241,70 @@ describe("daemon route body validation", () => {
           createDb: vi.fn(() => ({})),
           queries: {
             runtime: {
-              getAgentRuntimeForWorkspace: vi.fn().mockResolvedValue({ id: "rt1" }),
-              updateAgentRuntimeHeartbeat: vi.fn(),
-              markStaleRuntimesOffline: vi.fn(),
+              updateRuntimesLastSeen: vi.fn().mockResolvedValue(["r1"]),
             },
-            task: {
-              failStaleDispatchedTasks: vi.fn().mockResolvedValue([]),
+            agent: {
+              getAgent: vi.fn().mockResolvedValue(null),
             },
           },
         };
       });
       vi.doMock("@/lib/services/task", () => ({
         TaskService: vi.fn().mockImplementation(() => ({
-          reconcileAgentStatus: vi.fn(),
+          claimTasksForRuntimes: vi.fn().mockResolvedValue([]),
         })),
       }));
+      vi.doMock("@/lib/services/sweep", () => ({
+        sweepStaleState: vi.fn().mockResolvedValue(undefined),
+      }));
+      vi.doMock("@/lib/broadcast", () => ({
+        broadcastToUser: vi.fn().mockResolvedValue(undefined),
+      }));
 
-      return (await import("./heartbeat/route")).POST;
+      return (await import("./tasks/poll/route")).POST;
     }
 
-    it("returns 400 when runtime_id is empty", async () => {
-      const POST = await loadHeartbeat();
+    it("returns 400 when runtime_ids is empty array", async () => {
+      const POST = await loadPoll();
       const res = await POST(
-        postReq("http://localhost/api/daemon/heartbeat", { runtime_id: "" })
+        postReq("http://localhost/api/daemon/tasks/poll", { runtime_ids: [] })
       );
       expect(res.status).toBe(400);
     });
 
-    it("returns 400 when runtime_id is missing", async () => {
-      const POST = await loadHeartbeat();
+    it("returns 400 when runtime_ids is missing", async () => {
+      const POST = await loadPoll();
       const res = await POST(
-        postReq("http://localhost/api/daemon/heartbeat", {})
+        postReq("http://localhost/api/daemon/tasks/poll", {})
       );
       expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when max_tasks is 0", async () => {
+      const POST = await loadPoll();
+      const res = await POST(
+        postReq("http://localhost/api/daemon/tasks/poll", { runtime_ids: ["r1"], max_tasks: 0 })
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when runtime_ids contains empty strings", async () => {
+      const POST = await loadPoll();
+      const res = await POST(
+        postReq("http://localhost/api/daemon/tasks/poll", { runtime_ids: [""] })
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 on malformed JSON", async () => {
+      const POST = await loadPoll();
+      const res = await POST(
+        postRaw("http://localhost/api/daemon/tasks/poll", "not json{{{")
+      );
+      const body = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(body.error).toBe("invalid request body");
     });
   });
 

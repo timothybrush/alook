@@ -11,7 +11,8 @@ Alook's main purpose is to make the cli agent always on, and give it a email add
 
 ## MUST
 - run `pnpm typecheck`, `pnpm test`, `pnpm test:e2e` as the final check when you think the code is ready.
-
+- service must be STATELESS! All the state must be in DB or local, never put important states in memory.
+- scope the queries before, not check the ownership after. don't query data then check if the data belongs to a workspace, use workspace id ahead to query the data.
 
 ## Plan-driven Development
 - You must make a markdown plan at `plans/` before you implement any my request, otherwise I will reject your implementation.
@@ -21,7 +22,7 @@ Alook's main purpose is to make the cli agent always on, and give it a email add
 - A plan should at least contain `features`/`show case`, `designs overview`, `new deps`, `TODOS`, sections.
   - always use the features/show case to present what you're going to build.
   - in `new deps` section, you must list all the new external dependencies that will be added.
-  - use checklist in `TODOS` section, for each checkbox, you must have a clear descripion of what to do and list all the files that will be modified.
+  - use checklist in `TODOS` section, for each checkbox, you must have a clear description of what to do and list all the files that will be modified.
     - at the end of TODOS, you must include `test cases` sub section, use checklist format to list all the test cases that should be covered.
 
 ## Always WRITE/RUN TESTS!

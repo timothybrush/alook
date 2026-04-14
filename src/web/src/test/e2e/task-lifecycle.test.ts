@@ -45,21 +45,25 @@ describe("task lifecycle", () => {
     expect(taskId).toBeTruthy()
   })
 
-  it("POST /api/daemon/runtimes/:id/tasks/claim claims the task", async () => {
+  it("POST /api/daemon/tasks/poll claims the task", async () => {
     const res = await tokenRequest(
-      `/api/daemon/runtimes/${seed.runtimeId}/tasks/claim`,
+      `/api/daemon/tasks/poll`,
       seed.machineToken,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtime_ids: [seed.runtimeId], max_tasks: 1 }),
+      },
     )
     expect(res.status).toBe(200)
-    const data = await res.json() as { task: Record<string, unknown> | null }
-    expect(data.task).not.toBeNull()
-    expect(data.task!.id).toBe(taskId)
-    expect(data.task!.status).toBe("dispatched")
-    expect(data.task!.prompt).toBe("Run the e2e tests")
-    // Claim response includes agent data
-    expect(data.task!.agent).toBeTruthy()
-    const agent = data.task!.agent as Record<string, unknown>
+    const data = await res.json() as { tasks: Array<Record<string, unknown>> }
+    expect(data.tasks).toHaveLength(1)
+    expect(data.tasks[0].id).toBe(taskId)
+    expect(data.tasks[0].status).toBe("dispatched")
+    expect(data.tasks[0].prompt).toBe("Run the e2e tests")
+    // Poll response includes agent data
+    expect(data.tasks[0].agent).toBeTruthy()
+    const agent = data.tasks[0].agent as Record<string, unknown>
     expect(agent.name).toBe("Test Agent")
   })
 
@@ -140,15 +144,19 @@ describe("task lifecycle", () => {
     expect(data.status).toBe("completed")
   })
 
-  it("claim returns null when no tasks queued", async () => {
+  it("poll returns empty tasks when nothing queued", async () => {
     const res = await tokenRequest(
-      `/api/daemon/runtimes/${seed.runtimeId}/tasks/claim`,
+      `/api/daemon/tasks/poll`,
       seed.machineToken,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtime_ids: [seed.runtimeId], max_tasks: 1 }),
+      },
     )
     expect(res.status).toBe(200)
-    const data = await res.json() as { task: unknown }
-    expect(data.task).toBeNull()
+    const data = await res.json() as { tasks: unknown[] }
+    expect(data.tasks).toEqual([])
   })
 })
 
@@ -182,11 +190,15 @@ describe("task failure", () => {
       failTaskId = msgData.task.id
     }
 
-    // Claim and start the task
+    // Claim and start the task via poll
     await tokenRequest(
-      `/api/daemon/runtimes/${seed.runtimeId}/tasks/claim`,
+      `/api/daemon/tasks/poll`,
       seed.machineToken,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtime_ids: [seed.runtimeId], max_tasks: 1 }),
+      },
     )
     await tokenRequest(
       `/api/daemon/tasks/${failTaskId}/start`,
