@@ -44,7 +44,7 @@ export type ClaimedTaskRow = z.infer<typeof ClaimedTaskRowSchema>;
 export const TaskAgentDataApiSchema = z.object({
   instructions: z.string(),
   name: z.string(),
-  runtime_config: z.record(z.unknown()).default({}),
+  runtime_config: z.record(z.string(), z.unknown()).default({}),
 });
 export type TaskAgentDataApi = z.infer<typeof TaskAgentDataApiSchema>;
 
@@ -163,7 +163,7 @@ export const MessageItemSchema = z.object({
   tool: z.string().optional(),
   call_id: z.string().optional(),
   content: z.string().optional(),
-  input: z.record(z.unknown()).optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
 });
 export type MessageItem = z.infer<typeof MessageItemSchema>;
