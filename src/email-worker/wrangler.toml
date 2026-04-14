@@ -8,7 +8,7 @@ port = 8787
 
 [[d1_databases]]
 binding = "DB"
-database_id = "FILL_AFTER_CREATE"
+database_id = "1593b87c-d8a8-4cdf-b6c0-c80d94442654"
 database_name = "alook-app"
 
 [[r2_buckets]]

@@ -22,12 +22,17 @@
     "test:e2e": "pnpm --filter @alook/web test:e2e",
     "db:migrate": "pnpm --filter @alook/web exec wrangler d1 migrations apply alook-app --local",
     "db:reset": "rm -rf src/web/.wrangler/state && pnpm run db:migrate",
-    "test:all": "vitest run"
+    "test:all": "vitest run",
+    "deploy:web": "cd src/web && npx opennextjs-cloudflare build && npx opennextjs-cloudflare deploy",
+    "deploy:ws-do": "cd src/ws-do && npx wrangler deploy",
+    "deploy:email": "cd src/email-worker && npx wrangler deploy",
+    "db:migrate:remote": "pnpm --filter @alook/web exec wrangler d1 migrations apply alook-app --remote"
   },
   "devDependencies": {
     "turbo": "latest",
     "typescript": "latest",
-    "vitest": "^4.1.3"
+    "vitest": "^4.1.3",
+    "wrangler": "^4.82.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
