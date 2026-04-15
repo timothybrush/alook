@@ -97,10 +97,9 @@ describe("runtimeToResponse", () => {
       name: "Rt",
       runtimeMode: "docker",
       provider: "local",
-      status: "online",
       deviceInfo: "mac",
       metadata: null,
-      lastSeenAt: null,
+      machineLastSeenAt: null,
       ...baseFields(),
     });
     expect(res.metadata).toEqual({});
@@ -114,10 +113,9 @@ describe("runtimeToResponse", () => {
       name: "Rt",
       runtimeMode: "docker",
       provider: "local",
-      status: "online",
       deviceInfo: "mac",
       metadata: {},
-      lastSeenAt: null,
+      machineLastSeenAt: null,
       ...baseFields(),
     });
     expect(res.daemon_id).toBeNull();
@@ -130,13 +128,61 @@ describe("runtimeToResponse", () => {
       name: "Rt",
       runtimeMode: "docker",
       provider: "local",
-      status: "online",
       deviceInfo: "mac",
       metadata: {},
-      lastSeenAt: null,
+      machineLastSeenAt: null,
       ...baseFields(),
     });
     expect(res.daemon_id).toBeNull();
+  });
+
+  it("computes status online from recent machineLastSeenAt", () => {
+    const res = runtimeToResponse({
+      id: "rt1",
+      workspaceId: "w1",
+      daemonId: "d1",
+      name: "Rt",
+      runtimeMode: "docker",
+      provider: "local",
+      deviceInfo: "mac",
+      metadata: {},
+      machineLastSeenAt: new Date().toISOString(),
+      ...baseFields(),
+    });
+    expect(res.status).toBe("online");
+  });
+
+  it("computes status offline from null machineLastSeenAt", () => {
+    const res = runtimeToResponse({
+      id: "rt1",
+      workspaceId: "w1",
+      daemonId: "d1",
+      name: "Rt",
+      runtimeMode: "docker",
+      provider: "local",
+      deviceInfo: "mac",
+      metadata: {},
+      machineLastSeenAt: null,
+      ...baseFields(),
+    });
+    expect(res.status).toBe("offline");
+  });
+
+  it("computes status offline from old machineLastSeenAt", () => {
+    const oldTime = new Date(Date.now() - 60_000).toISOString();
+    const res = runtimeToResponse({
+      id: "rt1",
+      workspaceId: "w1",
+      daemonId: "d1",
+      name: "Rt",
+      runtimeMode: "docker",
+      provider: "local",
+      deviceInfo: "mac",
+      metadata: {},
+      machineLastSeenAt: oldTime,
+      ...baseFields(),
+    });
+    expect(res.status).toBe("offline");
   });
 });
 
@@ -317,8 +363,8 @@ describe("AgentRuntimeResponse shape", () => {
   it("has expected keys", () => {
     const res = runtimeToResponse({
       id: "rt1", workspaceId: "w1", daemonId: "d1", name: "Rt", runtimeMode: "docker",
-      provider: "local", status: "online", deviceInfo: "mac", metadata: { foo: 1 },
-      lastSeenAt: ts, ...baseFields(),
+      provider: "local", deviceInfo: "mac", metadata: { foo: 1 },
+      machineLastSeenAt: new Date().toISOString(), ...baseFields(),
     });
     expect(Object.keys(res).sort()).toEqual([
       "created_at", "daemon_id", "device_info", "id", "last_seen_at",
@@ -359,8 +405,8 @@ describe("all response mappers strip milliseconds from timestamps", () => {
   it("runtimeToResponse strips milliseconds", () => {
     const res = runtimeToResponse({
       id: "rt1", workspaceId: "w1", daemonId: "d1", name: "Rt", runtimeMode: "docker",
-      provider: "local", status: "online", deviceInfo: "mac", metadata: {},
-      lastSeenAt: ts, ...baseFields(),
+      provider: "local", deviceInfo: "mac", metadata: {},
+      machineLastSeenAt: ts, ...baseFields(),
     });
     expect(res.created_at).toBe(tsFormatted);
     expect(res.updated_at).toBe(tsFormatted);

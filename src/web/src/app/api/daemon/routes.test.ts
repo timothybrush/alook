@@ -78,6 +78,9 @@ describe("daemon route body validation", () => {
             member: {
               getMemberByUserAndWorkspace: vi.fn().mockResolvedValue({ id: "m1" }),
             },
+            machine: {
+              upsertMachine: vi.fn().mockResolvedValue({ daemonId: "d1", workspaceId: "w1" }),
+            },
             runtime: {
               upsertAgentRuntime: vi.fn().mockResolvedValue({ id: "rt1", workspaceId: "w1" }),
             },
@@ -148,6 +151,9 @@ describe("daemon route body validation", () => {
             member: {
               getMemberByUserAndWorkspace: vi.fn().mockResolvedValue({ id: "m1" }),
             },
+            machine: {
+              upsertMachine: vi.fn().mockResolvedValue({ daemonId: "d1", workspaceId: "w1" }),
+            },
             runtime: {
               upsertAgentRuntime: upsertMock,
             },
@@ -193,6 +199,9 @@ describe("daemon route body validation", () => {
           queries: {
             member: {
               getMemberByUserAndWorkspace: vi.fn().mockResolvedValue({ id: "m1" }),
+            },
+            machine: {
+              upsertMachine: vi.fn().mockResolvedValue({ daemonId: "d1", workspaceId: "w1" }),
             },
             runtime: {
               upsertAgentRuntime: upsertMock,
@@ -242,7 +251,9 @@ describe("daemon route body validation", () => {
           queries: {
             runtime: {
               getRuntimeIdsByDaemon: vi.fn().mockResolvedValue(["r1"]),
-              updateRuntimesLastSeen: vi.fn().mockResolvedValue(["r1"]),
+            },
+            machine: {
+              updateMachineLastSeen: vi.fn().mockResolvedValue(undefined),
             },
             agent: {
               getAgent: vi.fn().mockResolvedValue(null),
@@ -326,9 +337,8 @@ describe("daemon route body validation", () => {
           ...real,
           createDb: vi.fn(() => ({})),
           queries: {
-            runtime: {
-              getRuntimeIdsByDaemon: vi.fn().mockResolvedValue(["rt1"]),
-              setAgentRuntimeOffline: vi.fn(),
+            machine: {
+              setMachineLastSeenNull: vi.fn().mockResolvedValue(undefined),
             },
           },
         };

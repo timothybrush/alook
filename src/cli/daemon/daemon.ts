@@ -92,16 +92,21 @@ export async function startDaemon(
       name: config.runtimeName || `${p.type} (${config.deviceName})`,
       type: p.type,
       version: p.version,
-      status: "online",
     }));
 
-    const resp = await client.register(ws.token, {
-      workspace_id: ws.id,
-      daemon_id: config.daemonId,
-      device_name: config.deviceName,
-      cli_version: config.cliVersion,
-      runtimes,
-    });
+    let resp;
+    try {
+      resp = await client.register(ws.token, {
+        workspace_id: ws.id,
+        daemon_id: config.daemonId,
+        device_name: config.deviceName,
+        cli_version: config.cliVersion,
+        runtimes,
+      });
+    } catch (e) {
+      log.error(`Failed to register workspace ${ws.id}, skipping`, e);
+      continue;
+    }
 
     const runtimeIds = resp.runtimes.map((r: { id: string }) => r.id);
     workspaceStates.push({ workspaceId: ws.id, token: ws.token, runtimeIds });
@@ -113,6 +118,11 @@ export async function startDaemon(
         provider: providers[i].type,
       });
     }
+  }
+
+  if (workspaceStates.length === 0) {
+    log.error("No workspaces registered successfully.");
+    process.exit(1);
   }
 
   const allRuntimeIds = workspaceStates.flatMap((ws) => ws.runtimeIds);

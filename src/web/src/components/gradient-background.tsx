@@ -8,7 +8,7 @@ export function GradientBackground() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+      className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-[oklch(0.94_0.02_250)] dark:bg-transparent"
     >
       {/* Blob 1 — warm amber, top-left drift */}
       <div className="gradient-blob gradient-blob-1" />

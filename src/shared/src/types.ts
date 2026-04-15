@@ -101,6 +101,15 @@ export interface TaskMessage {
   output: string;
 }
 
+export interface Machine {
+  daemon_id: string;
+  workspace_id: string;
+  device_info: string;
+  last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MachineToken {
   id: string;
   name: string;

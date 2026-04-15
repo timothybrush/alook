@@ -34,8 +34,16 @@ export async function POST(req: NextRequest) {
   // Use hostname as daemonId — must match what the daemon uses (os.hostname())
   // so that daemon start's upsert hits the same records instead of creating duplicates
   const daemonId = hostname;
-  const results = [];
 
+  // Create machine row with last_seen_at = null (offline by default until daemon starts)
+  await queries.machine.upsertMachine(db, {
+    daemonId,
+    workspaceId: mt.workspaceId,
+    deviceInfo: hostname,
+    lastSeenAt: null,
+  });
+
+  const results = [];
   for (const rt of runtimes) {
     const name = `${rt.type} (${hostname})`;
     const result = await queries.runtime.upsertAgentRuntime(db, {
@@ -44,11 +52,10 @@ export async function POST(req: NextRequest) {
       name,
       runtimeMode: "local",
       provider: rt.type,
-      status: "offline",
       deviceInfo: hostname,
       metadata: { version: rt.version },
     });
-    results.push(result);
+    results.push({ ...result, machineLastSeenAt: null });
   }
 
   await queries.machineToken.activateMachineToken(db, mt.id);

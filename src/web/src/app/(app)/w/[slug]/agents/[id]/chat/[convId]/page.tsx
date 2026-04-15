@@ -240,32 +240,39 @@ export default function AgentChatDetailPage() {
             </p>
           )}
 
-          {messages.map((msg) => (
-            <React.Fragment key={msg.id}>
-              {/* Show trace before the assistant message it produced */}
-              {activeTask && msg.role === "assistant" && msg.task_id === activeTask.id && taskMessages.length > 0 && (
-                <TaskStream
-                  task={activeTask}
-                  messages={taskMessages}
-                  connectionLost={connectionLost}
-                  hideText
-                />
-              )}
-              <div
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                {msg.role === "user" ? (
-                  <div className="max-w-[80%] rounded-lg px-4 py-2 bg-primary text-primary-foreground whitespace-pre-wrap">
-                    {msg.content}
-                  </div>
-                ) : (
-                  <div className="markdown max-w-full px-1 py-1 text-base text-foreground">
-                    <Streamdown controls={{ code: { copy: true, download: false } }}>{msg.content}</Streamdown>
-                  </div>
+          {messages.map((msg) => {
+            const hasTaskStream =
+              activeTask &&
+              msg.role === "assistant" &&
+              msg.task_id === activeTask.id &&
+              taskMessages.length > 0;
+
+            return (
+              <React.Fragment key={msg.id}>
+                {/* Show full trace (including text) for completed tasks */}
+                {hasTaskStream && (
+                  <TaskStream
+                    task={activeTask}
+                    messages={taskMessages}
+                    connectionLost={connectionLost}
+                  />
                 )}
-              </div>
-            </React.Fragment>
-          ))}
+                {msg.role === "user" ? (
+                  <div className="flex justify-end">
+                    <div className="max-w-[80%] rounded-lg px-4 py-2 bg-primary text-primary-foreground text-base whitespace-pre-wrap">
+                      {msg.content}
+                    </div>
+                  </div>
+                ) : !hasTaskStream ? (
+                  <div className="flex justify-start">
+                    <div className="markdown max-w-full px-1 py-1 text-base text-foreground">
+                      <Streamdown controls={{ code: { copy: true, download: false }, table: { copy: true, download: false, fullscreen: true } }}>{msg.content}</Streamdown>
+                    </div>
+                  </div>
+                ) : null}
+              </React.Fragment>
+            );
+          })}
 
           {/* Show trace while task is in progress (no assistant message yet) */}
           {activeTask && activeTask.status !== "completed" && activeTask.status !== "failed" && (

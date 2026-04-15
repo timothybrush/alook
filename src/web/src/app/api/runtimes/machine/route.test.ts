@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const mockDeleteRuntimesByDaemonId = vi.fn();
+const mockDeleteMachine = vi.fn();
 const mockGetMemberByUserAndWorkspace = vi.fn();
 
 vi.mock("@opennextjs/cloudflare", () => ({
@@ -13,6 +14,10 @@ vi.mock("@alook/shared", () => ({
     runtime: {
       deleteRuntimesByDaemonId: (...args: any[]) =>
         mockDeleteRuntimesByDaemonId(...args),
+    },
+    machine: {
+      deleteMachine: (...args: any[]) =>
+        mockDeleteMachine(...args),
     },
     member: {
       getMemberByUserAndWorkspace: (...args: any[]) =>
@@ -45,6 +50,9 @@ vi.mock("@/lib/middleware/workspace", () => ({
 }));
 vi.mock("@/lib/logger", () => ({
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock("@/lib/broadcast", () => ({
+  broadcastToUser: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { DELETE } from "./route";
@@ -91,6 +99,7 @@ describe("DELETE /api/runtimes/machine", () => {
   it("returns 204 on successful delete", async () => {
     mockGetMemberByUserAndWorkspace.mockResolvedValue({ id: "m1" });
     mockDeleteRuntimesByDaemonId.mockResolvedValue(undefined);
+    mockDeleteMachine.mockResolvedValue(undefined);
 
     const res = await DELETE(
       makeReq({ daemon_id: "d1", workspace_id: "w1" })
@@ -102,6 +111,7 @@ describe("DELETE /api/runtimes/machine", () => {
   it("passes correct daemon_id with dots and dashes", async () => {
     mockGetMemberByUserAndWorkspace.mockResolvedValue({ id: "m1" });
     mockDeleteRuntimesByDaemonId.mockResolvedValue(undefined);
+    mockDeleteMachine.mockResolvedValue(undefined);
 
     const daemonId = "my-daemon.v2.host-01";
     await DELETE(makeReq({ daemon_id: daemonId, workspace_id: "w1" }));
@@ -116,6 +126,7 @@ describe("DELETE /api/runtimes/machine", () => {
   it("calls deleteRuntimesByDaemonId exactly once", async () => {
     mockGetMemberByUserAndWorkspace.mockResolvedValue({ id: "m1" });
     mockDeleteRuntimesByDaemonId.mockResolvedValue(undefined);
+    mockDeleteMachine.mockResolvedValue(undefined);
 
     await DELETE(makeReq({ daemon_id: "d1", workspace_id: "w1" }));
 

@@ -7,7 +7,6 @@ import { taskToResponse } from "@/lib/api/responses";
 import { TaskService } from "@/lib/services/task";
 import { sweepStaleState } from "@/lib/services/sweep";
 import { broadcastToUser } from "@/lib/broadcast";
-import { log } from "@/lib/logger";
 
 export const POST = withAuth(async (req: NextRequest, ctx) => {
   const { env } = getCloudflareContext();
@@ -31,19 +30,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeJSON({ tasks: [] });
   }
 
-  // 2. Liveness: bulk-update last_seen_at for all runtime IDs
-  const updatedIds = await queries.runtime.updateRuntimesLastSeen(
+  // 2. Liveness: update machine last_seen_at (1 row write instead of N)
+  await queries.machine.updateMachineLastSeen(
     db,
-    runtimeIds,
+    body.daemon_id,
     ctx.workspaceId,
   );
-
-  if (updatedIds.length < runtimeIds.length) {
-    log.warn("Some runtime IDs not found in workspace", {
-      expected: runtimeIds.length,
-      updated: updatedIds.length,
-    });
-  }
 
   // Single broadcast at daemon level
   broadcastToUser(ctx.userId, {

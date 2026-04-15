@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare"
-import { createDb, queries, isValidHandle } from "@alook/shared"
+import { createDb, queries, isValidHandle, isOnline } from "@alook/shared"
 import { withAuth } from "@/lib/middleware/auth";
 import { withWorkspaceMember } from "@/lib/middleware/workspace";
 import { writeJSON, writeError } from "@/lib/middleware/helpers";
@@ -91,7 +91,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     emailHandle: emailHandle || null,
   });
 
-  if (runtime.status === "online") {
+  if (isOnline(runtime.machineLastSeenAt)) {
     const taskService = new TaskService(db);
     await taskService.reconcileAgentStatus(newAgent.id, ws.workspaceId);
     const updated = await queries.agent.getAgent(

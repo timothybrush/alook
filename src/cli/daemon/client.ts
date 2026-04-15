@@ -40,7 +40,6 @@ export class DaemonClient {
         name: string;
         type: string;
         version: string;
-        status: string;
       }[];
     },
   ): Promise<RegisterResponse> {

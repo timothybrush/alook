@@ -11,6 +11,7 @@ const mockGetAgentRuntimeForWorkspace = vi.fn();
 
 vi.mock("@alook/shared", () => ({
   createDb: vi.fn(() => ({})),
+  isOnline: vi.fn((t: string | null) => !!t && Date.now() - new Date(t).getTime() < 9000),
   queries: {
     agent: {
       listAgents: (...args: unknown[]) => mockListAgents(...args),
@@ -77,7 +78,7 @@ describe("POST /api/agents", () => {
   const validBody = { name: "New Agent", runtime_id: "r1" };
 
   it("creates agent with valid input", async () => {
-    mockGetAgentRuntimeForWorkspace.mockResolvedValue({ status: "offline", runtimeMode: "local" });
+    mockGetAgentRuntimeForWorkspace.mockResolvedValue({ machineLastSeenAt: null, runtimeMode: "local" });
     mockCreateAgent.mockResolvedValue({ id: "a1", name: "New Agent" });
 
     const req = new NextRequest("http://localhost/api/agents", {
@@ -130,7 +131,7 @@ describe("POST /api/agents", () => {
   });
 
   it("creates agent with reconcile when runtime is online", async () => {
-    mockGetAgentRuntimeForWorkspace.mockResolvedValue({ status: "online", runtimeMode: "local" });
+    mockGetAgentRuntimeForWorkspace.mockResolvedValue({ machineLastSeenAt: new Date().toISOString(), runtimeMode: "local" });
     mockCreateAgent.mockResolvedValue({ id: "a1", name: "New Agent" });
     mockGetAgent.mockResolvedValue({ id: "a1", name: "Reconciled Agent" });
 
@@ -147,7 +148,7 @@ describe("POST /api/agents", () => {
   });
 
   it("creates agent without reconcile when runtime is offline", async () => {
-    mockGetAgentRuntimeForWorkspace.mockResolvedValue({ status: "offline", runtimeMode: "local" });
+    mockGetAgentRuntimeForWorkspace.mockResolvedValue({ machineLastSeenAt: null, runtimeMode: "local" });
     mockCreateAgent.mockResolvedValue({ id: "a1", name: "New Agent" });
 
     const req = new NextRequest("http://localhost/api/agents", {

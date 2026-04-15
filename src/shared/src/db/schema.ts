@@ -92,6 +92,21 @@ export const member = sqliteTable(
   (t) => [unique("member_workspace_user").on(t.workspaceId, t.userId)]
 );
 
+export const machine = sqliteTable(
+  "machine",
+  {
+    daemonId: text("daemon_id").notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id, { onDelete: "cascade" }),
+    deviceInfo: text("device_info").notNull().default(""),
+    lastSeenAt: text("last_seen_at"),
+    createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [primaryKey({ columns: [t.workspaceId, t.daemonId] })]
+);
+
 export const agentRuntime = sqliteTable(
   "agent_runtime",
   {
@@ -103,10 +118,8 @@ export const agentRuntime = sqliteTable(
     name: text("name").notNull().default(""),
     runtimeMode: text("runtime_mode").notNull().default("local"),
     provider: text("provider").notNull(),
-    status: text("status").notNull().default("offline"),
     deviceInfo: text("device_info").notNull().default(""),
     metadata: text("metadata", { mode: "json" }),
-    lastSeenAt: text("last_seen_at"),
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
     updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
   },

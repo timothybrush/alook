@@ -2,7 +2,7 @@ import {
   formatTimestamp,
   formatTimestampNullable,
 } from "@/lib/middleware/helpers";
-import { TaskApiBaseSchema } from "@alook/shared";
+import { TaskApiBaseSchema, isOnline } from "@alook/shared";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -141,6 +141,10 @@ export function taskMessageToResponse(m: any) {
 export function runtimeToResponse(rt: any) {
   let metadata = rt.metadata;
   if (!metadata) metadata = {};
+  const machineLastSeenAt = rt.machineLastSeenAt ?? null;
+  const lastSeenStr = machineLastSeenAt instanceof Date
+    ? machineLastSeenAt.toISOString()
+    : machineLastSeenAt;
   return {
     id: rt.id,
     workspace_id: rt.workspaceId,
@@ -148,10 +152,10 @@ export function runtimeToResponse(rt: any) {
     name: rt.name,
     runtime_mode: rt.runtimeMode,
     provider: rt.provider,
-    status: rt.status,
+    status: isOnline(lastSeenStr) ? "online" : "offline",
     device_info: rt.deviceInfo,
     metadata,
-    last_seen_at: formatTimestampNullable(rt.lastSeenAt),
+    last_seen_at: formatTimestampNullable(machineLastSeenAt),
     created_at: formatTimestamp(rt.createdAt),
     updated_at: formatTimestamp(rt.updatedAt),
   };

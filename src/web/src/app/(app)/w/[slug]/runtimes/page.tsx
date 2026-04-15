@@ -23,7 +23,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Monitor, Plus } from "lucide-react";
+import { Monitor, Plus } from "lucide-react";
 import type { Runtime } from "@/lib/api";
 import { CLI_CMD } from "@/lib/utils";
 
@@ -193,7 +193,7 @@ export default function RuntimesPage() {
   // Group runtimes by machine
   const machines = new Map<
     string,
-    { deviceInfo: string; name: string; runtimes: Runtime[] }
+    { deviceInfo: string; name: string; status: string; lastSeenAt: string | null; runtimes: Runtime[] }
   >();
   for (const rt of runtimes) {
     const key = rt.daemon_id || rt.id;
@@ -201,9 +201,12 @@ export default function RuntimesPage() {
       machines.set(key, {
         deviceInfo: typeof rt.device_info === "string" ? rt.device_info : "",
         name: rt.name || "",
+        status: rt.status,
+        lastSeenAt: rt.last_seen_at,
         runtimes: [],
       });
     }
+    // Use first runtime's status (all share the same machine status)
     machines.get(key)!.runtimes.push(rt);
   }
 
@@ -306,6 +309,16 @@ export default function RuntimesPage() {
                       <CardTitle className="truncate">
                         {displayName}
                       </CardTitle>
+                      <Badge
+                        variant={
+                          machine.status === "online"
+                            ? "default"
+                            : "outline"
+                        }
+                        className="shrink-0"
+                      >
+                        {machine.status}
+                      </Badge>
                     </div>
                     <CardAction>
                       <Button
@@ -328,10 +341,15 @@ export default function RuntimesPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {machine.lastSeenAt ? new Date(
+                          machine.lastSeenAt
+                        ).toLocaleString() : "Never seen"}
+                      </p>
                       {machine.runtimes.map((runtime) => (
                         <div
                           key={runtime.id}
-                          className="flex items-center justify-between gap-2"
+                          className="flex items-center gap-2"
                         >
                           <div className="min-w-0">
                             <p className="text-xs font-medium truncate">
@@ -342,22 +360,7 @@ export default function RuntimesPage() {
                                 </span>
                               ) : null}
                             </p>
-                            <p className="text-xs text-muted-foreground tabular-nums">
-                              {runtime.last_seen_at ? new Date(
-                                runtime.last_seen_at
-                              ).toLocaleString() : "Never"}
-                            </p>
                           </div>
-                          <Badge
-                            variant={
-                              runtime.status === "online"
-                                ? "default"
-                                : "outline"
-                            }
-                            className="shrink-0"
-                          >
-                            {runtime.status}
-                          </Badge>
                         </div>
                       ))}
                     </div>

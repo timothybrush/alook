@@ -21,6 +21,7 @@ export const DELETE = withAuth(async (req: NextRequest, ctx) => {
 
   try {
     await queries.runtime.deleteRuntimesByDaemonId(db, daemonId, ws.workspaceId);
+    await queries.machine.deleteMachine(db, daemonId, ws.workspaceId);
   } catch (e) {
     log.error("Failed to delete machine", { err: e });
     return writeJSON({ error: "Failed to remove machine" }, 500);

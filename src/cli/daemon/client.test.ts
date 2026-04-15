@@ -181,7 +181,7 @@ describe("DaemonClient.register() with mocked fetch", () => {
       daemon_id: "d1",
       device_name: "mac",
       cli_version: "1.0",
-      runtimes: [{ name: "claude", type: "claude", version: "1.0", status: "online" }],
+      runtimes: [{ name: "claude", type: "claude", version: "1.0" }],
     });
     expect(resp.runtimes[0].id).toBe("rt1");
   });
@@ -199,7 +199,7 @@ describe("DaemonClient.register() with mocked fetch", () => {
       daemon_id: "d1",
       device_name: "mac",
       cli_version: "1.0",
-      runtimes: [{ name: "claude", type: "claude", version: "1.0", status: "online" }],
+      runtimes: [{ name: "claude", type: "claude", version: "1.0" }],
     });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(

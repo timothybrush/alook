@@ -1,15 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockMarkStaleRuntimesOffline = vi.fn();
 const mockFailStaleDispatchedTasks = vi.fn();
 const mockCountRunningTasks = vi.fn();
 const mockUpdateAgentStatus = vi.fn();
 
 vi.mock("@alook/shared", () => ({
   queries: {
-    runtime: {
-      markStaleRuntimesOffline: (...args: unknown[]) => mockMarkStaleRuntimesOffline(...args),
-    },
     task: {
       failStaleDispatchedTasks: (...args: unknown[]) => mockFailStaleDispatchedTasks(...args),
       countRunningTasks: (...args: unknown[]) => mockCountRunningTasks(...args),
@@ -31,17 +27,7 @@ const db = {} as any;
 describe("sweepStaleState", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("calls markStaleRuntimesOffline with workspace", async () => {
-    mockMarkStaleRuntimesOffline.mockResolvedValue(undefined);
-    mockFailStaleDispatchedTasks.mockResolvedValue([]);
-
-    await sweepStaleState(db, "w1");
-
-    expect(mockMarkStaleRuntimesOffline).toHaveBeenCalledWith(db, "w1");
-  });
-
   it("calls failStaleDispatchedTasks with workspace", async () => {
-    mockMarkStaleRuntimesOffline.mockResolvedValue(undefined);
     mockFailStaleDispatchedTasks.mockResolvedValue([]);
 
     await sweepStaleState(db, "w1");
@@ -50,7 +36,6 @@ describe("sweepStaleState", () => {
   });
 
   it("reconciles agent status for each affected agent", async () => {
-    mockMarkStaleRuntimesOffline.mockResolvedValue(undefined);
     mockFailStaleDispatchedTasks.mockResolvedValue([
       { agentId: "a1", workspaceId: "w1" },
       { agentId: "a2", workspaceId: "w1" },
@@ -65,7 +50,6 @@ describe("sweepStaleState", () => {
   });
 
   it("deduplicates reconcile calls by agentId:workspaceId", async () => {
-    mockMarkStaleRuntimesOffline.mockResolvedValue(undefined);
     mockFailStaleDispatchedTasks.mockResolvedValue([
       { agentId: "a1", workspaceId: "w1" },
       { agentId: "a1", workspaceId: "w1" },
@@ -81,7 +65,6 @@ describe("sweepStaleState", () => {
   });
 
   it("handles zero stale tasks gracefully", async () => {
-    mockMarkStaleRuntimesOffline.mockResolvedValue(undefined);
     mockFailStaleDispatchedTasks.mockResolvedValue([]);
 
     await sweepStaleState(db, "w1");

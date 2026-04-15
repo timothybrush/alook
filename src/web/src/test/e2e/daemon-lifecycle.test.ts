@@ -30,7 +30,6 @@ describe("daemon lifecycle", () => {
             runtime_mode: "local",
             name: "Claude E2E",
             version: "4.0",
-            status: "online",
           },
         ],
       }),
@@ -57,7 +56,6 @@ describe("daemon lifecycle", () => {
             runtime_mode: "local",
             name: "Claude E2E Updated",
             version: "4.1",
-            status: "online",
           },
         ],
       }),
@@ -78,9 +76,9 @@ describe("daemon lifecycle", () => {
     const data = await res.json() as { tasks: unknown[] }
     expect(data.tasks).toEqual([])
 
-    // Verify last_seen_at was set in DB
+    // Verify machine last_seen_at was set in DB
     const rows = sqlQuery<{ last_seen_at: string }>(
-      `SELECT last_seen_at FROM agent_runtime WHERE id = '${registeredRuntimeId}'`
+      `SELECT last_seen_at FROM machine WHERE daemon_id = '${daemonId}' AND workspace_id = '${seed.workspaceId}'`
     )
     expect(rows[0]?.last_seen_at).toBeTruthy()
   })
@@ -95,7 +93,7 @@ describe("daemon lifecycle", () => {
     expect(res.status).toBe(401)
   })
 
-  it("POST /api/daemon/deregister sets runtime offline", async () => {
+  it("POST /api/daemon/deregister sets machine offline", async () => {
     const res = await tokenRequest("/api/daemon/deregister", seed.machineToken, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -103,17 +101,18 @@ describe("daemon lifecycle", () => {
     })
     expect(res.status).toBe(200)
 
-    // Verify status is offline
-    const rows = sqlQuery<{ status: string }>(
-      `SELECT status FROM agent_runtime WHERE id = '${registeredRuntimeId}'`
+    // Verify machine last_seen_at is null (offline)
+    const rows = sqlQuery<{ last_seen_at: string | null }>(
+      `SELECT last_seen_at FROM machine WHERE daemon_id = '${daemonId}' AND workspace_id = '${seed.workspaceId}'`
     )
-    expect(rows[0]?.status).toBe("offline")
+    expect(rows[0]?.last_seen_at).toBeNull()
   })
 
-  // Cleanup the registered runtime
+  // Cleanup the registered runtime and machine
   afterAll(() => {
     try {
       sql(`DELETE FROM agent_runtime WHERE daemon_id = '${daemonId}'`)
+      sql(`DELETE FROM machine WHERE daemon_id = '${daemonId}'`)
     } catch { /* ignore */ }
   })
 })

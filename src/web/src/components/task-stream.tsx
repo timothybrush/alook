@@ -1,43 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TaskMessage } from "@alook/shared";
 import type { Task } from "@/lib/api";
 import {
-  Terminal,
-  FileText,
-  Search,
-  Pencil,
-  Play,
   ChevronRight,
   Brain,
   AlertCircle,
 } from "lucide-react";
 import { Streamdown } from "streamdown";
 
-/* ── Tool icon mapping ── */
-
-const TOOL_ICONS: Record<string, React.ElementType> = {
-  read_file: FileText,
-  write_file: Pencil,
-  edit_file: Pencil,
-  search: Search,
-  grep: Search,
-  find: Search,
-  bash: Terminal,
-  execute: Terminal,
-  run: Play,
-};
-
-function getToolIcon(tool: string): React.ElementType {
-  const lower = tool.toLowerCase();
-  for (const [key, icon] of Object.entries(TOOL_ICONS)) {
-    if (lower.includes(key)) return icon;
-  }
-  return Terminal;
-}
+/* ── Helpers ── */
 
 function formatToolName(tool: string): string {
   return tool
@@ -104,7 +79,6 @@ function groupMessages(messages: TaskMessage[]): StreamItem[] {
         if (existing) {
           existing.output = msg.output || msg.content;
         } else {
-          // Standalone result — attach to most recent tool-call without output
           const lastTool = [...items]
             .reverse()
             .find((i): i is ToolCallGroup => i.kind === "tool-call" && !i.output);
@@ -136,7 +110,6 @@ function groupMessages(messages: TaskMessage[]): StreamItem[] {
         });
         break;
       default:
-        // Unknown types (e.g. future agent lifecycle events) — skip silently
         break;
     }
   }
@@ -147,7 +120,6 @@ function groupMessages(messages: TaskMessage[]): StreamItem[] {
 /* ── ToolCallBlock ── */
 
 function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: boolean }) {
-  const Icon = getToolIcon(item.tool);
   const hasDetails = item.input || item.output;
 
   const inputStr = useMemo(() => {
@@ -160,10 +132,10 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
   }, [item.input]);
 
   return (
-    <details className="group/tool animate-[fade-up_200ms_ease-out_both]">
+    <details className="group/tool">
       <summary
         className={cn(
-          "flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-md cursor-pointer select-none",
+          "flex items-center gap-2 py-1 px-2 -mx-2 rounded-md cursor-pointer select-none",
           "text-sm text-muted-foreground transition-colors duration-150",
           "hover:bg-muted/60 hover:text-foreground",
           "[&::-webkit-details-marker]:hidden [&::marker]:hidden"
@@ -172,7 +144,6 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
         {hasDetails && (
           <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-open/tool:rotate-90" />
         )}
-        <Icon className="size-3.5 shrink-0" />
         <span className="font-medium text-foreground/80">
           {formatToolName(item.tool)}
         </span>
@@ -182,7 +153,7 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
       </summary>
 
       {hasDetails && (
-        <div className="mt-1 mb-2 space-y-2">
+        <div className="mt-1 mb-2 ml-5 space-y-2">
           {inputStr && (
             <pre className="task-stream-pre overflow-x-auto rounded-md bg-muted/40 p-2.5 font-mono text-xs leading-relaxed text-muted-foreground max-h-48 overflow-y-auto">
               {inputStr}
@@ -199,27 +170,62 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
   );
 }
 
+/* ── ThinkingBlock ── */
+
+function ThinkingBlock({ item }: { item: ThinkingItem }) {
+  return (
+    <details className="group/think">
+      <summary
+        className={cn(
+          "flex items-center gap-2 py-1 px-2 -mx-2 rounded-md cursor-pointer select-none",
+          "text-sm text-muted-foreground/60 italic transition-colors duration-150",
+          "hover:bg-muted/60 hover:text-muted-foreground",
+          "[&::-webkit-details-marker]:hidden [&::marker]:hidden"
+        )}
+      >
+        <ChevronRight className="size-3 shrink-0 text-muted-foreground/40 transition-transform duration-150 group-open/think:rotate-90" />
+        <Brain className="size-3 shrink-0" />
+        <span>Thinking...</span>
+      </summary>
+      <div className="mt-1 mb-2 ml-5">
+        <p className="text-sm italic text-muted-foreground/60 whitespace-pre-wrap">
+          {item.content}
+        </p>
+      </div>
+    </details>
+  );
+}
+
 /* ── TaskStream ── */
 
 export function TaskStream({
   task,
   messages,
   connectionLost,
-  hideText,
 }: {
   task: Task;
   messages: TaskMessage[];
   connectionLost?: boolean;
-  /** Hide text items (final answer is rendered separately as the assistant message). */
-  hideText?: boolean;
 }) {
   const allItems = useMemo(() => groupMessages(messages), [messages]);
-  const items = hideText ? allItems.filter((i) => i.kind !== "text") : allItems;
   const isRunning = task.status !== "completed" && task.status !== "failed";
 
+  const toolItems = allItems.filter((i) => i.kind !== "text");
+  const textItems = allItems.filter((i): i is TextItem => i.kind === "text");
+
+  const toolScrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll tool area to bottom while running
+  useEffect(() => {
+    if (isRunning && toolScrollRef.current) {
+      toolScrollRef.current.scrollTop = toolScrollRef.current.scrollHeight;
+    }
+  }, [toolItems.length, isRunning]);
+
   return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2 mb-1">
+    <div className="space-y-3">
+      {/* Status badge */}
+      <div className="flex items-center gap-2">
         {task.status === "running" ? (
           <Badge variant="secondary" className="gap-1.5">
             <span className="size-1.5 rounded-full bg-primary animate-pulse" />
@@ -230,48 +236,65 @@ export function TaskStream({
         )}
       </div>
 
-      {items.length > 0 && (
-        <div className="space-y-0.5">
-          {items.map((item) => {
-            switch (item.kind) {
-              case "tool-call":
-                return <ToolCallBlock key={item.id} item={item} isRunning={isRunning} />;
-              case "text":
-                return (
-                  <div
-                    key={item.id}
-                    className="markdown text-sm px-1 animate-[fade-up_200ms_ease-out_both]"
-                  >
-                    <Streamdown controls={{ code: { copy: true, download: false } }}>{item.content}</Streamdown>
-                  </div>
-                );
-              case "thinking":
-                return (
-                  <p
-                    key={item.id}
-                    className="text-sm italic text-muted-foreground/60 px-1 animate-[fade-up_200ms_ease-out_both]"
-                  >
-                    <Brain className="inline size-3 mr-1 -mt-0.5" />
-                    {item.content}
-                  </p>
-                );
-              case "status":
-                return (
-                  <p
-                    key={item.id}
-                    className="text-xs text-muted-foreground px-1 animate-[fade-up_200ms_ease-out_both]"
-                  >
-                    {item.type === "error" && (
-                      <AlertCircle className="inline size-3 mr-1 -mt-0.5 text-destructive" />
-                    )}
-                    {item.content}
-                  </p>
-                );
-            }
-          })}
+      {/* Tool stream zone — foldable, height-limited, scrollable */}
+      {toolItems.length > 0 && (
+        <details open={isRunning || undefined} className="group/stream">
+          <summary
+            className={cn(
+              "flex items-center gap-2 py-1 cursor-pointer select-none",
+              "text-xs text-muted-foreground transition-colors duration-150",
+              "hover:text-foreground",
+              "[&::-webkit-details-marker]:hidden [&::marker]:hidden"
+            )}
+          >
+            <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-open/stream:rotate-90" />
+            <span>{toolItems.length} step{toolItems.length !== 1 ? "s" : ""}</span>
+          </summary>
+          <div
+            ref={toolScrollRef}
+            className="mt-1 max-h-80 overflow-y-auto overflow-x-hidden thin-scrollbar space-y-0.5 pl-1"
+          >
+            {toolItems.map((item) => {
+              switch (item.kind) {
+                case "tool-call":
+                  return <ToolCallBlock key={item.id} item={item} isRunning={isRunning} />;
+                case "thinking":
+                  return <ThinkingBlock key={item.id} item={item as ThinkingItem} />;
+                case "status":
+                  return (
+                    <p
+                      key={item.id}
+                      className="text-xs text-muted-foreground px-1"
+                    >
+                      {item.type === "error" && (
+                        <AlertCircle className="inline size-3 mr-1 -mt-0.5 text-destructive" />
+                      )}
+                      {(item as StatusItem).content}
+                    </p>
+                  );
+                default:
+                  return null;
+              }
+            })}
+          </div>
+        </details>
+      )}
+
+      {/* Text output zone */}
+      {textItems.length > 0 && (
+        <div className="space-y-3">
+          {textItems.map((item) => (
+            <div
+              key={item.id}
+              className="markdown max-w-full px-1 py-1 text-base text-foreground"
+            >
+              <Streamdown controls={{ code: { copy: true, download: false }, table: { copy: true, download: false, fullscreen: true } }}>{item.content}</Streamdown>
+            </div>
+          ))}
         </div>
       )}
 
+      {/* Error display */}
       {task.status === "failed" && task.error && (
         <p className="text-sm text-destructive flex items-center gap-1.5 mt-2">
           <AlertCircle className="size-3.5 shrink-0" />
@@ -280,7 +303,7 @@ export function TaskStream({
       )}
 
       {connectionLost && (
-        <p className="text-xs text-muted-foreground animate-pulse mt-1">
+        <p className="text-sm text-muted-foreground animate-pulse mt-1">
           Connection lost — retrying...
         </p>
       )}

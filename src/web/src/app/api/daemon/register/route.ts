@@ -24,6 +24,13 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeJSON({ error: "workspace not found" }, 404);
   }
 
+  // Upsert machine row (1 write for liveness)
+  await queries.machine.upsertMachine(db, {
+    daemonId,
+    workspaceId,
+    deviceInfo: deviceName.trim(),
+  });
+
   const results = [];
   for (const rt of runtimes) {
     const provider = (rt.type || rt.provider || "unknown").trim();
@@ -33,7 +40,6 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       name = deviceName ? `${provider} (${deviceName})` : provider;
     }
     const deviceInfo = deviceName.trim();
-    const status = rt.status === "offline" ? "offline" : "online";
     const metadata: Record<string, unknown> = {
       version: rt.version || "",
       cli_version: cliVersion,
@@ -45,11 +51,10 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       name,
       runtimeMode,
       provider,
-      status,
       deviceInfo,
       metadata,
     });
-    results.push(result);
+    results.push({ ...result, machineLastSeenAt: new Date().toISOString() });
   }
 
   return writeJSON({ runtimes: results.map(runtimeToResponse) });

@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const mockGetRuntimeIdsByDaemon = vi.fn();
-const mockSetAgentRuntimeOffline = vi.fn();
+const mockSetMachineLastSeenNull = vi.fn();
 const mockBroadcastToUser = vi.fn();
 
 function sharedMocks() {
@@ -13,19 +12,14 @@ function sharedMocks() {
     "@alook/shared": async () => ({
       createDb: vi.fn(() => ({})),
       queries: {
-        runtime: {
-          getRuntimeIdsByDaemon: (...a: any[]) =>
-            mockGetRuntimeIdsByDaemon(...a),
-          setAgentRuntimeOffline: (...a: any[]) =>
-            mockSetAgentRuntimeOffline(...a),
+        machine: {
+          setMachineLastSeenNull: (...a: any[]) =>
+            mockSetMachineLastSeenNull(...a),
         },
       },
       DeregisterRequestSchema: (await import("@alook/shared"))
         .DeregisterRequestSchema,
     }),
-    "@/lib/logger": {
-      log: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
-    },
     "@/lib/broadcast": {
       broadcastToUser: (...a: any[]) => mockBroadcastToUser(...a),
     },
@@ -50,7 +44,6 @@ describe("POST /api/daemon/deregister", () => {
 
     vi.doMock("@opennextjs/cloudflare", () => mocks["@opennextjs/cloudflare"]);
     vi.doMock("@alook/shared", mocks["@alook/shared"]);
-    vi.doMock("@/lib/logger", () => mocks["@/lib/logger"]);
     vi.doMock("@/lib/broadcast", () => mocks["@/lib/broadcast"]);
     vi.doMock("@/lib/middleware/auth", () => ({
       withAuth: vi.fn((handler: any) => async (req: any, ctx?: any) => {
@@ -72,11 +65,10 @@ describe("POST /api/daemon/deregister", () => {
   const daemonAuth = { userId: "u1", email: "u@t.com", workspaceId: "w1" };
   const jwtAuth = { userId: "u1", email: "u@t.com" };
 
-  it("sets all runtimes for daemon offline", async () => {
+  it("sets machine last_seen_at to null", async () => {
     const POST = await loadRoute(daemonAuth);
 
-    mockGetRuntimeIdsByDaemon.mockResolvedValue(["rt1", "rt2"]);
-    mockSetAgentRuntimeOffline.mockResolvedValue(undefined);
+    mockSetMachineLastSeenNull.mockResolvedValue(undefined);
     mockBroadcastToUser.mockResolvedValue(undefined);
 
     const res = await POST(makeReq({ daemon_id: "d1" }));
@@ -84,17 +76,15 @@ describe("POST /api/daemon/deregister", () => {
 
     expect(res.status).toBe(200);
     expect(body).toEqual({ status: "ok" });
-    expect(mockGetRuntimeIdsByDaemon).toHaveBeenCalledWith({}, "d1", "w1");
-    expect(mockSetAgentRuntimeOffline).toHaveBeenCalledTimes(2);
-    expect(mockSetAgentRuntimeOffline).toHaveBeenCalledWith({}, "rt1");
-    expect(mockSetAgentRuntimeOffline).toHaveBeenCalledWith({}, "rt2");
+    // Single machine write instead of N runtime writes
+    expect(mockSetMachineLastSeenNull).toHaveBeenCalledTimes(1);
+    expect(mockSetMachineLastSeenNull).toHaveBeenCalledWith({}, "d1", "w1");
   });
 
   it("sends single broadcast with daemonId and workspaceId", async () => {
     const POST = await loadRoute(daemonAuth);
 
-    mockGetRuntimeIdsByDaemon.mockResolvedValue(["rt1", "rt2"]);
-    mockSetAgentRuntimeOffline.mockResolvedValue(undefined);
+    mockSetMachineLastSeenNull.mockResolvedValue(undefined);
     mockBroadcastToUser.mockResolvedValue(undefined);
 
     await POST(makeReq({ daemon_id: "d1" }));
@@ -108,20 +98,6 @@ describe("POST /api/daemon/deregister", () => {
     });
   });
 
-  it("returns 200 with no broadcast when daemon has no runtimes", async () => {
-    const POST = await loadRoute(daemonAuth);
-
-    mockGetRuntimeIdsByDaemon.mockResolvedValue([]);
-
-    const res = await POST(makeReq({ daemon_id: "d1" }));
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(body).toEqual({ status: "ok" });
-    expect(mockSetAgentRuntimeOffline).not.toHaveBeenCalled();
-    expect(mockBroadcastToUser).not.toHaveBeenCalled();
-  });
-
   it("returns 403 when called without workspaceId", async () => {
     const POST = await loadRoute(jwtAuth);
 
@@ -130,22 +106,5 @@ describe("POST /api/daemon/deregister", () => {
 
     expect(res.status).toBe(403);
     expect(body.error).toContain("machine token required");
-  });
-
-  it("continues processing remaining runtimes after DB error on one", async () => {
-    const POST = await loadRoute(daemonAuth);
-
-    mockGetRuntimeIdsByDaemon.mockResolvedValue(["rt1", "rt2"]);
-    mockSetAgentRuntimeOffline
-      .mockRejectedValueOnce(new Error("DB connection lost"))
-      .mockResolvedValueOnce(undefined);
-    mockBroadcastToUser.mockResolvedValue(undefined);
-
-    const res = await POST(makeReq({ daemon_id: "d1" }));
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(body).toEqual({ status: "ok" });
-    expect(mockSetAgentRuntimeOffline).toHaveBeenCalledTimes(2);
   });
 });
