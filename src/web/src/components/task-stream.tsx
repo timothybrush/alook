@@ -4,7 +4,7 @@ import { useMemo, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TaskMessage } from "@alook/shared";
-import type { Task } from "@/lib/api";
+import type { TaskApi as Task } from "@alook/shared";
 import {
   ChevronRight,
   Brain,

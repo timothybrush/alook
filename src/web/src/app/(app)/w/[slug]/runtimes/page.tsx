@@ -24,7 +24,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Monitor, Plus } from "lucide-react";
-import type { Runtime } from "@/lib/api";
+import type { AgentRuntime as Runtime } from "@alook/shared";
 import { CLI_CMD } from "@/lib/utils";
 
 function ConnectMachineSteps({

@@ -17,8 +17,8 @@ import {
   deleteAgent,
   createMachineToken,
   deleteMachine,
-  type Runtime,
 } from "@/lib/api";
+import type { AgentRuntime as Runtime } from "@alook/shared";
 import { toast } from "sonner";
 import type {
   Agent,

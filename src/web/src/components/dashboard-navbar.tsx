@@ -21,7 +21,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Logo } from "@/components/logo";
 import { toast } from "sonner";
-import type { Runtime } from "@/lib/api";
+import type { AgentRuntime as Runtime } from "@alook/shared";
 import { signOut } from "@/lib/auth-client";
 import { CLI_CMD } from "@/lib/utils";
 

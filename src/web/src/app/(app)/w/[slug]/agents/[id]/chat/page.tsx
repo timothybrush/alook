@@ -12,8 +12,7 @@ import {
   getTask,
   getTaskMessages,
 } from "@/lib/api";
-import type { Conversation, Message, TaskMessage } from "@alook/shared";
-import type { Task } from "@/lib/api";
+import type { Conversation, Message, TaskApi as Task, TaskMessage } from "@alook/shared";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";

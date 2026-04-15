@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RuntimeSelect } from "@/components/runtime-select";
 import type { Agent } from "@alook/shared";
 import { isValidHandle } from "@alook/shared";
-import type { Runtime } from "@/lib/api";
+import type { AgentRuntime as Runtime } from "@alook/shared";
 import { cn } from "@/lib/utils";
 
 function nameToHandle(name: string): string {

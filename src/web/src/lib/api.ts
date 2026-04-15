@@ -14,10 +14,6 @@ import type {
 } from "@alook/shared";
 import { ApiError } from "@/lib/errors";
 
-// Re-export AgentRuntime as Runtime for convenience
-export type Runtime = AgentRuntime;
-export type Task = TaskApi;
-
 const API_BASE = "";
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -118,7 +114,7 @@ export const deleteAgent = (id: string, workspaceId: string) =>
 
 // Runtimes
 export const listRuntimes = (workspaceId: string) =>
-  apiFetch<Runtime[]>(`/api/runtimes${wsQuery(workspaceId)}`);
+  apiFetch<AgentRuntime[]>(`/api/runtimes${wsQuery(workspaceId)}`);
 
 export const deleteMachine = (daemonId: string, workspaceId: string) =>
   apiFetch<void>(
@@ -165,7 +161,7 @@ export const listMessages = (
 };
 
 export const sendMessage = (conversationId: string, content: string, workspaceId: string) =>
-  apiFetch<{ message: Message; task: Task }>(
+  apiFetch<{ message: Message; task: TaskApi }>(
     `/api/conversations/${conversationId}/messages${wsQuery(workspaceId)}`,
     {
       method: "POST",
@@ -185,7 +181,7 @@ export const createMachineToken = (name?: string, workspaceId?: string) =>
 
 // Tasks (polling)
 export const getTask = (id: string, workspaceId: string) =>
-  apiFetch<Task>(`/api/tasks/${id}${wsQuery(workspaceId)}`);
+  apiFetch<TaskApi>(`/api/tasks/${id}${wsQuery(workspaceId)}`);
 
 export const getTaskMessages = (id: string, workspaceId: string, since?: number) =>
   apiFetch<TaskMessage[]>(
