@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, DM_Mono, Caveat } from "next/font/google";
+import { DM_Sans, DM_Mono, Caveat, Bricolage_Grotesque, VT323 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToasterProvider } from "@/components/toaster-provider";
 import "./globals.css";
@@ -20,6 +20,18 @@ const caveat = Caveat({
   variable: "--font-caveat",
   subsets: ["latin"],
   weight: ["700"],
+});
+
+const bricolage = Bricolage_Grotesque({
+  variable: "--font-bricolage",
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+});
+
+const vt323 = VT323({
+  variable: "--font-vt323",
+  subsets: ["latin"],
+  weight: ["400"],
 });
 
 
@@ -48,7 +60,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${dmSans.variable} ${dmMono.variable} ${caveat.variable} h-full antialiased`}
+      className={`${dmSans.variable} ${dmMono.variable} ${caveat.variable} ${bricolage.variable} ${vt323.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">

@@ -1,0 +1,87 @@
+"use client";
+
+import { useRef } from "react";
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+gsap.registerPlugin(ScrollTrigger);
+
+export function MarketingFooter() {
+  const footerRef = useRef<HTMLElement>(null);
+
+  useGSAP(
+    () => {
+      gsap.from(footerRef.current, {
+        y: 20,
+        opacity: 0,
+        duration: 0.6,
+        ease: "power2.out",
+        scrollTrigger: {
+          trigger: footerRef.current,
+          start: "top 90%",
+          toggleActions: "play none none none",
+        },
+      });
+    },
+    { scope: footerRef }
+  );
+
+  return (
+    <footer
+      ref={footerRef}
+      className="px-6 py-12"
+      style={{
+        backgroundColor: "var(--landing-surface)",
+        borderTop: "1px solid var(--landing-border)",
+      }}
+    >
+      <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-6 md:flex-row">
+        <div className="flex items-center gap-4">
+          <span
+            className="text-lg tracking-tight"
+            style={{
+              fontFamily: "var(--font-brand)",
+              color: "var(--landing-text)",
+              fontWeight: 700,
+            }}
+          >
+            Alook
+          </span>
+          <span
+            className="text-[10px] uppercase tracking-[0.2em]"
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--landing-text-muted)",
+            }}
+          >
+            Email-driven autonomous agents
+          </span>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <a
+            href="https://github.com/alookai/alook"
+            className="text-xs uppercase tracking-[0.15em] transition-opacity duration-150 hover:opacity-60"
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--landing-text-muted)",
+            }}
+          >
+            GitHub
+          </a>
+          <span
+            className="text-[10px] uppercase tracking-[0.2em]"
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--landing-text-muted)",
+              opacity: 0.5,
+            }}
+          >
+            &copy; 2026 Alook Systems
+          </span>
+        </div>
+      </div>
+    </footer>
+  );
+}

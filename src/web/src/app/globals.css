@@ -13,6 +13,7 @@
   --font-sans: var(--font-dm-sans);
   --font-mono: var(--font-dm-mono);
   --font-heading: var(--font-dm-sans);
+  --font-display: var(--font-bricolage);
   --font-brand: var(--font-caveat);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -125,6 +126,435 @@
   --sidebar-accent-foreground: oklch(0.93 0.006 80);
   --sidebar-border: oklch(1 0.005 80 / 10%);
   --sidebar-ring: oklch(0.55 0.01 60);
+}
+
+/* ── Homepage "1980s CRT Nostalgia" scoped tokens ── */
+.landing {
+  --landing-bg: oklch(0.93 0.015 80);
+  --landing-surface: oklch(0.88 0.02 75);
+  --landing-text: oklch(0.15 0.01 55);
+  --landing-text-muted: oklch(0.45 0.01 55);
+  --landing-accent: oklch(0.7 0.15 80);
+  --landing-accent-dim: oklch(0.5 0.08 80);
+  --landing-border: oklch(0.15 0.01 55 / 12%);
+  --landing-crt-bg: oklch(0.08 0.008 55);
+  --landing-phosphor: oklch(0.75 0.18 80);
+  --font-crt: var(--font-vt323);
+
+  /* 3D typewriter tokens */
+  --tw-body: oklch(0.25 0.01 60);
+  --tw-body-hi: oklch(0.30 0.01 60);
+  --tw-body-lo: oklch(0.18 0.01 55);
+  --tw-body-top: oklch(0.28 0.01 60);
+  --tw-chrome: oklch(0.72 0.01 75);
+  --tw-chrome-hi: oklch(0.82 0.005 80);
+  --tw-paper: oklch(0.97 0.008 80);
+  --tw-blob: oklch(0.88 0.025 82);
+  --tw-roller: oklch(0.15 0.01 55);
+}
+
+/* ─── Front-Facing Typewriter Illustration ───
+
+  Classic front-view typewriter (Olivetti-inspired):
+        ┌─────────────┐  ← paper
+   ●────┤=============├────●  ← roller + knobs
+        │  ╲|||||||╱  │  ← type-bar fan
+   ╭────┴─────────────┴────╮
+   │   ○ ○ ○ ○ ○ ○ ○ ○    │  ← key rows
+   │    ○ ○ ○ ○ ○ ○ ○     │
+   │   ○ ○ ○ ○ ○ ○ ○ ○    │
+   │      ╶━━━━━━━╴        │  ← bars
+   ╰───────────────────────╯
+*/
+
+.typewriter-visual {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: visible;
+  zoom: 0.88; /* scale outside 3D context — keeps text crisp */
+}
+
+.typewriter-blob {
+  position: absolute;
+  bottom: -10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 130%;
+  height: 80%;
+  background-color: var(--tw-blob);
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23000' d='M44.7,-76.4C58.9,-69.2,71.8,-59.1,81.1,-46.1C90.4,-33.1,96.1,-16.6,96.6,-0.1C97.1,16.4,92.5,32.8,82.8,45.8C73.1,58.8,58.4,68.4,42.7,75.4C27,82.4,10.3,86.8,-5.5,88.4C-21.3,90,-36.2,88.8,-49.6,81.8C-63,74.8,-74.9,62.1,-82.1,47.4C-89.3,32.7,-91.8,16.3,-90.1,0.9C-88.4,-14.4,-82.5,-28.9,-73.6,-40.8C-64.7,-52.7,-52.9,-62,-40.1,-69.4C-27.3,-76.8,-13.6,-82.3,1.3,-84.6C16.2,-86.9,30.5,-83.6,44.7,-76.4Z' transform='translate(100 100)' /%3E%3C/svg%3E");
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  z-index: 1;
+  opacity: 0.45;
+  transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ── 3D Scene — default angle, mouse-follow via JS ── */
+.typewriter-scene {
+  position: relative;
+  z-index: 2;
+  perspective: 2500px;
+  transform-style: preserve-3d;
+  transform: rotateY(-20deg) rotateX(10deg);
+  transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.typewriter-visual:hover .typewriter-blob {
+  transform: translateX(-50%) scale(1.05) rotate(5deg);
+}
+
+/* ── Machine wrapper — 3D box ── */
+.tw-machine {
+  position: relative;
+  width: 420px;
+  transform-style: preserve-3d;
+}
+
+/* ── Paper track — clips the paper as it feeds out ── */
+.tw-paper-track {
+  position: absolute;
+  bottom: calc(100% - 20px);
+  left: 50%;
+  transform: translateX(-50%) translateZ(81px);
+  width: 100%;
+  height: 400px; /* tall enough for any paper content */
+  overflow: hidden;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ── Paper — slides up inside the track ── */
+.tw-paper {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: 24px 28px 44px;
+  background: var(--tw-paper);
+  box-shadow:
+    0 4px 20px rgba(0,0,0,0.08),
+    0 1px 4px rgba(0,0,0,0.05);
+  border-radius: 2px 2px 0 0;
+  pointer-events: auto;
+  opacity: 0; /* hidden by default — GSAP sets opacity:1 when ready */
+}
+
+/* ── 3D Body — 6-face box (420w × 260h × 160d, half-d=80) ── */
+.tw-body {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  transform-style: preserve-3d;
+}
+
+/* Corner filler — flat rectangle just behind front face, seals rounded-corner gaps */
+.tw-body::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  background: var(--tw-body-lo);
+  transform: translateZ(79px);
+}
+
+/* Front face — main visible surface */
+.tw-body-front {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    var(--tw-body-hi) 0%,
+    var(--tw-body) 30%,
+    var(--tw-body-lo) 100%
+  );
+  border-radius: 0 0 12px 12px;
+  transform: translateZ(80px);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 6%),
+    inset -5px -5px 15px oklch(0 0 0 / 10%),
+    inset 2px 2px 10px oklch(1 0 0 / 5%);
+  overflow: visible;
+}
+
+/* Back face */
+.tw-body-back {
+  position: absolute;
+  inset: 0;
+  background: var(--tw-body-lo);
+  border-radius: 0 0 12px 12px;
+  transform: translateZ(-80px) rotateY(180deg);
+}
+
+/* Left face */
+.tw-body-left {
+  position: absolute;
+  width: 160px;
+  height: 260px;
+  background: oklch(0.22 0.01 58);
+  border-radius: 0 0 0 12px;
+  transform: rotateY(-90deg) translateZ(80px);
+  box-shadow: inset 10px 0 30px oklch(0 0 0 / 6%);
+}
+
+/* Right face */
+.tw-body-right {
+  position: absolute;
+  width: 160px;
+  height: 260px;
+  background: var(--tw-body-lo);
+  border-radius: 0 0 12px 0;
+  transform: rotateY(90deg) translateZ(340px);
+}
+
+/* Top face */
+.tw-body-top {
+  position: absolute;
+  width: 420px;
+  height: 160px;
+  background: oklch(0.30 0.01 60);
+  border-radius: 0;
+  transform: rotateX(90deg) translateZ(80px);
+}
+
+/* Bottom face */
+.tw-body-bottom {
+  position: absolute;
+  width: 420px;
+  height: 160px;
+  background: oklch(0.14 0.01 55);
+  border-radius: 0 0 12px 12px;
+  transform: rotateX(-90deg) translateZ(180px);
+  box-shadow: 0 60px 100px oklch(0 0 0 / 20%);
+}
+
+/* ── Roller assembly — at the top of body, wider than body ── */
+.tw-roller-assembly {
+  position: absolute;
+  top: -6px;
+  left: -24px;
+  right: -24px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  z-index: 6;
+}
+
+.tw-roller {
+  flex: 1;
+  height: 22px;
+  background: var(--tw-roller);
+  border-radius: 11px;
+  box-shadow:
+    inset 0 -5px 10px rgba(0,0,0,0.5),
+    inset 0 4px 6px rgba(255,255,255,0.05),
+    0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Roller knobs */
+.tw-knob {
+  width: 20px;
+  height: 32px;
+  background: oklch(0.20 0.01 55);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 -3px 5px rgba(0,0,0,0.4),
+    inset 0 1px 2px rgba(255,255,255,0.06),
+    0 2px 4px rgba(0,0,0,0.3);
+  flex-shrink: 0;
+  border: 1px solid oklch(0.30 0.01 55);
+}
+.tw-knob-left { margin-right: -3px; }
+.tw-knob-right { margin-left: -3px; }
+
+/* ── Type-bar fan — below roller ── */
+.tw-typebar-fan {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  height: 38px;
+  z-index: 5;
+  overflow: hidden;
+}
+
+/* Fan arc */
+.tw-typebar-fan::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 76px;
+  border-radius: 50%;
+  border: 6px solid oklch(0.40 0.01 55);
+  border-bottom: none;
+  clip-path: inset(0 0 50% 0);
+}
+
+/* Radiating type bars */
+.tw-typebar-fan::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 180px;
+  height: 36px;
+  background: repeating-conic-gradient(
+    from 155deg at 50% 100%,
+    oklch(0.46 0.01 60) 0deg 1deg,
+    transparent 1deg 4.5deg
+  );
+  mask-image: radial-gradient(ellipse 90px 36px at 50% 100%, black 40%, transparent 90%);
+}
+
+/* ── Keys ── */
+.tw-keys-layer {
+  position: absolute;
+  top: 60px;
+  left: 0; right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 0 36px;
+  z-index: 4;
+}
+
+.tw-key-row {
+  display: flex;
+  gap: 12px;
+}
+
+.tw-key-row:nth-child(2) { margin-left: 18px; }
+.tw-key-row:nth-child(3) { margin-left: 0; }
+
+.tw-key {
+  width: 32px;
+  height: 26px;
+  background: oklch(0.92 0.005 80);
+  border-radius: 50%;
+  box-shadow:
+    0 3px 0 oklch(0.55 0.015 65),
+    0 4px 8px rgba(0,0,0,0.25),
+    inset 0 1px 3px rgba(255,255,255,0.7);
+  position: relative;
+}
+
+.tw-key::after {
+  content: "";
+  position: absolute;
+  top: 4px; left: 4px; right: 4px; bottom: 4px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 42% 38%,
+    rgba(255,255,255,0.5),
+    rgba(0,0,0,0.04) 70%
+  );
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+/* ── Bars (space bar area) ── */
+.tw-bars {
+  position: absolute;
+  bottom: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 4;
+}
+
+.tw-bar {
+  height: 10px;
+  background: oklch(0.88 0.005 80);
+  border-radius: 5px;
+  box-shadow:
+    0 2px 0 oklch(0.55 0.015 65),
+    0 3px 6px rgba(0,0,0,0.15),
+    inset 0 1px 2px rgba(255,255,255,0.5);
+}
+
+.tw-bar-long {
+  width: 210px;
+}
+
+.tw-bar-short {
+  width: 170px;
+}
+
+/* ── Return key — wider, clickable ── */
+.tw-return-key {
+  width: 52px !important;
+  border-radius: 14px !important;
+  cursor: pointer;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: none !important;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  background: oklch(0.25 0.01 55) !important;
+}
+.tw-return-key::after {
+  border-radius: 10px !important;
+  background: radial-gradient(
+    circle at 42% 38%,
+    rgba(255,255,255,0.15),
+    rgba(0,0,0,0.06) 70%
+  ) !important;
+}
+.tw-return-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: oklch(0.85 0.005 80);
+  line-height: 1;
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+}
+.tw-return-key:active {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 oklch(0.55 0.015 65), 0 1px 2px rgba(0,0,0,0.1), inset 0 1px 2px rgba(255,255,255,0.7);
+}
+
+/* Key press animation */
+.tw-key:not(.tw-return-key):nth-child(3n+1) { animation: tw-press 1.6s ease 0.15s infinite; }
+.tw-key:not(.tw-return-key):nth-child(7n)   { animation: tw-press 2.2s ease 0.55s infinite; }
+.tw-key:not(.tw-return-key):nth-child(2n+4) { animation: tw-press 1.9s ease 0.85s infinite; }
+.tw-key:not(.tw-return-key):nth-child(4n+2) { animation: tw-press 1.3s ease 0s infinite; }
+
+@keyframes tw-press {
+  0%, 88%, 100% {
+    transform: translateY(0);
+    box-shadow: 0 2px 0 oklch(0.55 0.015 65), 0 3px 6px rgba(0,0,0,0.2), inset 0 1px 2px rgba(255,255,255,0.7);
+  }
+  5% {
+    transform: translateY(2px);
+    box-shadow: 0 0 0 oklch(0.55 0.015 65), 0 1px 2px rgba(0,0,0,0.1), inset 0 1px 2px rgba(255,255,255,0.7);
+  }
+}
+
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .typewriter-scene {
+    transform: scale(0.55) !important;
+  }
+  .tw-paper {
+    padding: 16px 18px 24px;
+  }
 }
 
 /* ── Sonner toast: close button only on hover ── */
