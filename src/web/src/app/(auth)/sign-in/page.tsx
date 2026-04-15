@@ -276,7 +276,7 @@ export default function SignInPage() {
         <div className="flex flex-col gap-6">
           <Card className="overflow-hidden p-0">
             <CardContent className="grid p-0 md:grid-cols-2">
-              <div className="p-6 md:p-8">
+              <div className="p-6 md:p-8 md:min-h-[420px] flex flex-col justify-center">
                 {isProd ? <OTPSignIn /> : <PasswordSignIn />}
               </div>
               <div className="hidden bg-muted md:flex items-center justify-center overflow-clip min-h-[320px]">
