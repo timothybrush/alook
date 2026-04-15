@@ -21,7 +21,7 @@ import { SiGithub, SiGoogle } from "@icons-pack/react-simple-icons"
 import { GradientBackground } from "@/components/gradient-background"
 import { TypewriterVisual } from "@/components/typewriter-visual"
 
-const isProd = process.env.NEXTJS_ENV === "production"
+const isProd = process.env.NEXT_PUBLIC_AUTH_MODE === "otp"
 
 function OTPSignIn() {
   const [email, setEmail] = useState("")
