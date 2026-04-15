@@ -1,170 +1,20 @@
 "use client";
 
-import { useRef, useCallback, useState, useEffect } from "react";
+import { useRef } from "react";
 import Image from "next/image";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SplitText } from "gsap/SplitText";
+import { TypewriterVisual } from "@/components/typewriter-visual";
 
 gsap.registerPlugin(ScrollTrigger, SplitText);
 
-// Key layout: 3 rows of oval keys (front-facing view)
-const KEY_ROWS = [9, 7, 9];
-
-// Mock emails from Jarvis
-const EMAILS = [
-  {
-    from: "jarvis@alook.ai",
-    to: "you@company.com",
-    subject: "Re: Deploy the hotfix to staging",
-    body: "Done. Pulled feat/fix-session-token, all 47 tests passing. Deployed to staging \u2014 verified the login flow manually. It\u2019s live now.",
-  },
-  {
-    from: "jarvis@alook.ai",
-    to: "you@company.com",
-    subject: "Re: Check API health",
-    body: "All endpoints responding. p99 latency at 42ms, error rate 0.01%. The alerting threshold is 200ms so we\u2019re well within range.",
-  },
-  {
-    from: "jarvis@alook.ai",
-    to: "you@company.com",
-    subject: "Re: Summarize today\u2019s PRs",
-    body: "3 PRs merged: auth token rotation (#412), rate limiter fix (#415), dashboard chart update (#418). One open review from Sarah on #420.",
-  },
-  {
-    from: "jarvis@alook.ai",
-    to: "design@company.com",
-    subject: "Re: Update the landing page copy",
-    body: "Replaced the hero tagline and updated the feature descriptions. Pushed to feat/landing-copy. Preview link is live \u2014 check staging.",
-  },
-  {
-    from: "jarvis@alook.ai",
-    to: "you@company.com",
-    subject: "Re: Run the test suite",
-    body: "Full suite passed: 847 tests, 0 failures. Coverage at 84.2%, up from 83.1% last run. No flaky tests detected this time.",
-  },
-];
-
 export function HeroSection() {
   const sectionRef = useRef<HTMLDivElement>(null);
-  const visualRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const sublineRef = useRef<HTMLParagraphElement>(null);
   const ctaRef = useRef<HTMLDivElement>(null);
-  const paperTlRef = useRef<gsap.core.Timeline | null>(null);
-  const isAnimatingRef = useRef(false);
-  const [emailIndex, setEmailIndex] = useState(0);
-
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLElement>) => {
-      const el = visualRef.current;
-      if (!el) return;
-      const scene = el.querySelector<HTMLElement>(".typewriter-scene");
-      if (!scene) return;
-      const rect = el.getBoundingClientRect();
-      const nx = (e.clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
-      const ny = (e.clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
-      scene.style.transition = "transform 0.12s ease-out";
-      scene.style.transform = `rotateY(${-20 + nx * 15}deg) rotateX(${10 + ny * -10}deg)`;
-    },
-    []
-  );
-
-  const handleMouseLeave = useCallback(() => {
-    const el = visualRef.current;
-    if (!el) return;
-    const scene = el.querySelector<HTMLElement>(".typewriter-scene");
-    if (!scene) return;
-    scene.style.transition = "transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1)";
-    scene.style.transform = "";
-  }, []);
-
-  // Play the paper feed animation — paper slides up, text types in
-  const playPaperFeed = useCallback(() => {
-    if (paperTlRef.current) {
-      paperTlRef.current.kill();
-    }
-
-    const bodySplit = SplitText.create(".tw-email-body", { type: "words" });
-
-    // Measure paper height, then push it down behind the roller
-    const paper = document.querySelector<HTMLElement>(".tw-paper");
-    const paperH = paper ? paper.offsetHeight : 300;
-    gsap.set(".tw-paper", { y: paperH, opacity: 1 });
-    gsap.set(".tw-email-line", { opacity: 0 });
-    gsap.set(bodySplit.words, { opacity: 0 });
-    const tl = gsap.timeline({
-      onComplete: () => { isAnimatingRef.current = false; },
-    });
-
-    // Paper slides up + text types in simultaneously
-    tl.to(".tw-paper", {
-      y: 0,
-      duration: 3,
-      ease: "power1.out",
-    })
-    // Headers type line by line (parallel with paper)
-    .to(".tw-email-line", {
-      opacity: 1,
-      duration: 0.15,
-      stagger: 0.3,
-      ease: "none",
-    }, "<+=0.3")
-    // Body words type in (parallel with paper)
-    .to(bodySplit.words, {
-      opacity: 1,
-      duration: 0.01,
-      stagger: 0.06,
-      ease: "none",
-    }, "<+=0.5");
-
-    paperTlRef.current = tl;
-  }, []);
-
-  const handleReturnKey = useCallback(() => {
-    if (isAnimatingRef.current) return;
-    isAnimatingRef.current = true;
-
-    // Kill any running paper timeline
-    if (paperTlRef.current) {
-      paperTlRef.current.kill();
-    }
-
-    // Retract paper — slide back down behind roller
-    const paper = document.querySelector<HTMLElement>(".tw-paper");
-    const paperH = paper ? paper.offsetHeight : 300;
-    gsap.to(".tw-paper", {
-      y: paperH,
-      duration: 0.4,
-      ease: "power2.in",
-      onComplete: () => {
-        // Cycle to next email — use functional setState
-        setEmailIndex((prev) => {
-          const next = (prev + 1) % EMAILS.length;
-          // Wait a tick for React to render the new email content, then animate
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              playPaperFeed();
-            });
-          });
-          return next;
-        });
-      },
-    });
-  }, [playPaperFeed]);
-
-  // Listen for keyboard Enter to trigger the same effect
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault(); // prevent also activating a focused button
-        handleReturnKey();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleReturnKey]);
 
   useGSAP(
     () => {
@@ -178,16 +28,6 @@ export function HeroSection() {
       const sloganSplit = SplitText.create(headingRef.current, {
         type: "words, chars",
       });
-      const bodySplit = SplitText.create(".tw-email-body", {
-        type: "words",
-      });
-
-      // Measure paper height, push it down behind roller, hide text
-      const paper = document.querySelector<HTMLElement>(".tw-paper");
-      const paperH = paper ? paper.offsetHeight : 300;
-      gsap.set(".tw-paper", { y: paperH, opacity: 1 });
-      gsap.set(".tw-email-line", { opacity: 0 });
-      gsap.set(bodySplit.words, { opacity: 0 });
 
       const entranceTl = gsap.timeline({ delay: 0.3 });
 
@@ -204,39 +44,16 @@ export function HeroSection() {
           0.2
         )
         .from(sublineRef.current, { opacity: 0, duration: 0.03, ease: "none" }, "-=0.1")
-        // Paper slides up from roller
-        .to(".tw-paper", {
-          y: 0,
-          duration: 3,
-          ease: "power1.out",
-        }, "+=0.3")
-        // Headers type in (parallel with paper slide)
-        .to(".tw-email-line", {
-          opacity: 1,
-          duration: 0.15,
-          stagger: 0.3,
-          ease: "none",
-        }, "<+=0.3")
-        // Body words type in (parallel with paper slide)
-        .to(bodySplit.words, {
-          opacity: 1,
-          duration: 0.01,
-          stagger: 0.06,
-          ease: "none",
-        }, "<+=0.5")
         .from(
           ".hero-specs",
           { y: 15, opacity: 0, duration: 0.5, ease: "power2.out" },
-          "-=0.2"
+          "+=3.5"
         )
         .from(
           ctaRef.current,
           { y: 15, opacity: 0, duration: 0.4, ease: "power2.out" },
           "-=0.2"
         );
-
-      // Store the paper part of the timeline
-      paperTlRef.current = entranceTl;
 
       // Scroll exit
       const exitTl = gsap.timeline({
@@ -266,8 +83,6 @@ export function HeroSection() {
     { scope: sectionRef }
   );
 
-  const email = EMAILS[emailIndex];
-
   return (
     <section
       ref={sectionRef}
@@ -286,7 +101,7 @@ export function HeroSection() {
 
       <div className="hero-content relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center px-6">
         {/* Brand */}
-        <div className="hero-brand mb-6 flex items-center gap-3">
+        <div className="hero-brand mb-6 flex items-center gap-1.5">
           <Image src="/alook.svg" alt="Alook" width={28} height={28} />
           <span
             className="text-xl tracking-tight"
@@ -299,7 +114,7 @@ export function HeroSection() {
             Alook
           </span>
           <span
-            className="ml-2 text-xs tracking-widest uppercase"
+            className="ml-4 text-xs tracking-widest uppercase"
             style={{
               fontFamily: "var(--font-mono)",
               color: "var(--landing-text-muted)",
@@ -309,17 +124,9 @@ export function HeroSection() {
           </span>
         </div>
 
-        {/* Front-Facing Typewriter */}
-        <div
-          ref={visualRef}
-          className="typewriter-visual relative w-full"
-          style={{ height: 570 }}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-        >
-          <div className="typewriter-blob" />
-
-          {/* Slogan */}
+        {/* Typewriter + Slogan wrapper */}
+        <div className="relative w-full" style={{ height: 570 }}>
+          {/* Slogan — positioned at top of typewriter area */}
           <div className="absolute top-0 left-0 right-0 z-10 flex flex-col items-center pt-2">
             <h1
               ref={headingRef}
@@ -347,101 +154,12 @@ export function HeroSection() {
             </p>
           </div>
 
-          <div className="typewriter-scene">
-            <div className="tw-machine">
-              {/* 3D Body */}
-              <div className="tw-body">
-                {/* 3D faces */}
-                <div className="tw-body-back" />
-                <div className="tw-body-left" />
-                <div className="tw-body-right" />
-                <div className="tw-body-top" />
-                <div className="tw-body-bottom" />
-
-                {/* Front face */}
-                <div className="tw-body-front">
-                  {/* Paper track — clips paper as it feeds out */}
-                  <div className="tw-paper-track">
-                  <div className="tw-paper" key={emailIndex}>
-                    <div
-                      className="tw-email-headers"
-                      style={{
-                        fontFamily: "var(--font-crt)",
-                        fontSize: "15px",
-                        color: "var(--landing-text-muted)",
-                        lineHeight: 1.7,
-                        borderBottom: "1px solid oklch(0.15 0.01 55 / 10%)",
-                        paddingBottom: "10px",
-                        marginBottom: "12px",
-                      }}
-                    >
-                      <div className="tw-email-line">
-                        <span style={{ color: "var(--landing-text)" }}>From:</span>{" "}
-                        {email.from}
-                      </div>
-                      <div className="tw-email-line">
-                        <span style={{ color: "var(--landing-text)" }}>To:</span>{" "}
-                        {email.to}
-                      </div>
-                      <div className="tw-email-line">
-                        <span style={{ color: "var(--landing-text)" }}>Subject:</span>{" "}
-                        {email.subject}
-                      </div>
-                    </div>
-
-                    <div
-                      className="tw-email-body"
-                      style={{
-                        fontFamily: "var(--font-crt)",
-                        color: "var(--landing-text)",
-                        fontSize: "17px",
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      {email.body}
-                    </div>
-                  </div>
-                  </div>{/* close tw-paper-track */}
-
-                  {/* Roller with knobs */}
-                  <div className="tw-roller-assembly">
-                    <div className="tw-knob tw-knob-left" />
-                    <div className="tw-roller" />
-                    <div className="tw-knob tw-knob-right" />
-                  </div>
-
-                  {/* Type-bar fan */}
-                  <div className="tw-typebar-fan" />
-
-                  {/* Key rows + return key */}
-                  <div className="tw-keys-layer">
-                    {KEY_ROWS.map((count, ri) => (
-                      <div key={ri} className="tw-key-row">
-                        {Array.from({ length: count }).map((_, ki) => (
-                          <div key={ki} className="tw-key" />
-                        ))}
-                        {ri === 1 && (
-                          <button
-                            className="tw-key tw-return-key"
-                            onClick={handleReturnKey}
-                            aria-label="Return — load next email"
-                          >
-                            <span className="tw-return-label">↵</span>
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Bars */}
-                  <div className="tw-bars">
-                    <div className="tw-bar tw-bar-long" />
-                    <div className="tw-bar tw-bar-short" />
-                  </div>
-                </div>{/* close tw-body-front */}
-              </div>
-            </div>
-          </div>
+          {/* Full Typewriter */}
+          <TypewriterVisual
+            interactive
+            entranceDelay={1.2}
+            className="!absolute inset-0"
+          />
         </div>
 
         {/* Specs */}

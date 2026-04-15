@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/field"
 import { SiGithub, SiGoogle } from "@icons-pack/react-simple-icons"
 import { GradientBackground } from "@/components/gradient-background"
+import { TypewriterVisual } from "@/components/typewriter-visual"
 
 const isProd = process.env.NEXTJS_ENV === "production"
 
@@ -277,12 +278,8 @@ export default function SignInPage() {
               <div className="p-6 md:p-8">
                 {isProd ? <OTPSignIn /> : <PasswordSignIn />}
               </div>
-              <div className="relative hidden bg-muted md:block">
-                <img
-                  src="/placeholder.svg"
-                  alt="Alook"
-                  className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
-                />
+              <div className="relative hidden bg-muted md:block overflow-hidden">
+                <TypewriterVisual className="h-full scale-[0.6] origin-center" />
               </div>
             </CardContent>
           </Card>

@@ -14,6 +14,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { GradientBackground } from "@/components/gradient-background"
+import { TypewriterVisual } from "@/components/typewriter-visual"
 
 const isProd = process.env.NEXTJS_ENV === "production"
 
@@ -92,12 +93,8 @@ function SignUpForm() {
                   </FieldDescription>
                 </FieldGroup>
               </form>
-              <div className="relative hidden bg-muted md:block">
-                <img
-                  src="/placeholder.svg"
-                  alt="Alook"
-                  className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.2] dark:grayscale"
-                />
+              <div className="relative hidden bg-muted md:block overflow-hidden">
+                <TypewriterVisual className="h-full scale-[0.6] origin-center" />
               </div>
             </CardContent>
           </Card>
