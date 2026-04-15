@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { signIn, authClient } from "@/lib/auth-client"
+import { signIn, signUp, authClient } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/input-otp"
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -58,7 +57,7 @@ function OTPSignIn() {
     setError("")
     setLoading(true)
     try {
-      const { error } = await authClient.emailOtp.verifyEmail({
+      const { error } = await authClient.signIn.emailOtp({
         email,
         otp: value,
       })
@@ -184,17 +183,23 @@ function PasswordSignIn() {
     e.preventDefault()
     setError("")
     setLoading(true)
-    const { error } = await signIn.email(
+    const { error: signInErr } = await signIn.email(
       { email, password },
-      { onError: (ctx) => setError(ctx.error.message) },
+      { onError: () => {} },
     )
-    if (error) {
-      setError(error.message ?? "")
-    } else {
-      window.location.href = "/workspaces?auto"
-      return
+    if (signInErr) {
+      // Sign-in failed — try auto sign-up
+      const { error: signUpErr } = await signUp.email(
+        { name: email.split("@")[0], email, password },
+        { onError: () => {} },
+      )
+      if (signUpErr) {
+        setError(signInErr.message ?? "Invalid email or password")
+        setLoading(false)
+        return
+      }
     }
-    setLoading(false)
+    window.location.href = "/workspaces?auto"
   }
 
   return (
@@ -258,10 +263,6 @@ function PasswordSignIn() {
             Google
           </Button>
         </Field>
-        <FieldDescription className="text-center">
-          Don&apos;t have an account?{" "}
-          <a href="/sign-up">Sign up</a>
-        </FieldDescription>
       </FieldGroup>
     </form>
   )
