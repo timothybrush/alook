@@ -6,6 +6,8 @@ import { withWorkspaceMember } from "@/lib/middleware/workspace";
 import { writeJSON, writeError } from "@/lib/middleware/helpers";
 import { emailToResponse } from "@/lib/api/responses";
 
+const VALID_STATUSES = ["unread", "read", "archived"];
+
 export const GET = withAuth(async (req: NextRequest, ctx) => {
   const ws = await withWorkspaceMember(req, ctx);
   if (ws instanceof Response) return ws;
@@ -19,16 +21,21 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
   const agent = await queries.agent.getAgent(db, agentId, ws.workspaceId);
   if (!agent) return writeError("agent not found in workspace", 404);
 
+  const status = req.nextUrl.searchParams.get("status") ?? undefined;
+  if (status && !VALID_STATUSES.includes(status)) {
+    return writeError("invalid status", 400);
+  }
+
   const folder = req.nextUrl.searchParams.get("folder");
   const agentEmail = agent.emailHandle ? `${agent.emailHandle}@alook.ai` : "";
 
   let emailList;
   if (folder === "inbox" && agentEmail) {
-    emailList = await queries.email.getInboxEmails(db, agentId, agentEmail, ws.workspaceId);
+    emailList = await queries.email.getInboxEmails(db, agentId, agentEmail, ws.workspaceId, status);
   } else if (folder === "sent" && agentEmail) {
-    emailList = await queries.email.getSentEmails(db, agentId, agentEmail, ws.workspaceId);
+    emailList = await queries.email.getSentEmails(db, agentId, agentEmail, ws.workspaceId, status);
   } else {
-    emailList = await queries.email.getEmailsByAgent(db, agentId, ws.workspaceId);
+    emailList = await queries.email.getEmailsByAgent(db, agentId, ws.workspaceId, status);
   }
 
   return writeJSON(emailList.map(emailToResponse));

@@ -48,7 +48,6 @@ vi.mock("./agent/index.js", () => ({
 
 vi.mock("../lib/config.js", () => ({
   loadCLIConfigForProfile: vi.fn(() => ({
-    token: "",
     server_url: null,
     watched_workspaces: [{ id: "ws1", name: "Test WS", token: "al_test_token" }],
   })),
@@ -365,7 +364,6 @@ describe("daemon with multi-workspace config", () => {
 
     // Configure two workspaces
     vi.mocked(loadCLIConfigForProfile).mockReturnValue({
-      token: "",
       server_url: "",
       watched_workspaces: [
         { id: "ws1", name: "Personal", token: "al_tok_ws1" },
@@ -516,7 +514,6 @@ describe("daemon shutdown", () => {
   it("deregisters each workspace with correct token on shutdown", async () => {
     // Configure two workspaces
     vi.mocked(loadCLIConfigForProfile).mockReturnValue({
-      token: "",
       server_url: "",
       watched_workspaces: [
         { id: "ws1", name: "Personal", token: "al_tok_ws1" },

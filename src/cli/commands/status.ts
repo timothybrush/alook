@@ -9,7 +9,8 @@ export function statusCommand(): Command {
       const profile: string | undefined = command.parent?.opts().profile;
       const cfg = loadCLIConfigForProfile(profile);
 
-      if (!cfg.token) {
+      const ws = cfg.watched_workspaces?.[0];
+      if (!ws?.token) {
         console.log("Not registered");
         console.log(
           `Run '${cmdPrefix()} register --token <token>' to register.`,
@@ -19,10 +20,7 @@ export function statusCommand(): Command {
 
       console.log("Status: Registered");
       console.log(`Server: ${cfg.server_url}`);
-      if (cfg.watched_workspaces.length > 0) {
-        const ws = cfg.watched_workspaces[0];
-        console.log(`Workspace: ${ws.name} (${ws.id})`);
-      }
+      console.log(`Workspace: ${ws.name} (${ws.id})`);
     });
 
   return cmd;

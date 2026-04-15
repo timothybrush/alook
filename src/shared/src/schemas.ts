@@ -46,6 +46,7 @@ export const TaskAgentDataApiSchema = z.object({
   instructions: z.string(),
   name: z.string(),
   runtime_config: z.record(z.string(), z.unknown()).default({}),
+  email_handle: z.string().nullable().optional(),
 });
 export type TaskAgentDataApi = z.infer<typeof TaskAgentDataApiSchema>;
 

@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 const mockGetEmailById = vi.fn();
 const mockDeleteEmail = vi.fn();
+const mockUpdateEmailStatus = vi.fn();
 
 vi.mock("@opennextjs/cloudflare", () => ({
   getCloudflareContext: vi.fn(() => ({
@@ -16,6 +17,7 @@ vi.mock("@alook/shared", () => ({
     email: {
       getEmailById: (...args: unknown[]) => mockGetEmailById(...args),
       deleteEmail: (...args: unknown[]) => mockDeleteEmail(...args),
+      updateEmailStatus: (...args: unknown[]) => mockUpdateEmailStatus(...args),
     },
   },
 }));
@@ -40,10 +42,10 @@ vi.mock("@/lib/middleware/helpers", () => {
 });
 
 vi.mock("@/lib/api/responses", () => ({
-  emailToResponse: (e: any) => ({ id: e.id }),
+  emailToResponse: (e: any) => ({ id: e.id, status: e.status }),
 }));
 
-import { GET, DELETE } from "./route";
+import { GET, DELETE, PATCH } from "./route";
 
 describe("GET /api/email/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -89,5 +91,82 @@ describe("DELETE /api/email/[id]", () => {
     const res = await DELETE(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("PATCH /api/email/[id]", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("updates status for valid email in workspace", async () => {
+    mockUpdateEmailStatus.mockResolvedValue({ id: "e1", status: "read" });
+
+    const req = new NextRequest("http://localhost/api/email/e1", {
+      method: "PATCH",
+      body: JSON.stringify({ status: "read" }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: "e1" }) } as any);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ id: "e1", status: "read" });
+    expect(mockUpdateEmailStatus).toHaveBeenCalledWith({}, "e1", "ws1", "read");
+  });
+
+  it("updates status to archived", async () => {
+    mockUpdateEmailStatus.mockResolvedValue({ id: "e1", status: "archived" });
+
+    const req = new NextRequest("http://localhost/api/email/e1", {
+      method: "PATCH",
+      body: JSON.stringify({ status: "archived" }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(200);
+    expect(mockUpdateEmailStatus).toHaveBeenCalledWith({}, "e1", "ws1", "archived");
+  });
+
+  it("returns 404 when email not in workspace", async () => {
+    mockUpdateEmailStatus.mockResolvedValue(null);
+
+    const req = new NextRequest("http://localhost/api/email/e1", {
+      method: "PATCH",
+      body: JSON.stringify({ status: "read" }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 400 for invalid status value", async () => {
+    const req = new NextRequest("http://localhost/api/email/e1", {
+      method: "PATCH",
+      body: JSON.stringify({ status: "deleted" }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid status");
+  });
+
+  it("returns 400 for missing status", async () => {
+    const req = new NextRequest("http://localhost/api/email/e1", {
+      method: "PATCH",
+      body: JSON.stringify({}),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for invalid JSON body", async () => {
+    const req = new NextRequest("http://localhost/api/email/e1", {
+      method: "PATCH",
+      body: "not json",
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: "e1" }) } as any);
+
+    expect(res.status).toBe(400);
   });
 });

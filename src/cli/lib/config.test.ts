@@ -69,7 +69,7 @@ describe("loadCLIConfig", () => {
   });
 
   it("returns parsed JSON when file exists", () => {
-    const cfg = { token: "abc", server_url: "http://example.com" };
+    const cfg = { server_url: "http://example.com", watched_workspaces: [] };
     mockedReadFileSync.mockReturnValue(JSON.stringify(cfg));
     expect(loadCLIConfig()).toEqual(cfg);
   });
@@ -78,9 +78,8 @@ describe("loadCLIConfig", () => {
 describe("loadCLIConfigForProfile", () => {
   it("returns profile config when profile specified", () => {
     const profileCfg = {
-      token: "profile-token",
       server_url: "http://profile.example.com",
-      watched_workspaces: [{ id: "w1", name: "Workspace 1" }],
+      watched_workspaces: [{ id: "w1", name: "Workspace 1", token: "ws-token" }],
     };
     const cfg = { profiles: { staging: profileCfg } };
     mockedReadFileSync.mockReturnValue(JSON.stringify(cfg));
@@ -90,7 +89,6 @@ describe("loadCLIConfigForProfile", () => {
 
   it("uses default_profile when no profile specified", () => {
     const profileCfg = {
-      token: "default-token",
       server_url: "http://default.example.com",
       watched_workspaces: [],
     };
@@ -102,16 +100,14 @@ describe("loadCLIConfigForProfile", () => {
 
   it("falls back to root-level fields when profile not found", () => {
     const cfg = {
-      token: "root-token",
       server_url: "http://root.example.com",
-      watched_workspaces: [{ id: "w2", name: "Root WS" }],
+      watched_workspaces: [{ id: "w2", name: "Root WS", token: "ws-token" }],
     };
     mockedReadFileSync.mockReturnValue(JSON.stringify(cfg));
 
     expect(loadCLIConfigForProfile()).toEqual({
-      token: "root-token",
       server_url: "http://root.example.com",
-      watched_workspaces: [{ id: "w2", name: "Root WS" }],
+      watched_workspaces: [{ id: "w2", name: "Root WS", token: "ws-token" }],
     });
   });
 
@@ -121,7 +117,6 @@ describe("loadCLIConfigForProfile", () => {
     });
 
     expect(loadCLIConfigForProfile()).toEqual({
-      token: "",
       server_url: "",
       watched_workspaces: [],
     });
@@ -130,7 +125,7 @@ describe("loadCLIConfigForProfile", () => {
 
 describe("saveCLIConfig", () => {
   it("writes valid JSON with mode 0600 to ~/.alook in production", () => {
-    const cfg = { token: "abc", server_url: "http://example.com" };
+    const cfg = { server_url: "http://example.com", watched_workspaces: [] };
     saveCLIConfig(cfg);
 
     expect(mockedMkdirSync).toHaveBeenCalledWith(
@@ -148,7 +143,7 @@ describe("saveCLIConfig", () => {
     process.env.ALOOK_SERVER_URL = "http://localhost:3000";
     process.env.ALOOK_PROJECT_ROOT = "/tmp/my-project";
 
-    const cfg = { token: "dev-token", server_url: "http://localhost:3000" };
+    const cfg = { server_url: "http://localhost:3000", watched_workspaces: [] };
     saveCLIConfig(cfg);
 
     expect(mockedMkdirSync).toHaveBeenCalledWith(
@@ -165,11 +160,10 @@ describe("saveCLIConfig", () => {
 
 describe("saveCLIConfigForProfile", () => {
   it("updates specific profile", () => {
-    const existing = { token: "root", profiles: {} };
+    const existing = { profiles: {} };
     mockedReadFileSync.mockReturnValue(JSON.stringify(existing));
 
     const profileCfg = {
-      token: "new-token",
       server_url: "http://new.example.com",
       watched_workspaces: [],
     };
@@ -185,17 +179,15 @@ describe("saveCLIConfigForProfile", () => {
     mockedReadFileSync.mockReturnValue(JSON.stringify({}));
 
     const profileCfg = {
-      token: "root-token",
       server_url: "http://root.example.com",
-      watched_workspaces: [{ id: "w1", name: "WS" }],
+      watched_workspaces: [{ id: "w1", name: "WS", token: "ws-token" }],
     };
     saveCLIConfigForProfile(undefined, profileCfg);
 
     const written = JSON.parse(
       mockedWriteFileSync.mock.calls[0][1] as string,
     );
-    expect(written.token).toBe("root-token");
     expect(written.server_url).toBe("http://root.example.com");
-    expect(written.watched_workspaces).toEqual([{ id: "w1", name: "WS" }]);
+    expect(written.watched_workspaces).toEqual([{ id: "w1", name: "WS", token: "ws-token" }]);
   });
 });

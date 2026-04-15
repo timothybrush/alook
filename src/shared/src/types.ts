@@ -109,6 +109,7 @@ export interface Email {
   forwarded: boolean;
   html_body: string;
   attachments: EmailAttachment[];
+  status: string;
   created_at: string;
 }
 

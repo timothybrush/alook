@@ -41,6 +41,24 @@ export class APIClient {
     return this.request("DELETE", path);
   }
 
+  patchJSON<T>(path: string, body?: unknown): Promise<T> {
+    return this.request("PATCH", path, body);
+  }
+
+  async getText(path: string): Promise<string> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.token}`,
+    };
+    if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
+
+    const res = await fetch(this.baseURL + path, { method: "GET", headers });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.text();
+  }
+
   async healthCheck(): Promise<boolean> {
     try {
       await this.getJSON("/health");

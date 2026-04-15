@@ -282,6 +282,7 @@ export const emails = sqliteTable(
     forwarded: integer("forwarded", { mode: "boolean" }).notNull().default(false),
     htmlBody: text("html_body").notNull().default(""),
     attachments: text("attachments").notNull().default("[]"),
+    status: text("status").notNull().default("unread"),
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (t) => [

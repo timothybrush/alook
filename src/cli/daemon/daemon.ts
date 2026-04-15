@@ -167,7 +167,10 @@ export async function startDaemon(
 
   const pollTimer = setInterval(pollCycle, config.pollInterval);
 
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log.info("Shutting down...");
     clearInterval(pollTimer);
     const shutdownMs = Number(process.env.ALOOK_SHUTDOWN_TIMEOUT_MS) || 5000;

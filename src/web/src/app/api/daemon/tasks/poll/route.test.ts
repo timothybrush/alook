@@ -135,6 +135,7 @@ describe("POST /api/daemon/tasks/poll", () => {
       instructions: "be helpful",
       name: "Bot",
       runtime_config: { model: "gpt-4" },
+      email_handle: null,
     });
   });
 

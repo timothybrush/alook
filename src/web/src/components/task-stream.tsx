@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { TaskMessage } from "@alook/shared";
@@ -196,6 +196,75 @@ function ThinkingBlock({ item }: { item: ThinkingItem }) {
   );
 }
 
+/* ── AnimatedNumber (slot-style slide) ── */
+
+function AnimatedNumber({ value }: { value: number }) {
+  const prevRef = useRef(value);
+  const [display, setDisplay] = useState({ current: value, previous: null as number | null });
+  const [phase, setPhase] = useState<"idle" | "animating">("idle");
+
+  useEffect(() => {
+    if (value === prevRef.current) return;
+    const prev = prevRef.current;
+    prevRef.current = value;
+
+    // Start animation: show both old (will slide up) and new (will slide in from below)
+    setDisplay({ current: value, previous: prev });
+    // Force a frame so the initial position renders before transition kicks in
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setPhase("animating");
+      });
+    });
+
+    const timer = setTimeout(() => {
+      setPhase("idle");
+      setDisplay((d) => ({ ...d, previous: null }));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [value]);
+
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        position: "relative",
+        overflow: "hidden",
+        height: "1.2em",
+        lineHeight: "1.2em",
+        verticalAlign: "bottom",
+      }}
+    >
+      {/* Old number — starts at 0, slides to -100% */}
+      {display.previous !== null && (
+        <span
+          style={{
+            display: "block",
+            position: "absolute",
+            inset: "0",
+            transition: phase === "animating" ? "transform 250ms ease-out, opacity 250ms ease-out" : "none",
+            transform: phase === "animating" ? "translateY(-100%)" : "translateY(0)",
+            opacity: phase === "animating" ? 0 : 1,
+          }}
+        >
+          {display.previous}
+        </span>
+      )}
+      {/* New number — starts at +100%, slides to 0 */}
+      <span
+        style={{
+          display: "block",
+          transition: phase === "animating" ? "transform 250ms ease-out, opacity 250ms ease-out" : "none",
+          transform: display.previous !== null && phase !== "animating" ? "translateY(100%)" : "translateY(0)",
+          opacity: display.previous !== null && phase !== "animating" ? 0 : 1,
+        }}
+      >
+        {display.current}
+      </span>
+    </span>
+  );
+}
+
 /* ── TaskStream ── */
 
 export function TaskStream({
@@ -238,7 +307,7 @@ export function TaskStream({
 
       {/* Tool stream zone — foldable, height-limited, scrollable */}
       {toolItems.length > 0 && (
-        <details open={isRunning || undefined} className="group/stream">
+        <details className="group/stream">
           <summary
             className={cn(
               "flex items-center gap-2 py-1 cursor-pointer select-none",
@@ -248,7 +317,10 @@ export function TaskStream({
             )}
           >
             <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-open/stream:rotate-90" />
-            <span>{toolItems.length} step{toolItems.length !== 1 ? "s" : ""}</span>
+            {isRunning && (
+              <span className="size-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+            )}
+            <span><AnimatedNumber value={toolItems.length} /> {toolItems.length === 1 ? "step" : "steps"}</span>
           </summary>
           <div
             ref={toolScrollRef}

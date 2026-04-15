@@ -46,6 +46,58 @@ describe("PollResponseSchema validation", () => {
     const raw = { tasks: [{ id: "t1" }] }; // missing required fields
     expect(() => PollResponseSchema.parse(raw)).toThrow();
   });
+
+  it("parses task with email_handle in agent data", () => {
+    const raw = {
+      tasks: [{
+        id: "t1",
+        agent_id: "a1",
+        runtime_id: "r1",
+        conversation_id: "c1",
+        workspace_id: "w1",
+        prompt: "do it",
+        status: "dispatched",
+        priority: 1,
+        dispatched_at: "2024-01-01T00:00:00Z",
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2024-01-01T00:00:00Z",
+        type: "user_dm_message",
+        agent: { instructions: "help", name: "bot", runtime_config: {}, email_handle: "myagent" },
+      }],
+    };
+
+    const parsed = PollResponseSchema.parse(raw);
+    expect(parsed.tasks[0].agent?.email_handle).toBe("myagent");
+  });
+
+  it("parses task with null email_handle", () => {
+    const raw = {
+      tasks: [{
+        id: "t1",
+        agent_id: "a1",
+        runtime_id: "r1",
+        conversation_id: "c1",
+        workspace_id: "w1",
+        prompt: "do it",
+        status: "dispatched",
+        priority: 1,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2024-01-01T00:00:00Z",
+        type: "user_dm_message",
+        agent: { instructions: "help", name: "bot", runtime_config: {}, email_handle: null },
+      }],
+    };
+
+    const parsed = PollResponseSchema.parse(raw);
+    expect(parsed.tasks[0].agent?.email_handle).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -311,5 +363,26 @@ describe("fromApiTask", () => {
     const task = fromApiTask(api);
     expect(task.agent?.id).toBeUndefined();
     expect(task.agent?.name).toBe("bot");
+  });
+
+  it("maps email_handle to emailHandle", () => {
+    const api = validApiTask();
+    api.agent = { instructions: "help", name: "bot", runtime_config: {}, email_handle: "myagent" };
+    const task = fromApiTask(api);
+    expect(task.agent?.emailHandle).toBe("myagent");
+  });
+
+  it("maps null email_handle to undefined", () => {
+    const api = validApiTask();
+    api.agent = { instructions: "help", name: "bot", runtime_config: {}, email_handle: null };
+    const task = fromApiTask(api);
+    expect(task.agent?.emailHandle).toBeUndefined();
+  });
+
+  it("maps missing email_handle to undefined", () => {
+    const api = validApiTask();
+    // No email_handle field at all
+    const task = fromApiTask(api);
+    expect(task.agent?.emailHandle).toBeUndefined();
   });
 });

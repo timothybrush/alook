@@ -300,7 +300,7 @@ export default function RuntimesPage() {
               return (
                 <Card key={daemonId} size="sm" className="group">
                   <CardHeader>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <Monitor className="size-4 text-muted-foreground shrink-0" />
                       <CardTitle className="truncate">
                         {displayName}
@@ -336,29 +336,27 @@ export default function RuntimesPage() {
                     </CardAction>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2">
+                    <div className="space-y-2.5">
                       <p className="text-xs text-muted-foreground tabular-nums">
                         {machine.lastSeenAt ? new Date(
                           machine.lastSeenAt
                         ).toLocaleString() : "Never seen"}
                       </p>
-                      {machine.runtimes.map((runtime) => (
-                        <div
-                          key={runtime.id}
-                          className="flex items-center gap-2"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium truncate">
-                              {runtime.provider}
-                              {runtime.metadata?.version ? (
-                                <span className="ml-1.5 font-normal text-muted-foreground">
-                                  {String(runtime.metadata.version)}
-                                </span>
-                              ) : null}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                      <div className="flex flex-wrap gap-1.5">
+                        {machine.runtimes.map((runtime) => (
+                          <Badge
+                            key={runtime.id}
+                            variant="secondary"
+                          >
+                            {runtime.provider}
+                            {runtime.metadata?.version ? (
+                              <span className="text-muted-foreground font-normal">
+                                {String(runtime.metadata.version)}
+                              </span>
+                            ) : null}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

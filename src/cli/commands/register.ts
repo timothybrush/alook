@@ -15,6 +15,10 @@ interface Workspace {
   name: string;
 }
 
+interface AgentListItem {
+  id: string;
+}
+
 interface ActivateResponse {
   daemon_id: string;
   runtimes: { id: string; provider: string }[];
@@ -141,18 +145,27 @@ export function registerCommand(): Command {
         process.exit(1);
       }
 
+      // Fetch agents for this workspace
+      const wsClient = new APIClient(serverUrl, token, ws.id);
+      let agentIds: string[] = [];
+      try {
+        const agents = await wsClient.getJSON<AgentListItem[]>(`/api/agents?workspace_id=${ws.id}`);
+        agentIds = agents.map((a) => a.id);
+      } catch {
+        // Non-fatal — agent_ids will be empty
+      }
+
       // Load existing config to preserve other workspaces
       const existing = loadCLIConfigForProfile(profile);
       const watched = existing.watched_workspaces || [];
       const idx = watched.findIndex((w) => w.id === ws.id);
       if (idx >= 0) {
-        watched[idx] = { id: ws.id, name: ws.name, token };
+        watched[idx] = { id: ws.id, name: ws.name, token, agent_ids: agentIds };
       } else {
-        watched.push({ id: ws.id, name: ws.name, token });
+        watched.push({ id: ws.id, name: ws.name, token, agent_ids: agentIds });
       }
 
       saveCLIConfigForProfile(profile, {
-        token: "",
         server_url: serverUrl,
         watched_workspaces: watched,
       });

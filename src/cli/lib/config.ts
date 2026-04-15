@@ -7,16 +7,15 @@ interface WatchedWorkspace {
   id: string;
   name: string;
   token: string;
+  agent_ids?: string[];
 }
 
 interface ProfileConfig {
-  token: string;
   server_url: string;
   watched_workspaces: WatchedWorkspace[];
 }
 
 interface CLIConfig {
-  token?: string;
   server_url?: string;
   watched_workspaces?: WatchedWorkspace[];
   default_profile?: string;
@@ -51,7 +50,6 @@ export function loadCLIConfigForProfile(profile?: string): ProfileConfig {
     return cfg.profiles[profileName];
   }
   return {
-    token: cfg.token || "",
     server_url: cfg.server_url || "",
     watched_workspaces: cfg.watched_workspaces || [],
   };
@@ -71,7 +69,6 @@ export function saveCLIConfigForProfile(
     if (!cfg.profiles) cfg.profiles = {};
     cfg.profiles[profile] = profileConfig;
   } else {
-    cfg.token = profileConfig.token;
     cfg.server_url = profileConfig.server_url;
     cfg.watched_workspaces = profileConfig.watched_workspaces;
   }

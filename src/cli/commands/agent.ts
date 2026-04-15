@@ -12,12 +12,16 @@ interface Agent {
   created_at: string;
 }
 
-function resolveClientOpts(command: Command) {
+function resolveClientOpts(command: Command, workspaceOpt?: string) {
   const parentOpts = command.parent?.parent?.opts() || {};
   const profile: string | undefined = parentOpts.profile;
   const cfg = loadCLIConfigForProfile(profile);
   const serverUrl = parentOpts.server || cfg.server_url;
-  const token = cfg.token;
+
+  const ws = workspaceOpt
+    ? cfg.watched_workspaces?.find((w) => w.id === workspaceOpt)
+    : cfg.watched_workspaces?.[0];
+  const token = ws?.token;
 
   if (!token) {
     console.error(
@@ -26,7 +30,7 @@ function resolveClientOpts(command: Command) {
     process.exit(1);
   }
 
-  return { serverUrl, token, cfg, profile };
+  return { serverUrl, token, cfg, profile, workspaceId: ws?.id };
 }
 
 export function agentCommand(): Command {
@@ -38,9 +42,7 @@ export function agentCommand(): Command {
     .option("--workspace <id>", "Workspace ID")
     .option("--json", "Output as JSON")
     .action(async (opts, command) => {
-      const { serverUrl, token, cfg } = resolveClientOpts(command);
-      const workspaceId =
-        opts.workspace || cfg.watched_workspaces?.[0]?.id;
+      const { serverUrl, token, workspaceId } = resolveClientOpts(command, opts.workspace);
       const client = new APIClient(serverUrl, token, workspaceId);
 
       try {
@@ -80,9 +82,7 @@ export function agentCommand(): Command {
     .requiredOption("--runtime <runtime>", "Agent runtime")
     .option("--workspace <id>", "Workspace ID")
     .action(async (opts, command) => {
-      const { serverUrl, token, cfg } = resolveClientOpts(command);
-      const workspaceId =
-        opts.workspace || cfg.watched_workspaces?.[0]?.id;
+      const { serverUrl, token, workspaceId } = resolveClientOpts(command, opts.workspace);
       const client = new APIClient(serverUrl, token, workspaceId);
 
       if (!opts.name) {

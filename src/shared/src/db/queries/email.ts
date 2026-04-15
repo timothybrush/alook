@@ -15,24 +15,35 @@ export async function getEmailById(db: Database, id: string, workspaceId: string
   return rows[0] ?? null;
 }
 
-export async function getEmailsByAgent(db: Database, agentId: string, workspaceId: string) {
+export async function getEmailsByAgent(db: Database, agentId: string, workspaceId: string, status?: string) {
+  const conditions = [eq(emails.agentId, agentId), eq(emails.workspaceId, workspaceId)];
+  if (status) conditions.push(eq(emails.status, status));
   return db
     .select()
     .from(emails)
-    .where(and(eq(emails.agentId, agentId), eq(emails.workspaceId, workspaceId)))
+    .where(and(...conditions))
     .orderBy(desc(emails.createdAt));
 }
 
-export async function getInboxEmails(db: Database, agentId: string, agentEmail: string, workspaceId: string) {
+export async function getInboxEmails(db: Database, agentId: string, agentEmail: string, workspaceId: string, status?: string) {
+  const conditions = [eq(emails.agentId, agentId), eq(emails.toEmail, agentEmail), eq(emails.workspaceId, workspaceId)];
+  if (status) conditions.push(eq(emails.status, status));
   return db.select().from(emails)
-    .where(and(eq(emails.agentId, agentId), eq(emails.toEmail, agentEmail), eq(emails.workspaceId, workspaceId)))
+    .where(and(...conditions))
     .orderBy(desc(emails.createdAt));
 }
 
-export async function getSentEmails(db: Database, agentId: string, agentEmail: string, workspaceId: string) {
+export async function getSentEmails(db: Database, agentId: string, agentEmail: string, workspaceId: string, status?: string) {
+  const conditions = [eq(emails.agentId, agentId), eq(emails.fromEmail, agentEmail), eq(emails.workspaceId, workspaceId)];
+  if (status) conditions.push(eq(emails.status, status));
   return db.select().from(emails)
-    .where(and(eq(emails.agentId, agentId), eq(emails.fromEmail, agentEmail), eq(emails.workspaceId, workspaceId)))
+    .where(and(...conditions))
     .orderBy(desc(emails.createdAt));
+}
+
+export async function updateEmailStatus(db: Database, id: string, workspaceId: string, status: string) {
+  const rows = await db.update(emails).set({ status }).where(and(eq(emails.id, id), eq(emails.workspaceId, workspaceId))).returning();
+  return rows[0] ?? null;
 }
 
 export async function deleteEmail(db: Database, id: string, workspaceId: string) {

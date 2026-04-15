@@ -5,6 +5,7 @@ import { statusCommand } from "../commands/status.js";
 import { agentCommand } from "../commands/agent.js";
 import { daemonCommand } from "../commands/daemon.js";
 import { configCommand } from "../commands/config.js";
+import { emailCommand } from "../commands/email.js";
 import { versionCommand } from "../commands/version.js";
 
 const program = new Command();
@@ -19,6 +20,7 @@ program.addCommand(registerCommand());
 program.addCommand(statusCommand());
 program.addCommand(agentCommand());
 program.addCommand(daemonCommand());
+program.addCommand(emailCommand());
 program.addCommand(configCommand());
 program.addCommand(versionCommand());
 

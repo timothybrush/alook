@@ -1,0 +1,1 @@
+ALTER TABLE emails ADD COLUMN status TEXT NOT NULL DEFAULT 'unread';

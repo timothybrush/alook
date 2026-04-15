@@ -71,6 +71,20 @@ ${task.agent.instructions}
 `;
   }
 
+  if (task.agent?.emailHandle) {
+    content += `\n## Email Tools
+Run \`alook email pull --agent_id ${task.agentId} --status unread\` to download unread emails to \`/tmp/alook-emails/\`.
+Each email is saved to \`/tmp/alook-emails/<emailId>/\` with:
+- \`metadata.json\` — sender, recipient, subject, date, status
+- \`body.txt\` — plain text body
+- \`body.html\` — HTML body (if available)
+- \`attachments/\` — extracted attachment files (if any)
+
+After processing an email, mark it as read:
+Run \`alook email set --agent_id ${task.agentId} --email_id <EMAIL_ID> --status read\`
+`;
+  }
+
   return content;
 }
 

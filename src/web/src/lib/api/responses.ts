@@ -59,6 +59,7 @@ export function emailToResponse(e: any) {
     forwarded: !!e.forwarded,
     html_body: e.htmlBody ?? "",
     attachments: JSON.parse(e.attachments || "[]"),
+    status: e.status ?? "unread",
     created_at: formatTimestamp(e.createdAt),
   };
 }

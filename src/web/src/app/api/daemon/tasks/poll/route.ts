@@ -66,6 +66,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
             instructions: agent.instructions,
             name: agent.name,
             runtime_config: agent.runtimeConfig || {},
+            email_handle: agent.emailHandle || null,
           }
         : null,
     });

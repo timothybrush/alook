@@ -19,7 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { Streamdown } from "streamdown";
 
-const MESSAGE_LIMIT = 20;
+const MESSAGE_LIMIT = 10;
 
 export default function AgentChatPage() {
   const params = useParams();
@@ -59,7 +59,7 @@ export default function AgentChatPage() {
       try {
         const conv = await getOrCreateAgentConversation(agentId, workspaceId);
         setConversation(conv);
-        const msgs = await listMessages(conv.id, workspaceId);
+        const msgs = await listMessages(conv.id, workspaceId, { limit: MESSAGE_LIMIT });
         setMessages(msgs);
         setHasMore(msgs.length >= MESSAGE_LIMIT);
       } catch {
@@ -71,25 +71,15 @@ export default function AgentChatPage() {
     load();
   }, [agentId, workspaceId]);
 
-  // Scroll to bottom on initial load and when new messages arrive at the bottom
+  // Scroll to bottom on initial load
   useEffect(() => {
     if (!loading && messages.length > 0 && !initialScrollDone.current) {
       initialScrollDone.current = true;
-      // Use instant scroll for initial load
       setTimeout(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
       }, 50);
-      return;
     }
-    // For new messages/task updates, smooth scroll only if near bottom
-    const el = scrollRef.current;
-    if (el) {
-      const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
-      if (isNearBottom) {
-        scrollToBottom();
-      }
-    }
-  }, [messages, taskMessages, loading, scrollToBottom]);
+  }, [loading, messages.length]);
 
   const loadOlderMessages = useCallback(async () => {
     if (!conversation || loadingMoreRef.current || !hasMore) return;
@@ -103,6 +93,7 @@ export default function AgentChatPage() {
 
     try {
       const older = await listMessages(conversation.id, workspaceId, {
+        limit: MESSAGE_LIMIT,
         before: oldest.created_at,
         beforeId: oldest.id,
       });
@@ -111,7 +102,11 @@ export default function AgentChatPage() {
         return;
       }
       setHasMore(older.length >= MESSAGE_LIMIT);
-      setMessages((prev) => [...older, ...prev]);
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const unique = older.filter((m) => !existingIds.has(m.id));
+        return [...unique, ...prev];
+      });
 
       // Restore scroll position so content doesn't jump
       requestAnimationFrame(() => {
@@ -175,6 +170,7 @@ export default function AgentChatPage() {
                 const newMsgs = latest.filter((m) => !existingIds.has(m.id));
                 return [...prev, ...newMsgs];
               });
+              scrollToBottom();
             } catch {
               toast.error("Failed to refresh messages");
             }
@@ -218,6 +214,7 @@ export default function AgentChatPage() {
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
+    scrollToBottom();
 
     try {
       const { message, task } = await sendMessage(conversation.id, content, workspaceId);
