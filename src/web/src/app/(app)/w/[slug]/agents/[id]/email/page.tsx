@@ -158,7 +158,7 @@ export default function AgentEmailPage() {
   return (
     <div className="flex flex-1 min-h-0">
       {/* Column 1: Folder sidebar */}
-      <div className="flex w-[180px] shrink-0 flex-col border-r border-border/40">
+      <div className="flex w-45 shrink-0 flex-col border-r border-border/40">
         <div className="p-2">
           <Button
             size="sm"
@@ -202,7 +202,7 @@ export default function AgentEmailPage() {
       </div>
 
       {/* Column 2: Email list */}
-      <div className={cn("w-[300px] shrink-0 border-r border-border/40", emails.length > 0 && !loading ? "overflow-y-auto" : "overflow-hidden")}>
+      <div className={cn("w-75 shrink-0 border-r border-border/40", emails.length > 0 && !loading ? "overflow-y-auto" : "overflow-hidden")}>
         {loading ? (
           <>
             {Array.from({ length: 3 }).map((_, i) => (
@@ -370,7 +370,7 @@ export default function AgentEmailPage() {
                         className="flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/50 px-2.5 py-1.5 text-xs"
                       >
                         <FileIcon className="size-3 text-muted-foreground shrink-0" />
-                        <span className="truncate max-w-[180px]">{att.filename}</span>
+                        <span className="truncate max-w-45">{att.filename}</span>
                         <span className="text-muted-foreground shrink-0">
                           {att.size < 1024 ? `${att.size} B` : att.size < 1024 * 1024 ? `${(att.size / 1024).toFixed(1)} KB` : `${(att.size / (1024 * 1024)).toFixed(1)} MB`}
                         </span>

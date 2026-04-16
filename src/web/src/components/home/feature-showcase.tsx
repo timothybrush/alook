@@ -85,12 +85,11 @@ const features: Feature[] = [
 
 export function FeatureShowcase() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const trackRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
     () => {
-      if (!trackRef.current || !containerRef.current) return;
+      if (!containerRef.current) return;
 
       const isMobile = window.innerWidth < 1024;
       const panels = gsap.utils.toArray<HTMLElement>(".feature-panel");
@@ -112,94 +111,86 @@ export function FeatureShowcase() {
         return;
       }
 
-      gsap.set(trackRef.current, { width: `${features.length * 100}vw` });
-      const totalWidth =
-        trackRef.current.scrollWidth - containerRef.current.offsetWidth;
+      // Desktop: horizontal slide carousel (like shadcn/Embla)
+      const panelCount = panels.length;
+      const scrollPerPanel = window.innerHeight * 0.6;
+      const totalScroll = scrollPerPanel * panelCount;
 
-      const panelCount = features.length;
-      const snapPoints = Array.from(
-        { length: panelCount },
-        (_, i) => i / (panelCount - 1)
-      );
+      // Position all panels off-screen to the right, except the first
+      panels.forEach((panel, i) => {
+        gsap.set(panel, { xPercent: i * 100 });
+      });
 
       const progressBar = progressRef.current?.parentElement;
-      const scrollTl = gsap.timeline({
-        scrollTrigger: {
-          trigger: containerRef.current,
-          start: "top top",
-          end: () => `+=${totalWidth}`,
-          pin: true,
-          scrub: 1,
-          pinSpacing: true,
-          anticipatePin: 1,
-          snap: {
-            snapTo: snapPoints,
-            duration: { min: 0.25, max: 0.8 },
-            delay: 0.15,
-            ease: "power2.inOut",
-          },
-          onEnter: () => {
-            if (progressBar)
-              gsap.to(progressBar, { opacity: 1, duration: 0.3 });
-          },
-          onLeave: () => {
-            if (progressBar)
-              gsap.to(progressBar, { opacity: 0, duration: 0.3 });
-          },
-          onEnterBack: () => {
-            if (progressBar)
-              gsap.to(progressBar, { opacity: 1, duration: 0.3 });
-          },
-          onLeaveBack: () => {
-            if (progressBar)
-              gsap.to(progressBar, { opacity: 0, duration: 0.3 });
-          },
-          onUpdate: (self) => {
-            if (progressRef.current) {
-              progressRef.current.style.transform = `scaleX(${self.progress})`;
-            }
-          },
+      let currentIndex = 0;
+
+      ScrollTrigger.create({
+        trigger: containerRef.current,
+        start: "top top",
+        end: () => `+=${totalScroll}`,
+        pin: true,
+        pinSpacing: true,
+        anticipatePin: 1,
+        snap: {
+          snapTo: 1 / (panelCount - 1),
+          duration: { min: 0.15, max: 0.4 },
+          delay: 0.05,
+          ease: "power2.inOut",
         },
-      });
+        onEnter: () => {
+          if (progressBar)
+            gsap.to(progressBar, { opacity: 1, duration: 0.3 });
+        },
+        onLeave: () => {
+          if (progressBar)
+            gsap.to(progressBar, { opacity: 0, duration: 0.3 });
+        },
+        onEnterBack: () => {
+          if (progressBar)
+            gsap.to(progressBar, { opacity: 1, duration: 0.3 });
+        },
+        onLeaveBack: () => {
+          if (progressBar)
+            gsap.to(progressBar, { opacity: 0, duration: 0.3 });
+        },
+        onUpdate: (self) => {
+          if (progressRef.current) {
+            progressRef.current.style.transform = `scaleX(${self.progress})`;
+          }
 
-      scrollTl.to(trackRef.current, {
-        x: -totalWidth,
-        ease: "none",
-      });
+          // Determine which panel to show
+          const targetIndex = Math.round(
+            self.progress * (panelCount - 1)
+          );
 
-      // Animate panels
-      panels.forEach((panel) => {
-        const crt = panel.querySelector(".panel-crt");
-        const text = panel.querySelector(".panel-text");
+          if (targetIndex !== currentIndex) {
+            const leaving = panels[currentIndex];
+            const entering = panels[targetIndex];
+            const direction = targetIndex > currentIndex ? 1 : -1;
 
-        if (text) {
-          gsap.from(text, {
-            x: -30,
-            opacity: 0,
-            duration: 0.6,
-            scrollTrigger: {
-              trigger: panel,
-              containerAnimation: scrollTl,
-              start: "left 75%",
-              end: "left 40%",
-              scrub: true,
-            },
-          });
-        }
-        if (crt) {
-          gsap.from(crt, {
-            x: 30,
-            opacity: 0,
-            duration: 0.6,
-            scrollTrigger: {
-              trigger: panel,
-              containerAnimation: scrollTl,
-              start: "left 70%",
-              end: "left 35%",
-              scrub: true,
-            },
-          });
-        }
+            // Slide leaving panel out
+            gsap.to(leaving, {
+              xPercent: -direction * 100,
+              duration: 0.4,
+              ease: "power2.inOut",
+              overwrite: true,
+            });
+
+            // Slide entering panel in from the opposite side
+            gsap.fromTo(
+              entering,
+              { xPercent: direction * 100 },
+              {
+                xPercent: 0,
+                duration: 0.4,
+                ease: "power2.inOut",
+                overwrite: true,
+              }
+            );
+
+            currentIndex = targetIndex;
+          }
+        },
       });
     },
     { scope: containerRef }
@@ -226,118 +217,128 @@ export function FeatureShowcase() {
         />
       </div>
 
-      {/* Track */}
-      <div
-        ref={trackRef}
-        className="feature-track flex flex-col gap-16 px-6 py-16 lg:h-screen lg:flex-row lg:items-stretch lg:gap-0 lg:p-0"
-      >
+      {/* Panels */}
+      <div className="relative h-screen overflow-hidden lg:block">
+        {/* Mobile: normal flow */}
+        <div className="flex flex-col gap-16 px-6 py-16 lg:hidden">
+          {features.map((feature) => (
+            <FeaturePanel key={feature.number} feature={feature} />
+          ))}
+        </div>
+
+        {/* Desktop: absolutely positioned panels that slide horizontally */}
         {features.map((feature) => (
           <div
             key={feature.number}
-            className="feature-panel flex w-full shrink-0 items-center justify-center lg:h-full lg:w-screen"
+            className="feature-panel hidden lg:flex absolute inset-0 items-center justify-center will-change-transform"
           >
-            <div className="mx-auto grid w-full max-w-5xl grid-cols-1 items-center gap-8 px-6 lg:grid-cols-2 lg:gap-16 lg:px-12">
-              {/* Text side */}
-              <div className="panel-text">
-                <div className="mb-2 flex items-center gap-3">
-                  <span
-                    className="text-3xl"
-                    style={{
-                      fontFamily: "var(--font-crt)",
-                      color: "var(--landing-text-muted)",
-                    }}
-                  >
-                    {feature.number}.
-                  </span>
-                </div>
-                <h2
-                  className="leading-tight"
-                  style={{
-                    fontFamily: "var(--font-crt)",
-                    color: "var(--landing-text)",
-                    fontSize: "clamp(2rem, 4vw, 3rem)",
-                  }}
-                >
-                  {feature.title}
-                </h2>
-                <div
-                  className="mt-2 text-[10px] uppercase tracking-[0.2em]"
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--landing-text-muted)",
-                  }}
-                >
-                  {feature.spec}
-                </div>
-                <p
-                  className="mt-4 max-w-md leading-relaxed"
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    color: "var(--landing-text-muted)",
-                    fontSize: "0.875rem",
-                  }}
-                >
-                  {feature.description}
-                </p>
-              </div>
-
-              {/* CRT terminal */}
-              <div
-                className="panel-crt rounded-lg p-2"
-                style={{
-                  backgroundColor: "oklch(0.82 0.02 75)",
-                  boxShadow:
-                    "0 4px 16px oklch(0.15 0.01 55 / 15%), inset 0 1px 0 oklch(0.95 0.01 80 / 40%)",
-                }}
-              >
-                <div
-                  className="relative overflow-hidden rounded p-5"
-                  style={{
-                    backgroundColor: "var(--landing-crt-bg)",
-                    boxShadow: "inset 0 0 40px oklch(0.04 0.003 55)",
-                  }}
-                >
-                  {/* Scan lines */}
-                  <div
-                    className="pointer-events-none absolute inset-0 z-10"
-                    style={{
-                      backgroundImage:
-                        "repeating-linear-gradient(to bottom, transparent 0px, transparent 1px, oklch(0 0 0 / 6%) 1px, oklch(0 0 0 / 6%) 2px)",
-                      backgroundSize: "100% 2px",
-                    }}
-                  />
-                  {/* Vignette */}
-                  <div
-                    className="pointer-events-none absolute inset-0"
-                    style={{
-                      background:
-                        "radial-gradient(ellipse at center, transparent 60%, oklch(0.04 0.003 55 / 50%) 100%)",
-                    }}
-                  />
-                  {/* Terminal lines */}
-                  <div className="relative z-20 space-y-1">
-                    {feature.terminal.map((line, i) => (
-                      <div
-                        key={i}
-                        className="text-sm leading-relaxed"
-                        style={{
-                          fontFamily: "var(--font-crt)",
-                          color: "var(--landing-phosphor)",
-                          textShadow:
-                            "0 0 8px oklch(0.75 0.18 80 / 40%)",
-                          opacity: line.startsWith("  ") ? 0.65 : 0.85,
-                        }}
-                      >
-                        {line}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <FeaturePanel feature={feature} />
           </div>
         ))}
       </div>
     </section>
+  );
+}
+
+function FeaturePanel({ feature }: { feature: Feature }) {
+  return (
+    <div className="mx-auto grid w-full max-w-5xl grid-cols-1 items-center gap-8 px-6 lg:grid-cols-2 lg:gap-16 lg:px-12">
+      {/* Text side */}
+      <div className="panel-text">
+        <div className="mb-2 flex items-center gap-3">
+          <span
+            className="text-3xl"
+            style={{
+              fontFamily: "var(--font-crt)",
+              color: "var(--landing-text-muted)",
+            }}
+          >
+            {feature.number}.
+          </span>
+        </div>
+        <h2
+          className="leading-tight"
+          style={{
+            fontFamily: "var(--font-crt)",
+            color: "var(--landing-text)",
+            fontSize: "clamp(2rem, 4vw, 3rem)",
+          }}
+        >
+          {feature.title}
+        </h2>
+        <div
+          className="mt-2 text-[10px] uppercase tracking-[0.2em]"
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: "var(--landing-text-muted)",
+          }}
+        >
+          {feature.spec}
+        </div>
+        <p
+          className="mt-4 max-w-md leading-relaxed"
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: "var(--landing-text-muted)",
+            fontSize: "0.875rem",
+          }}
+        >
+          {feature.description}
+        </p>
+      </div>
+
+      {/* CRT terminal */}
+      <div
+        className="panel-crt rounded-lg p-2"
+        style={{
+          backgroundColor: "oklch(0.82 0.02 75)",
+          boxShadow:
+            "0 4px 16px oklch(0.15 0.01 55 / 15%), inset 0 1px 0 oklch(0.95 0.01 80 / 40%)",
+        }}
+      >
+        <div
+          className="relative overflow-hidden rounded p-5"
+          style={{
+            backgroundColor: "var(--landing-crt-bg)",
+            boxShadow: "inset 0 0 40px oklch(0.04 0.003 55)",
+          }}
+        >
+          {/* Scan lines */}
+          <div
+            className="pointer-events-none absolute inset-0 z-10"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(to bottom, transparent 0px, transparent 1px, oklch(0 0 0 / 6%) 1px, oklch(0 0 0 / 6%) 2px)",
+              backgroundSize: "100% 2px",
+            }}
+          />
+          {/* Vignette */}
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(ellipse at center, transparent 60%, oklch(0.04 0.003 55 / 50%) 100%)",
+            }}
+          />
+          {/* Terminal lines */}
+          <div className="relative z-20 space-y-1">
+            {feature.terminal.map((line, i) => (
+              <div
+                key={i}
+                className="text-sm leading-relaxed"
+                style={{
+                  fontFamily: "var(--font-crt)",
+                  color: "var(--landing-phosphor)",
+                  textShadow: "0 0 8px oklch(0.75 0.18 80 / 40%)",
+                  opacity: line.startsWith("  ") ? 0.65 : 0.85,
+                }}
+              >
+                {line}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

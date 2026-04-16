@@ -6,7 +6,7 @@ import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { HeroSection } from "./hero-section";
 import { FeatureShowcase } from "./feature-showcase";
-import { EmailDemo } from "./email-demo";
+import { ArchitectureOverview } from "./architecture-overview";
 import { MarketingNav } from "./marketing-nav";
 import { MarketingFooter } from "./marketing-footer";
 
@@ -59,7 +59,7 @@ export function HomePage({ isLoggedIn }: { isLoggedIn: boolean }) {
       <MarketingNav isLoggedIn={isLoggedIn} />
       <HeroSection />
       <FeatureShowcase />
-      <EmailDemo />
+      <ArchitectureOverview />
       <MarketingFooter />
     </div>
   );

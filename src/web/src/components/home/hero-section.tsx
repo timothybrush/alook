@@ -55,29 +55,42 @@ export function HeroSection() {
           "-=0.2"
         );
 
-      // Scroll exit
-      const exitTl = gsap.timeline({
-        scrollTrigger: {
-          trigger: sectionRef.current,
-          start: "top top",
-          end: "+=200%",
-          pin: true,
-          scrub: 1,
-          pinSpacing: true,
-          snap: {
-            snapTo: [0, 1],
-            duration: { min: 0.2, max: 0.6 },
-            delay: 0.1,
-            ease: "power2.inOut",
-          },
+      // Scroll exit — snap transition (not continuous scrub)
+      let heroVisible = true;
+      ScrollTrigger.create({
+        trigger: sectionRef.current,
+        start: "top top",
+        end: "+=50%",
+        pin: true,
+        pinSpacing: true,
+        snap: {
+          snapTo: [0, 1],
+          duration: { min: 0.15, max: 0.4 },
+          delay: 0.05,
+          ease: "power2.inOut",
         },
-      });
-
-      exitTl.to(".hero-content", {
-        y: -80,
-        opacity: 0,
-        duration: 1,
-        ease: "none",
+        onUpdate: (self) => {
+          const shouldHide = self.progress > 0.5;
+          if (shouldHide && heroVisible) {
+            heroVisible = false;
+            gsap.to(".hero-content", {
+              y: -80,
+              opacity: 0,
+              duration: 0.4,
+              ease: "power2.inOut",
+              overwrite: true,
+            });
+          } else if (!shouldHide && !heroVisible) {
+            heroVisible = true;
+            gsap.to(".hero-content", {
+              y: 0,
+              opacity: 1,
+              duration: 0.4,
+              ease: "power2.inOut",
+              overwrite: true,
+            });
+          }
+        },
       });
     },
     { scope: sectionRef }
@@ -158,7 +171,7 @@ export function HeroSection() {
           <TypewriterVisual
             interactive
             entranceDelay={1.2}
-            className="!absolute inset-0"
+            className="absolute! inset-0"
           />
         </div>
 
