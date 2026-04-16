@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { signIn, signUp, authClient } from "@/lib/auth-client"
+import { parseRetryAfterSeconds } from "@/lib/retry-after"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -29,18 +30,39 @@ function OTPSignIn() {
   const [step, setStep] = useState<"email" | "code">("email")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
+  const [retryAfter, setRetryAfter] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (retryAfter == null) return
+    const id = setTimeout(() => {
+      setRetryAfter((v) => (v == null || v <= 1 ? null : v - 1))
+    }, 1000)
+    return () => clearTimeout(id)
+  }, [retryAfter])
+
+  const rateLimitHandler = {
+    onError: (ctx: { response: Response }) => {
+      if (ctx.response.status === 429) {
+        const seconds = parseRetryAfterSeconds(ctx.response.headers)
+        if (seconds != null) setRetryAfter(seconds)
+      }
+    },
+  }
 
   async function handleSendCode(e: React.FormEvent) {
     e.preventDefault()
+    if (retryAfter != null) return
     setError("")
+    setRetryAfter(null)
     setLoading(true)
     try {
       const { error } = await authClient.emailOtp.sendVerificationOtp({
         email,
         type: "sign-in",
+        fetchOptions: rateLimitHandler,
       })
       if (error) {
-        setError(error.message ?? "Failed to send code")
+        if (error.status !== 429) setError(error.message ?? "Failed to send code")
       } else {
         setStep("code")
       }
@@ -75,6 +97,13 @@ function OTPSignIn() {
     setLoading(false)
   }
 
+  const isCoolingDown = retryAfter != null
+  const sendLabel = loading
+    ? "Sending..."
+    : isCoolingDown
+    ? `Wait ${retryAfter}s`
+    : "Send Code"
+
   return (
     <FieldGroup>
       <div className="flex flex-col items-center gap-2 text-center">
@@ -85,7 +114,12 @@ function OTPSignIn() {
             : "Enter the code we sent you"}
         </p>
       </div>
-      {error && <FieldError>{error}</FieldError>}
+      {isCoolingDown && (
+        <FieldError>
+          Too many requests. Try again in {retryAfter}s.
+        </FieldError>
+      )}
+      {error && !isCoolingDown && <FieldError>{error}</FieldError>}
       {step === "email" ? (
         <form onSubmit={handleSendCode}>
           <FieldGroup>
@@ -102,8 +136,12 @@ function OTPSignIn() {
               />
             </Field>
             <Field>
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? "Sending..." : "Send Code"}
+              <Button
+                type="submit"
+                disabled={loading || isCoolingDown}
+                className="w-full"
+              >
+                {sendLabel}
               </Button>
             </Field>
           </FieldGroup>
