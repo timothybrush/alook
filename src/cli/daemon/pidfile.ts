@@ -3,12 +3,22 @@ import { dirname } from "path";
 import { pidFilePath } from "./config.js";
 import { log } from "../lib/logger.js";
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch {
     return false;
+  }
+}
+
+export function readDaemonPid(profile?: string): number | null {
+  try {
+    const content = readFileSync(pidFilePath(profile), "utf-8").trim();
+    const pid = parseInt(content, 10);
+    return Number.isNaN(pid) ? null : pid;
+  } catch {
+    return null;
   }
 }
 
@@ -38,11 +48,23 @@ export function acquireDaemonPid(profile?: string): boolean {
   return true;
 }
 
-/** Remove the PID file on shutdown. */
-export function releaseDaemonPid(profile?: string): void {
+/**
+ * Remove the pidfile only if its contents match the given PID. Prevents a
+ * daemon from deleting someone else's pidfile (e.g. after a PID was reused or
+ * a newer daemon acquired the slot).
+ */
+export function removePidFileIfMatches(pid: number, profile?: string): void {
+  const pidPath = pidFilePath(profile);
+  const onDisk = readDaemonPid(profile);
+  if (onDisk !== pid) return;
   try {
-    unlinkSync(pidFilePath(profile));
+    unlinkSync(pidPath);
   } catch {
-    // already removed or never existed
+    // already removed
   }
+}
+
+/** Remove our own pidfile on shutdown. */
+export function releaseDaemonPid(profile?: string): void {
+  removePidFileIfMatches(process.pid, profile);
 }

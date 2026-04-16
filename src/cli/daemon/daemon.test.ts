@@ -95,17 +95,34 @@ vi.mock("path", async () => {
   return actual;
 });
 
-// Capture signal handlers and prevent actual process.exit
+// Capture signal handlers and prevent actual process.exit.
+// We also intercept "once" registrations for exit/uncaughtException/unhandledRejection
+// so daemon safety-net handlers don't bleed across tests.
 const signalHandlers = new Map<string, (...args: any[]) => any>();
+const capturedEvents = new Set([
+  "SIGTERM",
+  "SIGINT",
+  "exit",
+  "uncaughtException",
+  "unhandledRejection",
+]);
 const originalOn = process.on.bind(process);
 const mockProcessExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
 
 vi.spyOn(process, "on").mockImplementation(((event: string, handler: any) => {
-  if (event === "SIGTERM" || event === "SIGINT") {
+  if (capturedEvents.has(event)) {
     signalHandlers.set(event, handler);
     return process;
   }
   return originalOn(event, handler);
+}) as any);
+
+vi.spyOn(process, "once").mockImplementation(((event: string, handler: any) => {
+  if (capturedEvents.has(event)) {
+    signalHandlers.set(event, handler);
+    return process;
+  }
+  return process.on(event, handler);
 }) as any);
 
 // Track setInterval/clearInterval calls
@@ -127,7 +144,10 @@ vi.spyOn(globalThis, "clearInterval").mockImplementation(((timer: any) => {
 
 import { spawn } from "child_process";
 import { loadCLIConfigForProfile, saveCLIConfigForProfile } from "../lib/config.js";
+import { releaseDaemonPid } from "./pidfile.js";
 import { startDaemon, spawnSessionRunner } from "./daemon.js";
+
+const mockReleaseDaemonPid = vi.mocked(releaseDaemonPid);
 
 function decodeSpawnInput(call: any[]): any {
   // spawn('bun', ['run', path, encodedInput], opts)
@@ -638,6 +658,117 @@ describe("daemon agent_ids lazy sync", () => {
 
     // Only one save — the in-memory set deduplicates
     expect(saveCLIConfigForProfile).toHaveBeenCalledOnce();
+  });
+});
+
+describe("daemon startup failures release pidfile", () => {
+  beforeEach(async () => {
+    signalHandlers.clear();
+    intervalTimers.length = 0;
+    clearedTimers.length = 0;
+    spawnedChildren.length = 0;
+    nextPid = 50000;
+    vi.clearAllMocks();
+    mockProcessExit.mockImplementation((() => {}) as any);
+
+    // Restore defaults that other describe-level tests override.
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [
+        { id: "ws1", name: "Test WS", token: "al_test_token" },
+      ],
+    });
+    mockClientInstance.register.mockResolvedValue({ runtimes: [{ id: "rt1" }] });
+    mockClientInstance.poll.mockResolvedValue([]);
+    const cp = await import("child_process");
+    vi.mocked(cp.execSync).mockImplementation(() => undefined as never);
+  });
+
+  afterEach(() => {
+    for (const t of intervalTimers) realClearInterval(t);
+  });
+
+  it("exits with code 1 and logs when no workspaces are configured", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [],
+    });
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    await startDaemon();
+
+    expect(mockProcessExit.mock.calls[0]?.[0]).toBe(1);
+    const logs = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    expect(logs).toContain("No watched workspaces configured.");
+    stderrWrite.mockRestore();
+  });
+
+  it("registers an exit handler that releases the pidfile", async () => {
+    await startDaemon();
+
+    const exitHandler = signalHandlers.get("exit");
+    expect(exitHandler).toBeDefined();
+    mockReleaseDaemonPid.mockClear();
+    exitHandler!();
+    expect(mockReleaseDaemonPid).toHaveBeenCalled();
+  });
+
+  it("uncaughtException handler releases pidfile and exits 1", async () => {
+    await startDaemon();
+
+    const handler = signalHandlers.get("uncaughtException");
+    expect(handler).toBeDefined();
+    mockReleaseDaemonPid.mockClear();
+    mockProcessExit.mockClear();
+    handler!(new Error("boom"));
+    expect(mockReleaseDaemonPid).toHaveBeenCalled();
+    expect(mockProcessExit).toHaveBeenCalledWith(1);
+  });
+
+  it("unhandledRejection handler releases pidfile and exits 1", async () => {
+    await startDaemon();
+
+    const handler = signalHandlers.get("unhandledRejection");
+    expect(handler).toBeDefined();
+    mockReleaseDaemonPid.mockClear();
+    mockProcessExit.mockClear();
+    handler!(new Error("async-boom"));
+    expect(mockReleaseDaemonPid).toHaveBeenCalled();
+    expect(mockProcessExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits with code 1 and logs when no agent CLI tools are found on PATH", async () => {
+    const cp = await import("child_process");
+    vi.mocked(cp.execSync).mockImplementation(() => {
+      throw new Error("not found");
+    });
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    await startDaemon();
+
+    expect(mockProcessExit.mock.calls[0]?.[0]).toBe(1);
+    const logs = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    expect(logs).toContain("No agent CLI tools found on PATH.");
+    stderrWrite.mockRestore();
+  });
+
+  it("exits with code 1 and logs when every register call fails", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [
+        { id: "ws1", name: "Personal", token: "al_tok_ws1" },
+        { id: "ws2", name: "Team", token: "al_tok_ws2" },
+      ],
+    });
+    mockClientInstance.register.mockRejectedValue(new Error("ECONNREFUSED"));
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+    await startDaemon();
+
+    expect(mockProcessExit.mock.calls[0]?.[0]).toBe(1);
+    const logs = stderrWrite.mock.calls.map((c) => String(c[0])).join("");
+    expect(logs).toContain("No workspaces registered successfully.");
+    stderrWrite.mockRestore();
   });
 });
 

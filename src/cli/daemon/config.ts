@@ -7,6 +7,17 @@ export function pidFilePath(profile?: string): string {
   return join(configDir(), name);
 }
 
+export function daemonLogDir(): string {
+  return join(configDir(), "daemon", "logs");
+}
+
+export function daemonLogFilePath(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return join(daemonLogDir(), `${y}-${m}-${d}.log`);
+}
+
 function parseDuration(s: string): number {
   if (!s) return 0;
   let total = 0;

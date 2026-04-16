@@ -40,6 +40,23 @@ export async function startDaemon(
     process.exit(1);
   }
 
+  // Safety net: no matter how the process terminates (normal exit, early
+  // process.exit, shutdown timeout kick, uncaughtException), release the
+  // pidfile. `releaseDaemonPid` only deletes when the file still points at us,
+  // so a newer daemon's pidfile is safe.
+  process.once("exit", () => releaseDaemonPid(profile));
+  const bailOnUnexpected = (label: string, err: unknown) => {
+    log.error(`${label} — shutting down`, err);
+    releaseDaemonPid(profile);
+    process.exit(1);
+  };
+  process.once("uncaughtException", (err) =>
+    bailOnUnexpected("uncaughtException", err),
+  );
+  process.once("unhandledRejection", (err) =>
+    bailOnUnexpected("unhandledRejection", err),
+  );
+
   const config = loadDaemonConfig(profile);
   if (serverUrl) config.serverURL = serverUrl;
 
@@ -49,6 +66,7 @@ export async function startDaemon(
   if (workspaces.length === 0) {
     log.error("No watched workspaces configured.");
     process.exit(1);
+    return;
   }
 
   // Validate: each workspace must have its own token
@@ -58,6 +76,7 @@ export async function startDaemon(
       `Config uses old format. Run '${cmdPrefix()} register --token <token>' for each workspace to upgrade.`,
     );
     process.exit(1);
+    return;
   }
 
   // Use server_url from first workspace's config if available
@@ -81,6 +100,7 @@ export async function startDaemon(
   if (providers.length === 0) {
     log.error("No agent CLI tools found on PATH.");
     process.exit(1);
+    return;
   }
 
   log.info(
@@ -128,6 +148,7 @@ export async function startDaemon(
   if (workspaceStates.length === 0) {
     log.error("No workspaces registered successfully.");
     process.exit(1);
+    return;
   }
 
   const allRuntimeIds = workspaceStates.flatMap((ws) => ws.runtimeIds);

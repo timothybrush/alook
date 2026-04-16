@@ -2,7 +2,7 @@ import { vi, describe, it, expect, afterEach } from "vitest";
 import { hostname } from "os";
 import { join } from "path";
 import { homedir } from "os";
-import { loadDaemonConfig, normalizeServerBaseURL } from "./config.js";
+import { loadDaemonConfig, normalizeServerBaseURL, daemonLogFilePath, daemonLogDir } from "./config.js";
 
 const DAEMON_ENV_KEYS = [
   "ALOOK_SERVER_URL",
@@ -100,6 +100,25 @@ describe("daemonId profile suffix", () => {
     process.env.ALOOK_DAEMON_ID = `myhost-staging`;
     const cfg = loadDaemonConfig("staging");
     expect(cfg.daemonId).toBe("myhost-staging");
+  });
+});
+
+describe("daemonLogFilePath", () => {
+  it("returns <configDir>/daemon/logs/YYYY-MM-DD.log for a fixed date", () => {
+    const d = new Date(2026, 3, 17); // 2026-04-17 local
+    const p = daemonLogFilePath(d);
+    expect(p).toBe(join(homedir(), ".alook", "daemon", "logs", "2026-04-17.log"));
+  });
+
+  it("zero-pads month and day", () => {
+    const d = new Date(2026, 0, 5); // 2026-01-05 local
+    expect(daemonLogFilePath(d).endsWith("2026-01-05.log")).toBe(true);
+  });
+
+  it("honours ALOOK_PROJECT_ROOT in dev mode", () => {
+    process.env.ALOOK_SERVER_URL = "http://localhost:3000";
+    process.env.ALOOK_PROJECT_ROOT = "/tmp/proj";
+    expect(daemonLogDir()).toBe(join("/tmp/proj", ".alook", "daemon", "logs"));
   });
 });
 
