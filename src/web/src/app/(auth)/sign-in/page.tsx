@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/field"
 import { SiGithub, SiGoogle } from "@icons-pack/react-simple-icons"
 import { GradientBackground } from "@/components/gradient-background"
-import { TypewriterVisual } from "@/components/typewriter-visual"
+import { TypewriterVisual, EMAILS_PLAYFUL } from "@/components/typewriter-visual"
 
 const isProd = process.env.NODE_ENV === "production"
 
@@ -276,11 +276,11 @@ export default function SignInPage() {
         <div className="flex flex-col gap-6">
           <Card className="overflow-hidden p-0">
             <CardContent className="grid p-0 md:grid-cols-2">
-              <div className="p-6 md:p-8 md:min-h-[420px] flex flex-col justify-center">
+              <div className="p-6 md:p-8 md:min-h-105 flex flex-col justify-center">
                 {isProd ? <OTPSignIn /> : <PasswordSignIn />}
               </div>
-              <div className="hidden bg-muted md:flex items-center justify-center overflow-clip min-h-[320px] pt-24">
-                <TypewriterVisual className="scale-[0.55] shrink-0" />
+              <div className="hidden bg-muted md:flex items-center justify-center overflow-visible min-h-80 pt-24">
+                <TypewriterVisual className="scale-[0.55] shrink-0" emails={EMAILS_PLAYFUL} blobScale={2.5} blobBottom="30%" />
               </div>
             </CardContent>
           </Card>

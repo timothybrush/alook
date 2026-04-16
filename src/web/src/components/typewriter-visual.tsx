@@ -10,8 +10,15 @@ gsap.registerPlugin(SplitText);
 // Key layout: 3 rows of oval keys (front-facing view)
 const KEY_ROWS = [9, 7, 9];
 
-// Mock emails from Jarvis
-const EMAILS = [
+export interface TypewriterEmail {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+}
+
+/** Clean, professional emails — default for the homepage. */
+export const EMAILS_DEFAULT: TypewriterEmail[] = [
   {
     from: "jarvis@alook.ai",
     to: "you@company.com",
@@ -44,6 +51,40 @@ const EMAILS = [
   },
 ];
 
+/** All-emoji variant — playful, visual, good for sign-in and casual pages. */
+export const EMAILS_PLAYFUL: TypewriterEmail[] = [
+  {
+    from: "🤖@alook.ai",
+    to: "🧑‍💻@company.com",
+    subject: "Re: 🚀 Deploy hotfix → staging",
+    body: "✅ 🔀 feat/fix-session-token 🧪 47/47 ✅ 🚢 staging 🔐 login flow 👀✅ 🟢 live now!",
+  },
+  {
+    from: "🤖@alook.ai",
+    to: "🧑‍💻@company.com",
+    subject: "Re: 🏥 Check API health",
+    body: "📡 all endpoints 🟢 ⏱️ p99 42ms 📉 err 0.01% 🎯 threshold 200ms ✨ ~~~~ healthy ~~~~",
+  },
+  {
+    from: "🤖@alook.ai",
+    to: "🧑‍💻@company.com",
+    subject: "Re: 📋 Summarize today's PRs",
+    body: "🔀 #412 🔐✅ 🔀 #415 🚦✅ 🔀 #418 📊✅ 👀 #420 ← Sarah 🫡",
+  },
+  {
+    from: "🤖@alook.ai",
+    to: "🎨@company.com",
+    subject: "Re: ✏️ Update landing page copy",
+    body: "📝 hero tagline ✅ 📄 feature descriptions ✅ 🔀 feat/landing-copy 🔗 staging 🟢 >>> 👍 <<<",
+  },
+  {
+    from: "🤖@alook.ai",
+    to: "🧑‍💻@company.com",
+    subject: "Re: 🧪 Run the test suite",
+    body: "🧪 847 tests 🟢 0 💥 📈 84.2% ⬆️ 83.1% 🎉 no flakes! (╯°□°)╯︵ 🐛🐛🐛",
+  },
+];
+
 // CSS variables the typewriter CSS needs — self-provided so
 // the component works outside the `.landing` scope too.
 const TW_VARS: React.CSSProperties = {
@@ -66,6 +107,12 @@ interface TypewriterVisualProps {
   entranceDelay?: number;
   /** Custom paper content. When provided, replaces the default email carousel and disables cycling. */
   paper?: React.ReactNode;
+  /** Email scheme to display. Defaults to EMAILS_DEFAULT. Ignored when `paper` is provided. */
+  emails?: TypewriterEmail[];
+  /** Scale factor for the background blob. Default 1. */
+  blobScale?: number;
+  /** Bottom offset for the blob, e.g. "10%" or "20%". Default "-10%". */
+  blobBottom?: string;
 }
 
 /**
@@ -78,6 +125,9 @@ export function TypewriterVisual({
   interactive = false,
   entranceDelay = 0.3,
   paper,
+  emails = EMAILS_DEFAULT,
+  blobScale = 1,
+  blobBottom,
 }: TypewriterVisualProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const paperTlRef = useRef<gsap.core.Timeline | null>(null);
@@ -173,7 +223,7 @@ export function TypewriterVisual({
       ease: "power2.in",
       onComplete: () => {
         setEmailIndex((prev) => {
-          const next = (prev + 1) % EMAILS.length;
+          const next = (prev + 1) % emails.length;
           requestAnimationFrame(() => {
             requestAnimationFrame(() => {
               playPaperFeed();
@@ -183,7 +233,7 @@ export function TypewriterVisual({
         });
       },
     });
-  }, [playPaperFeed]);
+  }, [playPaperFeed, emails.length]);
 
   // Keyboard Enter listener — only when interactive
   useEffect(() => {
@@ -208,15 +258,15 @@ export function TypewriterVisual({
       if (!bodyEl) return;
       const bodySplit = SplitText.create(bodyEl, { type: "words" });
 
-      const paper = root.querySelector<HTMLElement>(".tw-paper");
-      const paperH = paper ? paper.offsetHeight : 300;
-      gsap.set(paper, { y: paperH, opacity: 1 });
+      const paperEl = root.querySelector<HTMLElement>(".tw-paper");
+      const paperH = paperEl ? paperEl.offsetHeight : 300;
+      gsap.set(paperEl, { y: paperH, opacity: 1 });
       gsap.set(root.querySelectorAll(".tw-email-line"), { opacity: 0 });
       gsap.set(bodySplit.words, { opacity: 0 });
 
       const tl = gsap.timeline({ delay: entranceDelay });
 
-      tl.to(paper, {
+      tl.to(paperEl, {
         y: 0,
         duration: 3,
         ease: "power1.out",
@@ -239,7 +289,7 @@ export function TypewriterVisual({
     { scope: containerRef }
   );
 
-  const email = EMAILS[emailIndex];
+  const email = emails[emailIndex];
 
   return (
     <div
@@ -249,7 +299,7 @@ export function TypewriterVisual({
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
-      <div className="typewriter-blob" />
+      <div className="typewriter-blob" style={(blobScale !== 1 || blobBottom) ? { "--blob-scale": blobScale, ...(blobBottom ? { "--blob-bottom": blobBottom } : {}) } as React.CSSProperties : undefined} />
 
       <div className="typewriter-scene">
         <div className="tw-machine">
@@ -271,7 +321,7 @@ export function TypewriterVisual({
                         style={{
                           fontFamily: "var(--font-crt)",
                           fontSize: "15px",
-                          color: "var(--landing-text-muted)",
+                          color: "oklch(0.45 0.01 55)",
                           lineHeight: 1.7,
                           borderBottom: "1px solid oklch(0.15 0.01 55 / 10%)",
                           paddingBottom: "10px",
@@ -279,15 +329,15 @@ export function TypewriterVisual({
                         }}
                       >
                         <div className="tw-email-line">
-                          <span style={{ color: "var(--landing-text)" }}>From:</span>{" "}
+                          <span style={{ color: "oklch(0.15 0.01 55)" }}>From:</span>{" "}
                           {email.from}
                         </div>
                         <div className="tw-email-line">
-                          <span style={{ color: "var(--landing-text)" }}>To:</span>{" "}
+                          <span style={{ color: "oklch(0.15 0.01 55)" }}>To:</span>{" "}
                           {email.to}
                         </div>
                         <div className="tw-email-line">
-                          <span style={{ color: "var(--landing-text)" }}>Subject:</span>{" "}
+                          <span style={{ color: "oklch(0.15 0.01 55)" }}>Subject:</span>{" "}
                           {email.subject}
                         </div>
                       </div>
@@ -296,7 +346,7 @@ export function TypewriterVisual({
                         className="tw-email-body"
                         style={{
                           fontFamily: "var(--font-crt)",
-                          color: "var(--landing-text)",
+                          color: "oklch(0.15 0.01 55)",
                           fontSize: "17px",
                           lineHeight: 1.6,
                         }}

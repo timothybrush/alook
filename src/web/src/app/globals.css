@@ -179,11 +179,11 @@
 
 .typewriter-blob {
   position: absolute;
-  bottom: -10%;
+  bottom: var(--blob-bottom, -10%);
   left: 50%;
-  transform: translateX(-50%);
-  width: 130%;
-  height: 80%;
+  transform: translateX(-50%) scale(var(--blob-scale, 1));
+  width: 150%;
+  height: 95%;
   background-color: var(--tw-blob);
   mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23000' d='M44.7,-76.4C58.9,-69.2,71.8,-59.1,81.1,-46.1C90.4,-33.1,96.1,-16.6,96.6,-0.1C97.1,16.4,92.5,32.8,82.8,45.8C73.1,58.8,58.4,68.4,42.7,75.4C27,82.4,10.3,86.8,-5.5,88.4C-21.3,90,-36.2,88.8,-49.6,81.8C-63,74.8,-74.9,62.1,-82.1,47.4C-89.3,32.7,-91.8,16.3,-90.1,0.9C-88.4,-14.4,-82.5,-28.9,-73.6,-40.8C-64.7,-52.7,-52.9,-62,-40.1,-69.4C-27.3,-76.8,-13.6,-82.3,1.3,-84.6C16.2,-86.9,30.5,-83.6,44.7,-76.4Z' transform='translate(100 100)' /%3E%3C/svg%3E");
   mask-size: contain;
@@ -205,7 +205,7 @@
 }
 
 .typewriter-visual:hover .typewriter-blob {
-  transform: translateX(-50%) scale(1.05) rotate(5deg);
+  transform: translateX(-50%) scale(calc(var(--blob-scale, 1) * 1.05)) rotate(5deg);
 }
 
 /* ── Machine wrapper — 3D box ── */
