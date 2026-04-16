@@ -64,6 +64,8 @@ interface TypewriterVisualProps {
   interactive?: boolean;
   /** Delay (seconds) before the paper-feed entrance animation starts. */
   entranceDelay?: number;
+  /** Custom paper content. When provided, replaces the default email carousel and disables cycling. */
+  paper?: React.ReactNode;
 }
 
 /**
@@ -75,6 +77,7 @@ export function TypewriterVisual({
   className,
   interactive = false,
   entranceDelay = 0.3,
+  paper,
 }: TypewriterVisualProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const paperTlRef = useRef<gsap.core.Timeline | null>(null);
@@ -260,44 +263,48 @@ export function TypewriterVisual({
             <div className="tw-body-front">
               {/* Paper track — clips paper as it feeds out */}
               <div className="tw-paper-track">
-                <div className="tw-paper" key={emailIndex}>
-                  <div
-                    className="tw-email-headers"
-                    style={{
-                      fontFamily: "var(--font-crt)",
-                      fontSize: "15px",
-                      color: "var(--landing-text-muted)",
-                      lineHeight: 1.7,
-                      borderBottom: "1px solid oklch(0.15 0.01 55 / 10%)",
-                      paddingBottom: "10px",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <div className="tw-email-line">
-                      <span style={{ color: "var(--landing-text)" }}>From:</span>{" "}
-                      {email.from}
-                    </div>
-                    <div className="tw-email-line">
-                      <span style={{ color: "var(--landing-text)" }}>To:</span>{" "}
-                      {email.to}
-                    </div>
-                    <div className="tw-email-line">
-                      <span style={{ color: "var(--landing-text)" }}>Subject:</span>{" "}
-                      {email.subject}
-                    </div>
-                  </div>
+                <div className="tw-paper" key={paper ? "custom" : emailIndex}>
+                  {paper ?? (
+                    <>
+                      <div
+                        className="tw-email-headers"
+                        style={{
+                          fontFamily: "var(--font-crt)",
+                          fontSize: "15px",
+                          color: "var(--landing-text-muted)",
+                          lineHeight: 1.7,
+                          borderBottom: "1px solid oklch(0.15 0.01 55 / 10%)",
+                          paddingBottom: "10px",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        <div className="tw-email-line">
+                          <span style={{ color: "var(--landing-text)" }}>From:</span>{" "}
+                          {email.from}
+                        </div>
+                        <div className="tw-email-line">
+                          <span style={{ color: "var(--landing-text)" }}>To:</span>{" "}
+                          {email.to}
+                        </div>
+                        <div className="tw-email-line">
+                          <span style={{ color: "var(--landing-text)" }}>Subject:</span>{" "}
+                          {email.subject}
+                        </div>
+                      </div>
 
-                  <div
-                    className="tw-email-body"
-                    style={{
-                      fontFamily: "var(--font-crt)",
-                      color: "var(--landing-text)",
-                      fontSize: "17px",
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    {email.body}
-                  </div>
+                      <div
+                        className="tw-email-body"
+                        style={{
+                          fontFamily: "var(--font-crt)",
+                          color: "var(--landing-text)",
+                          fontSize: "17px",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        {email.body}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -318,7 +325,7 @@ export function TypewriterVisual({
                     {Array.from({ length: count }).map((_, ki) => (
                       <div key={ki} className="tw-key" />
                     ))}
-                    {ri === 1 && (
+                    {ri === 1 && !paper && (
                       <button
                         className="tw-key tw-return-key"
                         onClick={handleReturnKey}

@@ -22,7 +22,7 @@ if (typeof window !== "undefined") {
   }
 }
 
-export function HomePage() {
+export function HomePage({ isLoggedIn }: { isLoggedIn: boolean }) {
   const mainRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
@@ -53,10 +53,10 @@ export function HomePage() {
   return (
     <div
       ref={mainRef}
-      className="landing relative overflow-x-hidden"
+      className="landing relative flex-1 overflow-x-clip"
       style={{ backgroundColor: "var(--landing-bg)" }}
     >
-      <MarketingNav />
+      <MarketingNav isLoggedIn={isLoggedIn} />
       <HeroSection />
       <FeatureShowcase />
       <EmailDemo />
