@@ -3,7 +3,7 @@ import { type DaemonConfig, loadDaemonConfig } from "./config.js";
 import { createHealthServer } from "./health.js";
 import { detectVersion } from "./agent/index.js";
 import { type Task, type SessionRunnerInput, fromApiTask } from "./types.js";
-import { loadCLIConfigForProfile } from "../lib/config.js";
+import { loadCLIConfigForProfile, saveCLIConfigForProfile } from "../lib/config.js";
 import { log } from "../lib/logger.js";
 import { cmdPrefix } from "../lib/env.js";
 import { acquireDaemonPid, releaseDaemonPid } from "./pidfile.js";
@@ -136,6 +136,28 @@ export async function startDaemon(
 
   const activeTasks = new Set<string>();
 
+  // Seed known agent IDs from config so we only write on genuinely new ones
+  const knownAgentIds = new Set<string>(
+    workspaces.flatMap((ws) => ws.agent_ids ?? []),
+  );
+
+  function syncAgentId(agentId: string, workspaceId: string): void {
+    if (knownAgentIds.has(agentId)) return;
+    knownAgentIds.add(agentId);
+    try {
+      const cfg = loadCLIConfigForProfile(profile);
+      const ws = cfg.watched_workspaces?.find((w) => w.id === workspaceId);
+      if (!ws) return;
+      if (!ws.agent_ids) ws.agent_ids = [];
+      if (!ws.agent_ids.includes(agentId)) {
+        ws.agent_ids.push(agentId);
+        saveCLIConfigForProfile(profile, cfg);
+      }
+    } catch {
+      // Non-fatal — config sync is best-effort
+    }
+  }
+
   // Staggered per-workspace polling
   const pollCycle = async () => {
     let remaining = config.maxConcurrentTasks - activeTasks.size;
@@ -156,6 +178,7 @@ export async function startDaemon(
         const tasks = await client.poll(ws.token, config.daemonId, remaining);
         for (const apiTask of tasks) {
           const task = fromApiTask(apiTask);
+          syncAgentId(task.agentId, ws.workspaceId);
           activeTasks.add(task.id);
           remaining--;
           handleTask(client, config, runtimeIndex, task, ws.token, activeTasks)

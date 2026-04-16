@@ -54,6 +54,7 @@ vi.mock("../lib/config.js", () => ({
     server_url: null,
     watched_workspaces: [{ id: "ws1", name: "Test WS", token: "al_test_token" }],
   })),
+  saveCLIConfigForProfile: vi.fn(),
 }));
 
 vi.mock("./pidfile.js", () => ({
@@ -125,7 +126,7 @@ vi.spyOn(globalThis, "clearInterval").mockImplementation(((timer: any) => {
 }) as any);
 
 import { spawn } from "child_process";
-import { loadCLIConfigForProfile } from "../lib/config.js";
+import { loadCLIConfigForProfile, saveCLIConfigForProfile } from "../lib/config.js";
 import { startDaemon, spawnSessionRunner } from "./daemon.js";
 
 function decodeSpawnInput(call: any[]): any {
@@ -532,6 +533,111 @@ describe("daemon shutdown", () => {
 
     // Child should still be alive — unref was called, no kill signal sent
     expect(spawnedChildren[0].unref).toHaveBeenCalled();
+  });
+});
+
+describe("daemon agent_ids lazy sync", () => {
+  beforeEach(() => {
+    signalHandlers.clear();
+    intervalTimers.length = 0;
+    clearedTimers.length = 0;
+    spawnedChildren.length = 0;
+    nextPid = 50000;
+    vi.clearAllMocks();
+    mockProcessExit.mockImplementation((() => {}) as any);
+
+    // Restore default mock implementations after clearAllMocks
+    mockClientInstance.register.mockResolvedValue({ runtimes: [{ id: "rt1" }] });
+    mockClientInstance.startTask.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    for (const t of intervalTimers) realClearInterval(t);
+  });
+
+  function makeFakeTask(overrides?: Record<string, unknown>) {
+    return {
+      id: "t1",
+      agent_id: "a1",
+      runtime_id: "rt1",
+      conversation_id: "c1",
+      workspace_id: "ws1",
+      prompt: "do stuff",
+      status: "dispatched",
+      priority: 0,
+      dispatched_at: null,
+      started_at: null,
+      completed_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      type: "user_dm_message",
+      result: null,
+      error: null,
+      agent: { name: "Agent 1", instructions: "be helpful" },
+      ...overrides,
+    };
+  }
+
+  it("syncs unknown agent_id to config when task is received", async () => {
+    // Config has no agent_ids — agent was created on the web
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [{ id: "ws1", name: "Test WS", token: "al_test_token", agent_ids: [] }],
+    });
+
+    let claimed = false;
+    mockClientInstance.poll.mockImplementation(async () => {
+      if (!claimed) { claimed = true; return [makeFakeTask()]; }
+      return [];
+    });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(saveCLIConfigForProfile).toHaveBeenCalledOnce();
+    const savedConfig = vi.mocked(saveCLIConfigForProfile).mock.calls[0][1];
+    expect(savedConfig.watched_workspaces![0].agent_ids).toContain("a1");
+  });
+
+  it("does not save config when agent_id is already known", async () => {
+    // Config already has agent "a1"
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [{ id: "ws1", name: "Test WS", token: "al_test_token", agent_ids: ["a1"] }],
+    });
+
+    let claimed = false;
+    mockClientInstance.poll.mockImplementation(async () => {
+      if (!claimed) { claimed = true; return [makeFakeTask()]; }
+      return [];
+    });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(saveCLIConfigForProfile).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates: multiple tasks with same new agent_id only save once", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [{ id: "ws1", name: "Test WS", token: "al_test_token", agent_ids: [] }],
+    });
+
+    let claimed = false;
+    mockClientInstance.poll.mockImplementation(async () => {
+      if (!claimed) {
+        claimed = true;
+        // Two tasks from the same agent
+        return [makeFakeTask({ id: "t1" }), makeFakeTask({ id: "t2" })];
+      }
+      return [];
+    });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Only one save — the in-memory set deduplicates
+    expect(saveCLIConfigForProfile).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { APIClient } from "../lib/client.js";
-import { loadCLIConfigForProfile } from "../lib/config.js";
+import { loadCLIConfigForProfile, saveCLIConfigForProfile } from "../lib/config.js";
 import { printTable, printJSON } from "../lib/output.js";
 import { cmdPrefix } from "../lib/env.js";
 
@@ -42,7 +42,7 @@ export function agentCommand(): Command {
     .option("--workspace <id>", "Workspace ID")
     .option("--json", "Output as JSON")
     .action(async (opts, command) => {
-      const { serverUrl, token, workspaceId } = resolveClientOpts(command, opts.workspace);
+      const { serverUrl, token, workspaceId, profile } = resolveClientOpts(command, opts.workspace);
       const client = new APIClient(serverUrl, token, workspaceId);
 
       try {
@@ -52,6 +52,14 @@ export function agentCommand(): Command {
         const agents = await client.getJSON<Agent[]>(
           `/api/agents${queryParam}`,
         );
+
+        // Sync agent_ids to local config
+        const profileCfg = loadCLIConfigForProfile(profile);
+        const ws = profileCfg.watched_workspaces?.find((w) => w.id === workspaceId);
+        if (ws) {
+          ws.agent_ids = agents.map((a) => a.id);
+          saveCLIConfigForProfile(profile, profileCfg);
+        }
 
         if (opts.json) {
           printJSON(agents);
@@ -82,7 +90,7 @@ export function agentCommand(): Command {
     .requiredOption("--runtime <runtime>", "Agent runtime")
     .option("--workspace <id>", "Workspace ID")
     .action(async (opts, command) => {
-      const { serverUrl, token, workspaceId } = resolveClientOpts(command, opts.workspace);
+      const { serverUrl, token, workspaceId, profile } = resolveClientOpts(command, opts.workspace);
       const client = new APIClient(serverUrl, token, workspaceId);
 
       if (!opts.name) {
@@ -100,6 +108,19 @@ export function agentCommand(): Command {
           runtime: opts.runtime,
           workspace_id: workspaceId,
         });
+
+        // Update local config with new agent ID
+        const profileCfg = loadCLIConfigForProfile(profile);
+        const watched = profileCfg.watched_workspaces || [];
+        const ws = watched.find((w) => w.id === workspaceId);
+        if (ws) {
+          if (!ws.agent_ids) ws.agent_ids = [];
+          if (!ws.agent_ids.includes(agent.id)) {
+            ws.agent_ids.push(agent.id);
+          }
+          saveCLIConfigForProfile(profile, profileCfg);
+        }
+
         console.log(`Agent created: ${agent.name} (${agent.id})`);
       } catch (err) {
         console.error(
