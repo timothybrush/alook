@@ -53,9 +53,10 @@ jobs:
       - name: Build CLI bundle
         run: pnpm -C src/cli run build
 
-      - name: Publish to npm (OIDC + provenance)
+      - name: Publish to npm (OIDC)
+        # --provenance requires a public source repo; this repo is private.
         working-directory: src/cli
-        run: npm publish --provenance --access public
+        run: npm publish --access public
 
       - name: Create GitHub release
         env:
