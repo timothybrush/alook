@@ -4,6 +4,14 @@ import { useRef } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import Autoplay from "embla-carousel-autoplay";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselPrevious,
+  CarouselNext,
+} from "@/components/ui/carousel";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -84,157 +92,67 @@ const features: Feature[] = [
 ];
 
 export function FeatureShowcase() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const progressRef = useRef<HTMLDivElement>(null);
+  const mobileRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
     () => {
-      if (!containerRef.current) return;
-
-      const isMobile = window.innerWidth < 1024;
-      const panels = gsap.utils.toArray<HTMLElement>(".feature-panel");
-
-      if (isMobile) {
-        panels.forEach((panel) => {
-          gsap.from(panel, {
-            y: 40,
-            opacity: 0,
-            duration: 0.6,
-            ease: "power2.out",
-            scrollTrigger: {
-              trigger: panel,
-              start: "top 80%",
-              toggleActions: "play none none none",
-            },
-          });
+      const panels = gsap.utils.toArray<HTMLElement>(".feature-panel-mobile");
+      panels.forEach((panel) => {
+        gsap.from(panel, {
+          y: 40,
+          opacity: 0,
+          duration: 0.6,
+          ease: "power2.out",
+          scrollTrigger: {
+            trigger: panel,
+            start: "top 80%",
+            toggleActions: "play none none none",
+          },
         });
-        return;
-      }
-
-      // Desktop: horizontal slide carousel (like shadcn/Embla)
-      const panelCount = panels.length;
-      const scrollPerPanel = window.innerHeight * 0.6;
-      const totalScroll = scrollPerPanel * panelCount;
-
-      // Position all panels off-screen to the right, except the first
-      panels.forEach((panel, i) => {
-        gsap.set(panel, { xPercent: i * 100 });
-      });
-
-      const progressBar = progressRef.current?.parentElement;
-      let currentIndex = 0;
-
-      ScrollTrigger.create({
-        trigger: containerRef.current,
-        start: "top top",
-        end: () => `+=${totalScroll}`,
-        pin: true,
-        pinSpacing: true,
-        anticipatePin: 1,
-        snap: {
-          snapTo: 1 / (panelCount - 1),
-          duration: { min: 0.15, max: 0.4 },
-          delay: 0.05,
-          ease: "power2.inOut",
-        },
-        onEnter: () => {
-          if (progressBar)
-            gsap.to(progressBar, { opacity: 1, duration: 0.3 });
-        },
-        onLeave: () => {
-          if (progressBar)
-            gsap.to(progressBar, { opacity: 0, duration: 0.3 });
-        },
-        onEnterBack: () => {
-          if (progressBar)
-            gsap.to(progressBar, { opacity: 1, duration: 0.3 });
-        },
-        onLeaveBack: () => {
-          if (progressBar)
-            gsap.to(progressBar, { opacity: 0, duration: 0.3 });
-        },
-        onUpdate: (self) => {
-          if (progressRef.current) {
-            progressRef.current.style.transform = `scaleX(${self.progress})`;
-          }
-
-          // Determine which panel to show
-          const targetIndex = Math.round(
-            self.progress * (panelCount - 1)
-          );
-
-          if (targetIndex !== currentIndex) {
-            const leaving = panels[currentIndex];
-            const entering = panels[targetIndex];
-            const direction = targetIndex > currentIndex ? 1 : -1;
-
-            // Slide leaving panel out
-            gsap.to(leaving, {
-              xPercent: -direction * 100,
-              duration: 0.4,
-              ease: "power2.inOut",
-              overwrite: true,
-            });
-
-            // Slide entering panel in from the opposite side
-            gsap.fromTo(
-              entering,
-              { xPercent: direction * 100 },
-              {
-                xPercent: 0,
-                duration: 0.4,
-                ease: "power2.inOut",
-                overwrite: true,
-              }
-            );
-
-            currentIndex = targetIndex;
-          }
-        },
       });
     },
-    { scope: containerRef }
+    { scope: mobileRef }
   );
 
   return (
     <section
-      ref={containerRef}
-      className="relative min-h-screen overflow-hidden"
+      className="relative overflow-hidden py-24"
       style={{ backgroundColor: "var(--landing-bg)" }}
     >
-      {/* Progress bar */}
-      <div
-        className="fixed bottom-0 left-0 right-0 z-50 h-px opacity-0"
-        style={{ backgroundColor: "var(--landing-border)" }}
-      >
-        <div
-          ref={progressRef}
-          className="h-full origin-left"
-          style={{
-            backgroundColor: "var(--landing-text-muted)",
-            transform: "scaleX(0)",
-          }}
-        />
-      </div>
-
-      {/* Panels */}
-      <div className="relative h-screen overflow-hidden lg:block">
-        {/* Mobile: normal flow */}
-        <div className="flex flex-col gap-16 px-6 py-16 lg:hidden">
-          {features.map((feature) => (
-            <FeaturePanel key={feature.number} feature={feature} />
-          ))}
-        </div>
-
-        {/* Desktop: absolutely positioned panels that slide horizontally */}
+      {/* Mobile: vertical stacked panels with scroll fade-in */}
+      <div ref={mobileRef} className="flex flex-col gap-16 px-6 lg:hidden">
         {features.map((feature) => (
-          <div
-            key={feature.number}
-            className="feature-panel hidden lg:flex absolute inset-0 items-center justify-center will-change-transform"
-          >
+          <div key={feature.number} className="feature-panel-mobile">
             <FeaturePanel feature={feature} />
           </div>
         ))}
+      </div>
+
+      {/* Desktop: Embla carousel */}
+      <div className="hidden lg:block">
+        <Carousel
+          opts={{ align: "center", loop: true }}
+          plugins={[Autoplay({ delay: 4000, stopOnInteraction: false })]}
+          className="mx-auto w-full max-w-6xl px-12"
+        >
+          <CarouselContent className="-ml-8">
+            {features.map((feature) => (
+              <CarouselItem key={feature.number} className="pl-8">
+                <div className="flex min-h-[420px] items-center">
+                  <FeaturePanel feature={feature} />
+                </div>
+              </CarouselItem>
+            ))}
+          </CarouselContent>
+          <CarouselPrevious
+            className="border-none bg-transparent hover:bg-transparent"
+            style={{ color: "var(--landing-text-muted)" }}
+          />
+          <CarouselNext
+            className="border-none bg-transparent hover:bg-transparent"
+            style={{ color: "var(--landing-text-muted)" }}
+          />
+        </Carousel>
       </div>
     </section>
   );

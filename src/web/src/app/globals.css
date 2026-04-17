@@ -538,7 +538,7 @@
 /* ── Responsive ── */
 @media (max-width: 640px) {
   .typewriter-scene {
-    transform: scale(0.55) !important;
+    transform: scale(0.85) !important;
   }
   .tw-paper {
     padding: 16px 18px 24px;
