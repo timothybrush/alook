@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Sans, DM_Mono, Caveat, Bricolage_Grotesque, VT323 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeScript } from "@/components/theme-script";
 import { ToasterProvider } from "@/components/toaster-provider";
 import "./globals.css";
 
@@ -63,6 +64,9 @@ export default function RootLayout({
       className={`${dmSans.variable} ${dmMono.variable} ${caveat.variable} ${bricolage.variable} ${vt323.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        <ThemeScript />
+      </head>
       <body className="min-h-full flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           {children}
