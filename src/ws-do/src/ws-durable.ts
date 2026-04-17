@@ -27,15 +27,9 @@ export class WebSocketDurableObject extends DurableObject<Env> {
 
     this.ctx.acceptWebSocket(server)
 
-    const preAuthUserId = request.headers.get("X-Authenticated-User")
-    const state: ConnectionState = preAuthUserId
-      ? { userId: preAuthUserId, authenticated: true }
-      : { userId: "", authenticated: false }
-    server.serializeAttachment(state)
-
-    if (preAuthUserId) {
-      log.info("websocket connected (pre-auth)", { userId: preAuthUserId })
-    }
+    // Connections start unauthenticated. Client must send {type:"auth",token}
+    // before any other message. See webSocketMessage below.
+    server.serializeAttachment({ userId: "", authenticated: false } as ConnectionState)
 
     this.ctx.setWebSocketAutoResponse(
       new WebSocketRequestResponsePair("ping", "pong")

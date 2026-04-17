@@ -17,24 +17,22 @@ export function useAgentWs(agentId: string, onMessage: (msg: WsMessage) => void)
   onMessageRef.current = onMessage
 
   const connect = useCallback(async () => {
-    let url: string
-    let authToken: string | null = null
-
-    if (isDev) {
-      // Dev: connect directly to ws-do worker, authenticate via auth message
-      try {
-        const res = await fetch("/api/ws/token")
-        if (!res.ok) return
-        const { token } = await res.json() as { token: string }
-        url = `ws://localhost:${WS_DO_PORT}/?agentId=${agentId}`
-        authToken = token
-      } catch {
-        return
-      }
-    } else {
-      // Production: go through Next.js API route (service binding handles WS upgrade)
-      url = `${location.origin.replace("http", "ws")}/api/ws?agentId=${agentId}`
+    // Unified dev/prod flow — see use-user-ws.ts for rationale.
+    let userId: string
+    let authToken: string
+    try {
+      const res = await fetch("/api/ws/token")
+      if (!res.ok) return
+      const body = await res.json() as { userId: string; token: string }
+      userId = body.userId
+      authToken = body.token
+    } catch {
+      return
     }
+
+    const url = isDev
+      ? `ws://localhost:${WS_DO_PORT}/?userId=${userId}&agentId=${agentId}`
+      : `${location.origin.replace("http", "ws")}/api/ws?userId=${userId}&agentId=${agentId}`
 
     let ws: WebSocket
     try {
@@ -46,9 +44,7 @@ export function useAgentWs(agentId: string, onMessage: (msg: WsMessage) => void)
 
     ws.onopen = () => {
       reconnectDelay.current = WS_RECONNECT_INIT
-      if (authToken) {
-        ws.send(JSON.stringify({ type: "auth", token: authToken }))
-      }
+      ws.send(JSON.stringify({ type: "auth", token: authToken }))
     }
 
     ws.onmessage = (e) => {

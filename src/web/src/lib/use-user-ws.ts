@@ -17,24 +17,27 @@ export function useUserWs(onMessage: (msg: WsMessage) => void) {
   onMessageRef.current = onMessage
 
   const connect = useCallback(async () => {
-    let url: string
-    let authToken: string | null = null
-
-    if (isDev) {
-      // Dev: connect directly to ws-do worker, authenticate via auth message
-      try {
-        const res = await fetch("/api/ws/token")
-        if (!res.ok) return
-        const { userId, token } = await res.json() as { userId: string; token: string }
-        url = `ws://localhost:${WS_DO_PORT}/?userId=${userId}`
-        authToken = token
-      } catch {
-        return
-      }
-    } else {
-      // Production: go through Next.js API route (service binding handles WS upgrade)
-      url = `${location.origin.replace("http", "ws")}/api/ws/user`
+    // Unified flow for dev and prod:
+    //   1. Fetch /api/ws/token over HTTP (cookie-authenticated Next.js route).
+    //   2. Open WebSocket with ?userId= and authenticate via {type:"auth",token}.
+    // The custom OpenNext wrapper (src/web/custom-worker.ts) forwards /api/ws/*
+    // upgrade requests directly to the ws-do worker in prod; in dev we connect
+    // to the ws-do worker on localhost directly.
+    let userId: string
+    let authToken: string
+    try {
+      const res = await fetch("/api/ws/token")
+      if (!res.ok) return
+      const body = await res.json() as { userId: string; token: string }
+      userId = body.userId
+      authToken = body.token
+    } catch {
+      return
     }
+
+    const url = isDev
+      ? `ws://localhost:${WS_DO_PORT}/?userId=${userId}`
+      : `${location.origin.replace("http", "ws")}/api/ws/user?userId=${userId}`
 
     let ws: WebSocket
     try {
@@ -46,9 +49,7 @@ export function useUserWs(onMessage: (msg: WsMessage) => void) {
 
     ws.onopen = () => {
       reconnectDelay.current = WS_RECONNECT_INIT
-      if (authToken) {
-        ws.send(JSON.stringify({ type: "auth", token: authToken }))
-      }
+      ws.send(JSON.stringify({ type: "auth", token: authToken }))
     }
 
     ws.onmessage = (e) => {

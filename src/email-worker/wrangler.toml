@@ -11,6 +11,7 @@ enabled = true
 
 [dev]
 port = 8787
+inspector_port = 9231
 
 [[d1_databases]]
 binding = "DB"

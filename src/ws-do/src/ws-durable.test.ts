@@ -119,18 +119,17 @@ describe("WebSocketDurableObject", () => {
       expect(res.status).toBe(426)
     })
 
-    it("pre-authenticates when X-Authenticated-User header is present", async () => {
+    it("attaches an unauthenticated ConnectionState on upgrade", async () => {
       const { durable, ctx } = createDO()
       const req = new Request("http://internal/?userId=u1", {
-        headers: { Upgrade: "websocket", "X-Authenticated-User": "user-99" },
+        headers: { Upgrade: "websocket" },
       })
 
       await durable.fetch(req)
 
-      // Check that acceptWebSocket was called and the server WS has authenticated state
       const acceptCall = (ctx.acceptWebSocket as ReturnType<typeof vi.fn>).mock.calls[0]
       const serverWs = acceptCall[0]
-      expect(serverWs.deserializeAttachment()).toEqual({ userId: "user-99", authenticated: true })
+      expect(serverWs.deserializeAttachment()).toEqual({ userId: "", authenticated: false })
     })
   })
 
