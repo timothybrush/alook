@@ -129,7 +129,7 @@ function ConnectMachineSteps({
 }
 
 export default function RuntimesPage() {
-  const { runtimes, loading, handleGenerateToken, handleDeleteMachine, reload, subscribeWs, workspaceId } =
+  const { runtimes, loading, handleGenerateToken, handleDeleteMachine, subscribeWs, workspaceId } =
     useAgentContext();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -226,7 +226,7 @@ export default function RuntimesPage() {
             <Skeleton className="h-4 w-16" />
             <Skeleton className="h-3 w-52" />
           </div>
-          <Skeleton className="h-8 w-[116px] rounded-md" />
+          <Skeleton className="h-8 w-29 rounded-md" />
         </div>
         {/* Skeleton card grid */}
         <div className="flex-1 overflow-y-auto px-5 py-5">
