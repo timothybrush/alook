@@ -115,6 +115,148 @@ describe("email receive (inbound)", () => {
   })
 })
 
+// ─── Threading on ingest ───
+
+describe("email threading (inbound)", () => {
+  it("stores Message-ID, In-Reply-To, References from incoming email", async () => {
+    const from = `${seed.userId}@test.local`
+    const to = `${seed.agentEmailHandle}@alook.ai`
+    const subject = "E2E threading test"
+    const msgId = `<threading-${randomUUID()}@e2e.test>`
+    const inReplyTo = `<parent-${randomUUID()}@e2e.test>`
+    const references = `<root-${randomUUID()}@e2e.test> ${inReplyTo}`
+
+    const raw = [
+      `From: ${from}`,
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      `Message-ID: ${msgId}`,
+      `In-Reply-To: ${inReplyTo}`,
+      `References: ${references}`,
+      `Date: ${new Date().toUTCString()}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: text/plain; charset=utf-8`,
+      "",
+      "Thread test body",
+    ].join("\r\n")
+
+    await fetch(
+      `${EMAIL_WORKER_URL}/cdn-cgi/handler/email?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: raw },
+    )
+
+    const row = await waitForEmail(seed.agentId, from, 5000)
+    expect(row).not.toBeNull()
+    expect(row!.message_id).toBe(msgId)
+    expect(row!.in_reply_to).toBe(inReplyTo)
+    expect(row!.references).toBe(references)
+  })
+
+  it("stores empty strings when threading headers are absent", async () => {
+    const from = `${seed.userId}@test.local`
+    const to = `${seed.agentEmailHandle}@alook.ai`
+    const subject = `E2E no-thread ${randomUUID().slice(0, 8)}`
+
+    await fetch(
+      `${EMAIL_WORKER_URL}/cdn-cgi/handler/email?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: rawEmail(from, to, subject, "No threading headers"),
+      },
+    )
+
+    // Wait for this specific email by subject
+    const start = Date.now()
+    let row: Record<string, unknown> | null = null
+    while (Date.now() - start < 5000) {
+      const rows = sqlQuery<Record<string, unknown>>(
+        `SELECT * FROM emails WHERE agent_id = '${seed.agentId}' AND subject = '${subject}' LIMIT 1`,
+      )
+      if (rows.length > 0) { row = rows[0]; break }
+      await new Promise((r) => setTimeout(r, 300))
+    }
+
+    expect(row).not.toBeNull()
+    expect(row!.in_reply_to).toBe("")
+    expect(row!.references).toBe("")
+  })
+})
+
+// ─── Rejected folder ───
+
+describe("email folder: rejected", () => {
+  it("GET /api/email?folder=rejected returns only non-whitelisted emails", async () => {
+    // Ensure we have a non-whitelisted email
+    const strangerFrom = `stranger-${randomUUID().slice(0, 8)}@external.com`
+    const to = `${seed.agentEmailHandle}@alook.ai`
+    await fetch(
+      `${EMAIL_WORKER_URL}/cdn-cgi/handler/email?from=${encodeURIComponent(strangerFrom)}&to=${encodeURIComponent(to)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: rawEmail(strangerFrom, to, "Rejected folder test", "Spam content"),
+      },
+    )
+    await waitForEmail(seed.agentId, strangerFrom)
+
+    const res = await tokenRequest(
+      `/api/email?workspace_id=${seed.workspaceId}&agentId=${seed.agentId}&folder=rejected`,
+      seed.machineToken,
+    )
+    expect(res.status).toBe(200)
+
+    const emails = await res.json() as { is_whitelisted: boolean }[]
+    expect(emails.length).toBeGreaterThan(0)
+    for (const email of emails) {
+      expect(email.is_whitelisted).toBe(false)
+    }
+  })
+
+  it("GET /api/email?folder=rejected excludes sent emails", async () => {
+    // Send an outgoing email (creates a record with is_whitelisted=false)
+    await tokenRequest(
+      `/api/email/send?workspace_id=${seed.workspaceId}`,
+      seed.machineToken,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: seed.agentId,
+          to: "outbound@example.com",
+          subject: "E2E sent email",
+          htmlBody: "<p>Outbound</p>",
+        }),
+      },
+    )
+
+    const res = await tokenRequest(
+      `/api/email?workspace_id=${seed.workspaceId}&agentId=${seed.agentId}&folder=rejected`,
+      seed.machineToken,
+    )
+    expect(res.status).toBe(200)
+
+    const emails = await res.json() as { from_email: string; to_email: string }[]
+    const agentEmail = `${seed.agentEmailHandle}@alook.ai`
+    for (const email of emails) {
+      expect(email.from_email).not.toBe(agentEmail)
+    }
+  })
+
+  it("GET /api/email?folder=inbox returns only whitelisted emails", async () => {
+    const res = await tokenRequest(
+      `/api/email?workspace_id=${seed.workspaceId}&agentId=${seed.agentId}&folder=inbox`,
+      seed.machineToken,
+    )
+    expect(res.status).toBe(200)
+
+    const emails = await res.json() as { is_whitelisted: boolean }[]
+    for (const email of emails) {
+      expect(email.is_whitelisted).toBe(true)
+    }
+  })
+})
+
 // ─── Send path ───
 
 describe("email send (outbound)", () => {
@@ -180,5 +322,112 @@ describe("email send (outbound)", () => {
       },
     )
     expect(res.status).toBe(400)
+  })
+
+  it("POST /api/email/send with threading → stores message_id, in_reply_to, references", async () => {
+    const inReplyTo = `<parent-${randomUUID()}@e2e.test>`
+    const references = `<root-${randomUUID()}@e2e.test> ${inReplyTo}`
+
+    const res = await tokenRequest(
+      `/api/email/send?workspace_id=${seed.workspaceId}`,
+      seed.machineToken,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: seed.agentId,
+          to: "recipient@example.com",
+          subject: "E2E reply test",
+          htmlBody: "<p>Reply body</p>",
+          inReplyTo,
+          references,
+        }),
+      },
+    )
+    expect(res.status).toBe(200)
+
+    const data = await res.json() as Record<string, unknown>
+    expect(data.message_id).toBeTruthy()
+    expect(typeof data.message_id).toBe("string")
+    expect((data.message_id as string).length).toBeGreaterThan(0)
+    expect(data.in_reply_to).toBe(inReplyTo)
+    expect(data.references).toBe(references)
+  })
+})
+
+// ─── Thread endpoint ───
+
+describe("email thread", () => {
+  it("GET /api/email/[id]/thread returns parent chain", async () => {
+    const agentEmail = `${seed.agentEmailHandle}@alook.ai`
+    const now = new Date().toISOString()
+    const parentMsgId = `<thread-parent-${randomUUID()}@e2e.test>`
+    const childMsgId = `<thread-child-${randomUUID()}@e2e.test>`
+
+    // Insert parent email directly
+    const parentId = `ep_${randomUUID().slice(0, 12)}`
+    sql(`INSERT INTO emails (id, agent_id, workspace_id, from_email, to_email, subject, r2_key, is_whitelisted, forwarded, message_id, in_reply_to, "references", created_at) VALUES ('${parentId}', '${seed.agentId}', '${seed.workspaceId}', 'sender@test.com', '${agentEmail}', 'Thread parent', 'emails/fake/raw', 1, 0, '${parentMsgId}', '', '', '${now}')`)
+
+    // Insert child email that replies to parent
+    const childId = `ec_${randomUUID().slice(0, 12)}`
+    sql(`INSERT INTO emails (id, agent_id, workspace_id, from_email, to_email, subject, r2_key, is_whitelisted, forwarded, message_id, in_reply_to, "references", created_at) VALUES ('${childId}', '${seed.agentId}', '${seed.workspaceId}', '${agentEmail}', 'sender@test.com', 'Re: Thread parent', 'emails/fake2/raw', 0, 0, '${childMsgId}', '${parentMsgId}', '${parentMsgId}', '${now}')`)
+
+    const res = await tokenRequest(
+      `/api/email/${childId}/thread?workspace_id=${seed.workspaceId}`,
+      seed.machineToken,
+    )
+    expect(res.status).toBe(200)
+
+    const thread = await res.json() as { id: string; message_id: string }[]
+    expect(thread.length).toBe(1)
+    expect(thread[0].id).toBe(parentId)
+    expect(thread[0].message_id).toBe(parentMsgId)
+  })
+
+  it("GET /api/email/[id]/thread returns empty array for root email", async () => {
+    const agentEmail = `${seed.agentEmailHandle}@alook.ai`
+    const now = new Date().toISOString()
+    const rootId = `er_${randomUUID().slice(0, 12)}`
+    const rootMsgId = `<root-${randomUUID()}@e2e.test>`
+
+    sql(`INSERT INTO emails (id, agent_id, workspace_id, from_email, to_email, subject, r2_key, is_whitelisted, forwarded, message_id, in_reply_to, "references", created_at) VALUES ('${rootId}', '${seed.agentId}', '${seed.workspaceId}', 'sender@test.com', '${agentEmail}', 'Root email', 'emails/fake3/raw', 1, 0, '${rootMsgId}', '', '', '${now}')`)
+
+    const res = await tokenRequest(
+      `/api/email/${rootId}/thread?workspace_id=${seed.workspaceId}`,
+      seed.machineToken,
+    )
+    expect(res.status).toBe(200)
+
+    const thread = await res.json() as unknown[]
+    expect(thread).toHaveLength(0)
+  })
+
+  it("GET /api/email/[id]/thread respects MAX_DEPTH limit", async () => {
+    const agentEmail = `${seed.agentEmailHandle}@alook.ai`
+    const now = new Date().toISOString()
+    const depth = 55 // exceeds MAX_DEPTH of 50
+
+    // Build a chain of 55 emails where each replies to the previous
+    const emailIds: string[] = []
+    const msgIds: string[] = []
+    for (let i = 0; i < depth; i++) {
+      const eid = `edepth_${randomUUID().slice(0, 8)}`
+      const mid = `<depth-${i}-${randomUUID().slice(0, 8)}@e2e.test>`
+      const irt = i > 0 ? msgIds[i - 1] : ""
+      emailIds.push(eid)
+      msgIds.push(mid)
+      sql(`INSERT INTO emails (id, agent_id, workspace_id, from_email, to_email, subject, r2_key, is_whitelisted, forwarded, message_id, in_reply_to, "references", created_at) VALUES ('${eid}', '${seed.agentId}', '${seed.workspaceId}', 'sender@test.com', '${agentEmail}', 'Depth ${i}', 'emails/fake-depth/raw', 1, 0, '${mid}', '${irt}', '', '${now}')`)
+    }
+
+    // Query thread for the last email in the chain
+    const lastId = emailIds[depth - 1]
+    const res = await tokenRequest(
+      `/api/email/${lastId}/thread?workspace_id=${seed.workspaceId}`,
+      seed.machineToken,
+    )
+    expect(res.status).toBe(200)
+
+    const thread = await res.json() as unknown[]
+    expect(thread.length).toBeLessThanOrEqual(50)
   })
 })

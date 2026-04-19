@@ -50,7 +50,6 @@ const AGENT = {
   workspaceId: "ws-1",
   ownerId: "user-1" as string | null,
   emailHandle: "jarvis",
-  forwardToEmail: "",
   name: "Jarvis",
   status: "idle",
 }
@@ -193,20 +192,53 @@ describe("whitelisted path", () => {
 
     expect(forward).not.toHaveBeenCalled()
   })
+
+  it("passes threading headers (Message-ID, In-Reply-To, References) to notify", async () => {
+    const { env, message, wsFetch } = setup({
+      isWhitelisted: true,
+      messageOpts: {
+        from: "owner@example.com",
+        to: "jarvis@alook.ai",
+        subject: "Re: Thread",
+        extraHeaders: {
+          "message-id": "<msg-123@example.com>",
+          "in-reply-to": "<parent-456@example.com>",
+          "references": "<root-789@example.com> <parent-456@example.com>",
+        },
+      },
+    })
+
+    await handler.email(message, env)
+
+    const body = JSON.parse(wsFetch.mock.calls[0][1].body)
+    expect(body.messageId).toBe("<msg-123@example.com>")
+    expect(body.inReplyTo).toBe("<parent-456@example.com>")
+    expect(body.references).toBe("<root-789@example.com> <parent-456@example.com>")
+  })
+
+  it("passes empty threading fields when headers are absent", async () => {
+    const { env, message, wsFetch } = setup({ isWhitelisted: true })
+
+    await handler.email(message, env)
+
+    const body = JSON.parse(wsFetch.mock.calls[0][1].body)
+    expect(body.messageId).toBe("")
+    expect(body.inReplyTo).toBe("")
+    expect(body.references).toBe("")
+  })
 })
 
-// ─── Group 4: Non-whitelisted path ───
+// ─── Group 4: Non-whitelisted path (rejected) ───
 
 describe("non-whitelisted path", () => {
   const strangerOpts = {
     messageOpts: { from: "stranger@example.com", to: "jarvis@alook.ai", subject: "Spam" } as const,
   }
 
-  it("notifies web service with isWhitelisted: false", async () => {
+  it("notifies web service with isWhitelisted: false and forwarded: false", async () => {
     const { env, message, wsFetch } = setup({
       ...strangerOpts,
       isWhitelisted: false,
-      agentOverrides: { forwardToEmail: "fwd@corp.com" },
     })
 
     await handler.email(message, env)
@@ -214,40 +246,24 @@ describe("non-whitelisted path", () => {
     expect(wsFetch).toHaveBeenCalledOnce()
     const body = JSON.parse(wsFetch.mock.calls[0][1].body)
     expect(body.isWhitelisted).toBe(false)
-    expect(body.forwarded).toBe(true)
-  })
-
-  it("forwards email when forwardToEmail is set on agent", async () => {
-    const { env, message, forward } = setup({
-      ...strangerOpts,
-      isWhitelisted: false,
-      agentOverrides: { forwardToEmail: "fwd@corp.com" },
-    })
-
-    await handler.email(message, env)
-
-    expect(forward).toHaveBeenCalledWith("fwd@corp.com")
-  })
-
-  it("notifies with forwarded: false when no forward address", async () => {
-    const { env, message, wsFetch } = setup({
-      ...strangerOpts,
-      isWhitelisted: false,
-      agentOverrides: { forwardToEmail: "", ownerId: null },
-    })
-
-    await handler.email(message, env)
-
-    const body = JSON.parse(wsFetch.mock.calls[0][1].body)
-    expect(body.isWhitelisted).toBe(false)
     expect(body.forwarded).toBe(false)
   })
 
-  it("does NOT forward when forwardToEmail is empty", async () => {
+  it("rejects email with setReject", async () => {
+    const { env, message, setReject } = setup({
+      ...strangerOpts,
+      isWhitelisted: false,
+    })
+
+    await handler.email(message, env)
+
+    expect(setReject).toHaveBeenCalledWith("Sender not whitelisted")
+  })
+
+  it("does NOT forward email", async () => {
     const { env, message, forward } = setup({
       ...strangerOpts,
       isWhitelisted: false,
-      agentOverrides: { forwardToEmail: "", ownerId: null },
     })
 
     await handler.email(message, env)
@@ -255,30 +271,15 @@ describe("non-whitelisted path", () => {
     expect(forward).not.toHaveBeenCalled()
   })
 
-  it("falls back to user email when forwardToEmail is empty", async () => {
-    const { env, message, forward } = setup({
+  it("still stores raw email in R2", async () => {
+    const { env, message, put } = setup({
       ...strangerOpts,
       isWhitelisted: false,
-      agentOverrides: { forwardToEmail: "", ownerId: "user-1" },
-      userEmail: "fallback@example.com",
     })
 
     await handler.email(message, env)
 
-    expect(mockGetUser).toHaveBeenCalledWith(expect.anything(), "user-1")
-    expect(forward).toHaveBeenCalledWith("fallback@example.com")
-  })
-
-  it("does not call getUser when forwardToEmail is set", async () => {
-    const { env, message } = setup({
-      ...strangerOpts,
-      isWhitelisted: false,
-      agentOverrides: { forwardToEmail: "fwd@corp.com" },
-    })
-
-    await handler.email(message, env)
-
-    expect(mockGetUser).not.toHaveBeenCalled()
+    expect(put).toHaveBeenCalledOnce()
   })
 })
 
@@ -489,6 +490,58 @@ describe("POST /send/agent", () => {
     )
 
     expect(res.status).toBe(400)
+  })
+
+  it("includes threading headers in outgoing MIME when inReplyTo/references provided", async () => {
+    mockGetAgent.mockResolvedValue({ id: "agent-1", workspaceId: "ws-1", emailHandle: "jarvis" })
+    const { env, put } = agentSendEnv()
+
+    const res = await handler.fetch(
+      makeAgentSendRequest({
+        agentId: "agent-1",
+        workspaceId: "ws-1",
+        to: "user@example.com",
+        subject: "Re: Thread test",
+        htmlBody: "<p>Reply</p>",
+        inReplyTo: "<parent-123@example.com>",
+        references: "<root-000@example.com> <parent-123@example.com>",
+      }),
+      env,
+    )
+
+    expect(res.status).toBe(200)
+    const json = await res.json() as { ok: boolean; messageId: string }
+    expect(json.messageId).toMatch(/@alook\.ai>$/)
+
+    const storedMime = put.mock.calls[0][1] as string
+    expect(storedMime).toContain("Message-ID: " + json.messageId)
+    expect(storedMime).toContain("In-Reply-To: <parent-123@example.com>")
+    expect(storedMime).toContain("References: <root-000@example.com> <parent-123@example.com>")
+  })
+
+  it("generates Message-ID but omits In-Reply-To/References when not provided", async () => {
+    mockGetAgent.mockResolvedValue({ id: "agent-1", workspaceId: "ws-1", emailHandle: "jarvis" })
+    const { env, put } = agentSendEnv()
+
+    const res = await handler.fetch(
+      makeAgentSendRequest({
+        agentId: "agent-1",
+        workspaceId: "ws-1",
+        to: "user@example.com",
+        subject: "New email",
+        htmlBody: "<p>Fresh</p>",
+      }),
+      env,
+    )
+
+    expect(res.status).toBe(200)
+    const json = await res.json() as { ok: boolean; messageId: string }
+    expect(json.messageId).toMatch(/@alook\.ai>$/)
+
+    const storedMime = put.mock.calls[0][1] as string
+    expect(storedMime).toContain("Message-ID:")
+    expect(storedMime).not.toContain("In-Reply-To:")
+    expect(storedMime).not.toContain("References:")
   })
 })
 

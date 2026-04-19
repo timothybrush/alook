@@ -19,12 +19,14 @@ import { Send, X, Loader2, Paperclip, File as FileIcon } from "lucide-react";
 
 interface EmailComposeProps {
   fromAddress: string;
-  onSend: (to: string, subject: string, htmlBody: string, attachments: EmailAttachment[]) => Promise<boolean>;
+  onSend: (to: string, subject: string, htmlBody: string, attachments: EmailAttachment[], threading?: { inReplyTo?: string; references?: string }) => Promise<boolean>;
   onDiscard: () => void;
   initialTo?: string;
   initialSubject?: string;
   initialBody?: string;
   initialAttachments?: EmailAttachment[];
+  inReplyTo?: string;
+  references?: string;
 }
 
 function formatFileSize(bytes: number): string {
@@ -41,6 +43,8 @@ export function EmailCompose({
   initialSubject = "",
   initialBody = "",
   initialAttachments = [],
+  inReplyTo,
+  references,
 }: EmailComposeProps) {
   const [to, setTo] = useState(initialTo);
   const [subject, setSubject] = useState(initialSubject);
@@ -86,7 +90,8 @@ export function EmailCompose({
     setSending(true);
     try {
       const html = editor.getHTML();
-      const ok = await onSend(to.trim(), subject.trim(), html, attachments);
+      const threading = inReplyTo || references ? { inReplyTo, references } : undefined;
+      const ok = await onSend(to.trim(), subject.trim(), html, attachments, threading);
       if (ok) {
         setTo("");
         setSubject("");

@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@alook/shared": "workspace:*",
-    "nanoid": "^5.1.9"
+    "nanoid": "^5.1.9",
+    "postal-mime": "^2.7.4"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260418.1",

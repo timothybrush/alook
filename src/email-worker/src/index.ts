@@ -86,6 +86,8 @@ export default {
       to?: string
       subject?: string
       htmlBody?: string
+      inReplyTo?: string
+      references?: string
       attachmentKeys?: { key: string; filename: string; contentType: string }[]
     }
 
@@ -134,6 +136,12 @@ export default {
     await env.SEND_EMAIL.send(sendPayload as any)
 
     // Build raw MIME for R2 archival
+    const outMessageId = `<${nanoid()}@alook.ai>`
+    const threadingHeaders: string[] = []
+    threadingHeaders.push(`Message-ID: ${outMessageId}`)
+    if (body.inReplyTo) threadingHeaders.push(`In-Reply-To: ${body.inReplyTo}`)
+    if (body.references) threadingHeaders.push(`References: ${body.references}`)
+
     let rawMime: string
     if (attachments.length === 0) {
       rawMime = [
@@ -141,6 +149,7 @@ export default {
         `To: ${body.to}`,
         `Subject: ${body.subject}`,
         `Date: ${new Date().toUTCString()}`,
+        ...threadingHeaders,
         `MIME-Version: 1.0`,
         `Content-Type: text/html; charset=utf-8`,
         "",
@@ -153,6 +162,7 @@ export default {
         `To: ${body.to}`,
         `Subject: ${body.subject}`,
         `Date: ${new Date().toUTCString()}`,
+        ...threadingHeaders,
         `MIME-Version: 1.0`,
         `Content-Type: multipart/mixed; boundary="${boundary}"`,
         "",
@@ -185,7 +195,7 @@ export default {
       httpMetadata: { contentType: "message/rfc822" },
     })
 
-    return Response.json({ ok: true, r2Key })
+    return Response.json({ ok: true, r2Key, messageId: outMessageId })
   },
 
   async email(message: ForwardableEmailMessage, env: EmailEnv): Promise<void> {
@@ -214,6 +224,11 @@ export default {
     })
 
     const subject = message.headers.get("subject") ?? ""
+    const messageId = message.headers.get("message-id") ?? ""
+    const inReplyTo = message.headers.get("in-reply-to") ?? ""
+    const references = message.headers.get("references") ?? ""
+
+    const threadingFields = { messageId, inReplyTo, references }
 
     if (whitelisted) {
       emailLog.info("whitelisted email, notifying web", { agentId: agent.id })
@@ -225,19 +240,10 @@ export default {
         to: message.to,
         subject,
         isWhitelisted: true,
+        ...threadingFields,
       }, traceId)
     } else {
-      const forwardToEmail = agent.forwardToEmail ?? ""
-      let forwardAddress = forwardToEmail
-
-      if (!forwardAddress) {
-        const agentUser = agent.ownerId ? await queries.user.getUser(db, agent.ownerId) : null
-        forwardAddress = agentUser?.email ?? ""
-      }
-
-      const forwarded = !!forwardAddress
-
-      emailLog.info("non-whitelisted email, notifying web", { agentId: agent.id, forwarded })
+      emailLog.info("non-whitelisted email, rejecting", { agentId: agent.id })
       await notifyWeb(env, {
         agentId: agent.id,
         workspaceId: agent.workspaceId,
@@ -246,13 +252,11 @@ export default {
         to: message.to,
         subject,
         isWhitelisted: false,
-        forwarded,
+        forwarded: false,
+        ...threadingFields,
       }, traceId)
 
-      if (forwardAddress) {
-        emailLog.info("forwarding email", { forwardTo: forwardAddress })
-        await message.forward(forwardAddress)
-      }
+      message.setReject("Sender not whitelisted")
     }
   },
 }

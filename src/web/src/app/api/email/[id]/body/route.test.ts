@@ -40,48 +40,71 @@ vi.mock("@/lib/middleware/helpers", () => {
 import { GET } from "./route";
 
 function makeR2Object(text: string) {
-  return { text: () => Promise.resolve(text) };
+  const buf = new TextEncoder().encode(text).buffer;
+  return { arrayBuffer: () => Promise.resolve(buf) };
 }
 
 describe("GET /api/email/[id]/body", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("strips RFC822 headers (CRLF) and returns only body text", async () => {
+  it("parses plain text email and returns text body", async () => {
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1", r2Key: "emails/abc/raw" });
     mockR2Get.mockResolvedValue(
-      makeR2Object("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\n\r\nHello world")
+      makeR2Object("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/plain\r\n\r\nHello world")
     );
 
     const req = new NextRequest("http://localhost/api/email/e1/body");
     const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("Hello world");
+    expect((await res.text()).trim()).toBe("Hello world");
+    expect(res.headers.get("Content-Type")).toContain("text/plain");
     expect(mockGetEmailById).toHaveBeenCalledWith({}, "e1", "ws1");
   });
 
-  it("strips RFC822 headers (LF) and returns only body text", async () => {
+  it("parses HTML email and returns HTML body", async () => {
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1", r2Key: "emails/abc/raw" });
     mockR2Get.mockResolvedValue(
-      makeR2Object("From: a@b.com\nTo: c@d.com\nSubject: Test\n\nHello world")
+      makeR2Object("From: a@b.com\r\nTo: c@d.com\r\nSubject: Test\r\nContent-Type: text/html\r\n\r\n<p>Hello</p>")
     );
 
     const req = new NextRequest("http://localhost/api/email/e1/body");
     const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("Hello world");
+    expect((await res.text()).trim()).toBe("<p>Hello</p>");
+    expect(res.headers.get("Content-Type")).toContain("text/html");
   });
 
-  it("returns full content if no header/body separator found", async () => {
+  it("extracts HTML from multipart MIME email", async () => {
+    const boundary = "----=_Part_123";
+    const mime = [
+      "From: a@b.com",
+      "To: c@d.com",
+      "Subject: Test",
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      "",
+      `--${boundary}`,
+      "Content-Type: text/plain; charset=UTF-8",
+      "",
+      "Plain text body",
+      `--${boundary}`,
+      "Content-Type: text/html; charset=UTF-8",
+      "",
+      "<p>HTML body</p>",
+      `--${boundary}--`,
+    ].join("\r\n");
+
     mockGetEmailById.mockResolvedValue({ id: "e1", agentId: "a1", r2Key: "emails/abc/raw" });
-    mockR2Get.mockResolvedValue(makeR2Object("Just plain text with no headers"));
+    mockR2Get.mockResolvedValue(makeR2Object(mime));
 
     const req = new NextRequest("http://localhost/api/email/e1/body");
     const res = await GET(req, { params: Promise.resolve({ id: "e1" }) } as any);
 
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("Just plain text with no headers");
+    const text = await res.text();
+    expect(text).toContain("<p>HTML body</p>");
+    expect(res.headers.get("Content-Type")).toContain("text/html");
   });
 
   it("returns 404 when R2 object not found", async () => {

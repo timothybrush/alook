@@ -115,7 +115,6 @@ CREATE TABLE IF NOT EXISTS agent (
   tools TEXT,
   triggers TEXT,
   email_handle TEXT UNIQUE,
-  forward_to_email TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (id, workspace_id)
@@ -201,6 +200,9 @@ CREATE TABLE IF NOT EXISTS emails (
   r2_key TEXT NOT NULL,
   is_whitelisted INTEGER NOT NULL DEFAULT 0,
   forwarded INTEGER NOT NULL DEFAULT 0,
+  message_id TEXT NOT NULL DEFAULT '',
+  in_reply_to TEXT NOT NULL DEFAULT '',
+  "references" TEXT NOT NULL DEFAULT '',
   html_body TEXT NOT NULL DEFAULT '',
   attachments TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'unread',

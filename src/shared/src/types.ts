@@ -128,6 +128,9 @@ export interface Email {
   r2_key: string;
   is_whitelisted: boolean;
   forwarded: boolean;
+  message_id: string;
+  in_reply_to: string;
+  references: string;
   html_body: string;
   attachments: EmailAttachment[];
   status: string;

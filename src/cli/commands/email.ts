@@ -16,6 +16,9 @@ interface EmailResponse {
   r2_key: string;
   is_whitelisted: boolean;
   forwarded: boolean;
+  message_id: string;
+  in_reply_to: string;
+  references: string;
   html_body: string;
   attachments: unknown[];
   status: string;
@@ -146,6 +149,9 @@ export function emailCommand(): Command {
             subject: email.subject,
             date: email.created_at,
             status: email.status,
+            message_id: email.message_id || "",
+            in_reply_to: email.in_reply_to || "",
+            references: email.references || "",
           };
           const metadataPath = join(emailDir, "metadata.json");
           writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
@@ -256,6 +262,7 @@ export function emailCommand(): Command {
     .requiredOption("--to <addr>", "Recipient email address")
     .requiredOption("--subject <s>", "Subject line")
     .requiredOption("--body-file <path>", "Path to HTML body file")
+    .option("--in-reply-to <emailId>", "Email ID to reply to (sets threading headers)")
     .option(
       "--attachment <path>",
       "Path to a file to attach (repeatable)",
@@ -320,12 +327,28 @@ export function emailCommand(): Command {
           });
         }
 
+        // Build threading context if replying
+        let inReplyTo: string | undefined;
+        let references: string | undefined;
+        if (opts.inReplyTo) {
+          try {
+            const parentEmail = await client.getJSON<EmailResponse>(`/api/email/${opts.inReplyTo}`);
+            if (parentEmail.message_id) {
+              inReplyTo = parentEmail.message_id;
+              references = [parentEmail.references, parentEmail.message_id].filter(Boolean).join(" ").trim() || undefined;
+            }
+          } catch {
+            console.warn(`Warning: could not fetch parent email ${opts.inReplyTo}, sending without threading`);
+          }
+        }
+
         const res = await client.postJSON<SendResponse>("/api/email/send", {
           agentId: opts.agent_id,
           to: opts.to,
           subject: opts.subject,
           htmlBody,
           attachments,
+          ...(inReplyTo ? { inReplyTo, references } : {}),
         });
         console.log(`Sent email to ${res.to_email} (id: ${res.id})`);
       } catch (err) {

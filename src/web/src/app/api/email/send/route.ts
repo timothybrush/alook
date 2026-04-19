@@ -20,6 +20,8 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     to: string;
     subject: string;
     htmlBody: string;
+    inReplyTo?: string;
+    references?: string;
     attachments?: EmailAttachment[];
   };
   try {
@@ -48,6 +50,8 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     to: body.to,
     subject: body.subject,
     htmlBody: body.htmlBody || "",
+    inReplyTo: body.inReplyTo || "",
+    references: body.references || "",
     attachmentKeys: attachments.length > 0
       ? attachments.map((a) => ({ key: a.key, filename: a.filename, contentType: a.contentType }))
       : undefined,
@@ -74,7 +78,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeError(`email worker error: ${errBody}`, emailRes.status);
   }
 
-  const emailResult = await emailRes.json() as { ok: boolean; r2Key: string };
+  const emailResult = await emailRes.json() as { ok: boolean; r2Key: string; messageId?: string };
 
   // Create DB record
   const fromAddress = `${agent.emailHandle}@alook.ai`;
@@ -87,6 +91,9 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     r2Key: emailResult.r2Key,
     isWhitelisted: false,
     forwarded: false,
+    messageId: emailResult.messageId ?? "",
+    inReplyTo: body.inReplyTo ?? "",
+    references: body.references ?? "",
     htmlBody: body.htmlBody || "",
     attachments: JSON.stringify(attachments),
   });

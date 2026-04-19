@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
   const { env } = getCloudflareContext()
   const db = createDb((env as Env).DB)
 
-  let body: { agentId: string; workspaceId: string; r2Key: string; from: string; to?: string; subject: string; isWhitelisted: boolean; forwarded?: boolean }
+  let body: { agentId: string; workspaceId: string; r2Key: string; from: string; to?: string; subject: string; isWhitelisted: boolean; forwarded?: boolean; messageId?: string; inReplyTo?: string; references?: string }
   try { body = await req.json() } catch { return writeError("invalid body", 400) }
 
   const agent = await queries.agent.getAgent(db, body.agentId, body.workspaceId)
@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
     r2Key: body.r2Key,
     isWhitelisted: body.isWhitelisted,
     forwarded: body.forwarded ?? false,
+    messageId: body.messageId ?? "",
+    inReplyTo: body.inReplyTo ?? "",
+    references: body.references ?? "",
   })
 
   if (body.isWhitelisted && agent && agent.runtimeId) {

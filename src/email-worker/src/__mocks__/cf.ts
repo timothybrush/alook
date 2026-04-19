@@ -28,12 +28,18 @@ export interface MockMessageOpts {
   to: string
   subject?: string | null
   body?: string
+  extraHeaders?: Record<string, string>
 }
 
 export function createMockMessage(opts: MockMessageOpts) {
   const headers = new Headers()
   if (opts.subject !== undefined && opts.subject !== null) {
     headers.set("subject", opts.subject)
+  }
+  if (opts.extraHeaders) {
+    for (const [k, v] of Object.entries(opts.extraHeaders)) {
+      headers.set(k, v)
+    }
   }
 
   const rawText = [

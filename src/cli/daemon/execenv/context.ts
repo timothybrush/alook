@@ -86,7 +86,7 @@ ${task.agent.userEmail ? `Your owner's email address is '${task.agent.userEmail}
 ---
 Run 'npx @alook/cli pull --agent_id ${task.agentId} --status unread' to download unread emails to '/tmp/alook-emails/'.
 Each email is saved to '/tmp/alook-emails/<emailId>/' with:
-- 'metadata.json' — sender, recipient, subject, date, status
+- 'metadata.json' — sender, recipient, subject, date, status, message_id, in_reply_to, references
 - 'body.txt' — plain text body
 - 'body.html' — HTML body (if available)
 - 'attachments/' — extracted attachment files (if any)
@@ -95,11 +95,18 @@ Before starting to process an email, mark it as read:
 - Run 'npx @alook/cli set --agent_id ${task.agentId} --email_id <EMAIL_ID> --status read'
 ---
 
-#### Sending email
+#### Sending a new email
 Write the HTML body to a file first, then send it. The body is forwarded as-is (HTML).
 - Run 'npx @alook/cli email send --agent_id ${task.agentId} --to <ADDRESS> --subject "<SUBJECT>" --body-file <PATH_TO_HTML>'
 - Attach files with '--attachment <PATH>' — repeat the flag for multiple attachments. Each file is uploaded before sending.
 - Example: 'npx @alook/cli email send --agent_id ${task.agentId} --to foo@bar.com --subject "Weekly report" --body-file /tmp/body.html --attachment /tmp/report.pdf --attachment /tmp/chart.png'
+
+#### Replying to an email
+To reply to an email, add '--in-reply-to <EMAIL_ID>' to the send command. This sets the correct email threading headers so the recipient's email client groups the reply into the same conversation thread.
+- Use 'Re: <original subject>' as the subject.
+- Quote the original email body in your reply (wrap it in a blockquote).
+- The <EMAIL_ID> is the Alook email id from metadata.json (not the message_id header).
+- Example: 'npx @alook/cli email send --agent_id ${task.agentId} --to sender@example.com --subject "Re: Bug report" --body-file /tmp/reply.html --in-reply-to <EMAIL_ID>'
 ---
 `;
   }

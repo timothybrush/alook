@@ -4,19 +4,18 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useAgentContext } from "@/contexts/agent-context";
-import { listEmails, getEmailBody, deleteEmail, sendEmail } from "@/lib/api";
+import { listEmails, getEmailBody, getEmailThread, deleteEmail, sendEmail } from "@/lib/api";
 import type { Email, EmailAttachment } from "@alook/shared";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmailCompose } from "@/components/email-compose";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2, Mail, Inbox, Send, Plus, Trash2, Forward, Paperclip, File as FileIcon, Copy, Check } from "lucide-react";
+import { Loader2, Mail, Inbox, Send, Plus, Trash2, Forward, Reply, Paperclip, File as FileIcon, Copy, Check, ShieldX } from "lucide-react";
 import { ResizablePanels } from "@/components/ui/resizable-panels";
 
-type Folder = "inbox" | "sent";
+type Folder = "inbox" | "sent" | "rejected";
 
 function relativeTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -44,12 +43,17 @@ export default function AgentEmailPage() {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [body, setBody] = useState<string | null>(null);
+  const [body, setBody] = useState<{ content: string; isHtml: boolean } | null>(null);
   const [bodyLoading, setBodyLoading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [composeInitial, setComposeInitial] = useState<{
     to?: string; subject?: string; body?: string; attachments?: EmailAttachment[];
+    inReplyTo?: string; references?: string;
   }>({});
+
+  const [thread, setThread] = useState<Email[]>([]);
+  const [expandedThreadId, setExpandedThreadId] = useState<string | null>(null);
+  const [threadBodies, setThreadBodies] = useState<Record<string, { content: string; isHtml: boolean }>>({});
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -89,13 +93,36 @@ export default function AgentEmailPage() {
     setSelectedId(emailId);
     setBody(null);
     setBodyLoading(true);
+    setThread([]);
+    setExpandedThreadId(null);
+    setThreadBodies({});
     try {
-      const text = await getEmailBody(emailId, workspaceId);
-      setBody(text);
+      const [result, threadData] = await Promise.all([
+        getEmailBody(emailId, workspaceId),
+        getEmailThread(emailId, workspaceId).catch(() => [] as Email[]),
+      ]);
+      setBody(result);
+      setThread(threadData);
     } catch {
-      setBody("(body not available)");
+      setBody({ content: "(body not available)", isHtml: false });
     } finally {
       setBodyLoading(false);
+    }
+  };
+
+  const handleExpandThread = async (emailId: string) => {
+    if (expandedThreadId === emailId) {
+      setExpandedThreadId(null);
+      return;
+    }
+    setExpandedThreadId(emailId);
+    if (!threadBodies[emailId]) {
+      try {
+        const result = await getEmailBody(emailId, workspaceId);
+        setThreadBodies((prev) => ({ ...prev, [emailId]: result }));
+      } catch {
+        setThreadBodies((prev) => ({ ...prev, [emailId]: { content: "(body not available)", isHtml: false } }));
+      }
     }
   };
 
@@ -119,9 +146,9 @@ export default function AgentEmailPage() {
     }
   };
 
-  const handleSend = async (to: string, subject: string, htmlBody: string, attachments: EmailAttachment[]): Promise<boolean> => {
+  const handleSend = async (to: string, subject: string, htmlBody: string, attachments: EmailAttachment[], threading?: { inReplyTo?: string; references?: string }): Promise<boolean> => {
     try {
-      await sendEmail(agentId, to, subject, htmlBody, workspaceId, attachments.length > 0 ? attachments : undefined);
+      await sendEmail(agentId, to, subject, htmlBody, workspaceId, attachments.length > 0 ? attachments : undefined, threading);
       toast.success("Email sent");
       setComposing(false);
       setFolder("sent");
@@ -132,24 +159,43 @@ export default function AgentEmailPage() {
     }
   };
 
+  const buildQuotedBody = (email: Email) => [
+    `<br/><br/>`,
+    `<div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 0; color: #666;">`,
+    `<p><strong>From:</strong> ${email.from_email}<br/>`,
+    `<strong>To:</strong> ${email.to_email}<br/>`,
+    `<strong>Date:</strong> ${new Date(email.created_at).toLocaleString()}<br/>`,
+    `<strong>Subject:</strong> ${email.subject}</p>`,
+    email.html_body ? email.html_body : body?.isHtml ? body.content : `<pre>${body?.content ?? ""}</pre>`,
+    `</div>`,
+  ].join("");
+
+  const buildThreadingContext = (email: Email) => {
+    const inReplyTo = email.message_id || undefined;
+    const refs = [email.references, email.message_id].filter(Boolean).join(" ").trim() || undefined;
+    return { inReplyTo, references: refs };
+  };
+
+  const handleReply = (email: Email) => {
+    const reSubject = email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`;
+    setSelectedId(null);
+    setComposeInitial({
+      to: email.from_email,
+      subject: reSubject,
+      body: buildQuotedBody(email),
+      ...buildThreadingContext(email),
+    });
+    setComposing(true);
+  };
+
   const handleForward = (email: Email) => {
     const fwdSubject = email.subject.startsWith("Fwd:") ? email.subject : `Fwd: ${email.subject}`;
-    const quotedBody = [
-      `<br/><br/>`,
-      `<div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 0; color: #666;">`,
-      `<p><strong>From:</strong> ${email.from_email}<br/>`,
-      `<strong>To:</strong> ${email.to_email}<br/>`,
-      `<strong>Date:</strong> ${new Date(email.created_at).toLocaleString()}<br/>`,
-      `<strong>Subject:</strong> ${email.subject}</p>`,
-      email.html_body ? email.html_body : `<pre>${body ?? ""}</pre>`,
-      `</div>`,
-    ].join("");
-
     setSelectedId(null);
     setComposeInitial({
       subject: fwdSubject,
-      body: quotedBody,
+      body: buildQuotedBody(email),
       attachments: email.attachments ?? [],
+      ...buildThreadingContext(email),
     });
     setComposing(true);
   };
@@ -228,6 +274,19 @@ export default function AgentEmailPage() {
           <Send className="size-4 shrink-0" />
           Sent
         </button>
+        <button
+          type="button"
+          onClick={() => setFolder("rejected")}
+          className={cn(
+            "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors cursor-pointer",
+            folder === "rejected"
+              ? "bg-accent text-foreground font-medium"
+              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          )}
+        >
+          <ShieldX className="size-4 shrink-0" />
+          Rejected
+        </button>
       </nav>
     </div>
   );
@@ -251,7 +310,7 @@ export default function AgentEmailPage() {
         <div className="flex flex-col items-center justify-center h-full animate-[fade-up_400ms_ease-out_both]">
           <Mail className="size-8 text-muted-foreground mb-3" />
           <p className="text-sm text-muted-foreground">
-            {folder === "inbox" ? "No emails received yet" : "No emails sent yet"}
+            {folder === "inbox" ? "No emails received yet" : folder === "sent" ? "No emails sent yet" : "No rejected emails"}
           </p>
         </div>
       ) : (
@@ -269,7 +328,7 @@ export default function AgentEmailPage() {
           >
             <div className="flex items-center justify-between gap-2 mb-0.5">
               <p className="text-sm font-medium truncate">
-                {folder === "inbox" ? email.from_email : email.to_email}
+                {folder === "sent" ? email.to_email : email.from_email}
               </p>
               <span className="text-xs text-muted-foreground shrink-0">
                 {relativeTime(email.created_at)}
@@ -278,17 +337,6 @@ export default function AgentEmailPage() {
             <p className="text-[13px] truncate text-muted-foreground">
               {email.subject || "(no subject)"}
             </p>
-            {folder === "inbox" && (
-              <div className="mt-1">
-                {email.is_whitelisted ? (
-                  <Badge className="text-[11px] h-4 px-1">triggered</Badge>
-                ) : (
-                  <Badge variant="secondary" className="text-[11px] h-4 px-1">
-                    forwarded
-                  </Badge>
-                )}
-              </div>
-            )}
           </button>
         ))
       )}
@@ -307,6 +355,8 @@ export default function AgentEmailPage() {
           initialSubject={composeInitial.subject}
           initialBody={composeInitial.body}
           initialAttachments={composeInitial.attachments}
+          inReplyTo={composeInitial.inReplyTo}
+          references={composeInitial.references}
         />
       ) : !selected ? (
         <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -316,6 +366,17 @@ export default function AgentEmailPage() {
         <div className="flex flex-col h-full min-w-[400px] max-w-3xl mx-auto w-full">
           {/* Detail toolbar */}
           <div className="flex items-center gap-0.5 border-b border-border/40 px-4 py-1.5">
+            {folder !== "sent" && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-muted-foreground/60 hover:text-foreground"
+                title="Reply"
+                onClick={() => handleReply(selected)}
+              >
+                <Reply className="size-3.5" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -339,22 +400,55 @@ export default function AgentEmailPage() {
             </Button>
           </div>
 
+          {/* Thread parents */}
+          {thread.length > 0 && (
+            <div className="border-b border-border/30">
+              {thread.map((parent) => (
+                <div key={parent.id} className="border-b border-border/20 last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => handleExpandThread(parent.id)}
+                    className="w-full flex items-center gap-2 px-5 py-2.5 text-left hover:bg-accent/30 transition-colors cursor-pointer"
+                  >
+                    <span className="text-xs text-muted-foreground">
+                      {expandedThreadId === parent.id ? "▾" : "▸"}
+                    </span>
+                    <span className="text-sm font-medium truncate flex-1">
+                      {parent.from_email}
+                    </span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {relativeTime(parent.created_at)}
+                    </span>
+                  </button>
+                  {expandedThreadId === parent.id && (
+                    <div className="px-5 pb-3">
+                      <p className="text-xs text-muted-foreground mb-2">{parent.subject}</p>
+                      {threadBodies[parent.id] ? (
+                        threadBodies[parent.id].isHtml ? (
+                          <div
+                            className="markdown max-w-full text-sm text-foreground"
+                            dangerouslySetInnerHTML={{ __html: threadBodies[parent.id].content }}
+                          />
+                        ) : (
+                          <div className="text-sm whitespace-pre-wrap leading-[1.65] text-foreground">
+                            {threadBodies[parent.id].content}
+                          </div>
+                        )
+                      ) : (
+                        <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Email detail */}
           <div className="p-5">
             <h2 className="text-lg font-heading font-semibold tracking-tight mb-1">
               {selected.subject || "(no subject)"}
             </h2>
-            {folder === "inbox" && (
-              <div className="flex items-center gap-2 mb-4">
-                {selected.is_whitelisted ? (
-                  <Badge className="text-[11px] h-4 px-1">triggered</Badge>
-                ) : (
-                  <Badge variant="secondary" className="text-[11px] h-4 px-1">
-                    forwarded
-                  </Badge>
-                )}
-              </div>
-            )}
             <div className="text-sm space-y-1 mb-5">
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground w-16 shrink-0">From</span>
@@ -366,7 +460,7 @@ export default function AgentEmailPage() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground w-16 shrink-0">
-                  {folder === "inbox" ? "Received" : "Sent"}
+                  {folder === "sent" ? "Sent" : "Received"}
                 </span>
                 <span className="text-muted-foreground">
                   {new Date(selected.created_at).toLocaleString()}
@@ -383,9 +477,14 @@ export default function AgentEmailPage() {
                 className="markdown max-w-full text-base text-foreground"
                 dangerouslySetInnerHTML={{ __html: selected.html_body }}
               />
+            ) : body?.isHtml ? (
+              <div
+                className="markdown max-w-full text-base text-foreground"
+                dangerouslySetInnerHTML={{ __html: body.content }}
+              />
             ) : (
               <div className="text-sm whitespace-pre-wrap leading-[1.65] text-foreground">
-                {body}
+                {body?.content}
               </div>
             )}
 

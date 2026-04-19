@@ -43,6 +43,17 @@ describe("buildInstructionContent email tool injection", () => {
     expect(content).toContain("--attachment");
   });
 
+  it("includes reply-to docs when agent has email handle", () => {
+    const task = makeTask({
+      agent: { name: "test", instructions: "do stuff", emailHandle: "myagent" },
+    });
+    const content = buildInstructionContent(task);
+
+    expect(content).toContain("--in-reply-to <EMAIL_ID>");
+    expect(content).toContain("Replying to an email");
+    expect(content).toContain("Re:");
+  });
+
   it("omits send-email docs when agent has no email handle", () => {
     const task = makeTask({
       agent: { name: "test", instructions: "do stuff" },

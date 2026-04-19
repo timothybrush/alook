@@ -10,6 +10,14 @@ describe("email query module exports", () => {
     expect(typeof emailQueries.getSentEmails).toBe("function");
   });
 
+  it("exports getRejectedEmails", () => {
+    expect(typeof emailQueries.getRejectedEmails).toBe("function");
+  });
+
+  it("exports getEmailByMessageId", () => {
+    expect(typeof emailQueries.getEmailByMessageId).toBe("function");
+  });
+
   it("exports deleteEmail", () => {
     expect(typeof emailQueries.deleteEmail).toBe("function");
   });
@@ -43,6 +51,11 @@ describe("email query function signatures", () => {
 
   it("getSentEmails accepts optional status parameter", () => {
     expect(emailQueries.getSentEmails.length).toBeLessThanOrEqual(5);
+  });
+
+  it("getRejectedEmails requires agentEmail parameter to exclude outbound", () => {
+    // (db, agentId, agentEmail, workspaceId, status?)
+    expect(emailQueries.getRejectedEmails.length).toBeGreaterThanOrEqual(4);
   });
 
   it("updateEmailStatus has correct arity", () => {

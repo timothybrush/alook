@@ -1,9 +1,9 @@
-import PostalMime from "postal-mime";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { createDb, queries } from "@alook/shared";
 import { withAuth } from "@/lib/middleware/auth";
 import { withWorkspaceMember } from "@/lib/middleware/workspace";
-import { writeError } from "@/lib/middleware/helpers";
+import { writeJSON, writeError } from "@/lib/middleware/helpers";
+import { emailToResponse } from "@/lib/api/responses";
 
 export const GET = withAuth(async (req, ctx) => {
   const ws = await withWorkspaceMember(req, ctx);
@@ -18,24 +18,20 @@ export const GET = withAuth(async (req, ctx) => {
   const email = await queries.email.getEmailById(db, id, ws.workspaceId);
   if (!email) return writeError("email not found", 404);
 
-  const object = await (env as Env).EMAIL_BUCKET.get(email.r2Key);
-  if (!object) {
-    return new Response("Email body not available", {
-      status: 404,
-      headers: { "Content-Type": "text/plain" },
-    });
+  if (!email.inReplyTo) return writeJSON([]);
+
+  const MAX_DEPTH = 50;
+  const thread: typeof email[] = [];
+  let currentReplyTo = email.inReplyTo;
+  const seen = new Set<string>();
+
+  while (currentReplyTo && !seen.has(currentReplyTo) && thread.length < MAX_DEPTH) {
+    seen.add(currentReplyTo);
+    const parent = await queries.email.getEmailByMessageId(db, currentReplyTo, ws.workspaceId);
+    if (!parent) break;
+    thread.unshift(parent);
+    currentReplyTo = parent.inReplyTo;
   }
 
-  const raw = await object.arrayBuffer();
-  const parsed = await PostalMime.parse(raw);
-
-  if (parsed.html) {
-    return new Response(parsed.html, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
-  return new Response(parsed.text ?? "", {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  });
+  return writeJSON(thread.map(emailToResponse));
 });
