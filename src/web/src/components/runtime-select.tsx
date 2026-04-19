@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentRuntime as Runtime } from "@alook/shared";
+import { ProviderLogo } from "@/components/provider-logo";
 import {
   Select,
   SelectTrigger,
@@ -86,6 +87,7 @@ export function RuntimeSelect({
                 disabled={rt.status !== "online"}
               >
                 <span className="flex items-center gap-2">
+                  <ProviderLogo provider={rt.provider} className="h-4 w-4" />
                   <span>{rt.provider}</span>
                   <span className="text-muted-foreground text-xs">
                     ({rt.status})

@@ -7,6 +7,7 @@ import { useGSAP } from "@gsap/react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SplitText } from "gsap/SplitText";
 import { TypewriterVisual } from "@/components/typewriter-visual";
+import { ProviderLogo } from "@/components/provider-logo";
 
 gsap.registerPlugin(ScrollTrigger, SplitText);
 
@@ -40,6 +41,11 @@ export function HeroSection({ isLoggedIn }: { isLoggedIn: boolean }) {
           ".hero-specs",
           { y: 15, opacity: 0, duration: 0.5, ease: "power2.out" },
           "-=0.1"
+        )
+        .from(
+          ".hero-providers",
+          { y: 10, opacity: 0, duration: 0.4, ease: "power2.out" },
+          "-=0.2"
         )
         .from(
           ctaRef.current,
@@ -150,6 +156,37 @@ export function HeroSection({ isLoggedIn }: { isLoggedIn: boolean }) {
             >
               {spec}
             </span>
+          ))}
+        </div>
+
+        {/* Agent providers */}
+        <div className="hero-providers mt-5 flex items-center justify-center gap-4">
+          <span
+            className="text-xs uppercase tracking-[0.15em]"
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--landing-text-muted)",
+            }}
+          >
+            Use with
+          </span>
+          {(
+            [
+              { provider: "claude", comingSoon: false },
+              { provider: "codex", comingSoon: false },
+              { provider: "opencode", comingSoon: false },
+              { provider: "cursor", comingSoon: true },
+              { provider: "hermes", comingSoon: true },
+              { provider: "openclaw", comingSoon: true },
+            ] as const
+          ).map(({ provider, comingSoon }) => (
+            <div
+              key={provider}
+              className="flex items-center justify-center"
+              style={{ opacity: comingSoon ? 0.45 : 1 }}
+            >
+              <ProviderLogo provider={provider} className="h-5 w-5" />
+            </div>
           ))}
         </div>
 

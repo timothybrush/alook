@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import type { AgentRuntime as Runtime } from "@alook/shared";
 import { signOut } from "@/lib/auth-client";
 import { CLI_CMD } from "@/lib/utils";
+import { ProviderLogo } from "@/components/provider-logo";
 
 function OnboardingSteps({
   generatedToken,
@@ -317,7 +318,8 @@ export function DashboardNavbar() {
                                       className="rounded-md border border-dashed p-2.5 space-y-1"
                                     >
                                       <div className="flex items-center justify-between">
-                                        <span className="text-xs font-medium">
+                                        <span className="text-xs font-medium flex items-center gap-1.5">
+                                          <ProviderLogo provider={runtime.provider} className="h-3.5 w-3.5" />
                                           {runtime.provider}
                                           {runtime.metadata?.version ? (
                                             <span className="ml-1.5 font-normal text-muted-foreground">

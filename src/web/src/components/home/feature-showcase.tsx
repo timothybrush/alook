@@ -19,9 +19,9 @@ const features: Feature[] = [
   {
     number: "I",
     title: "Email",
-    spec: "PROTOCOL: SMTP / FORMAT: RFC 5322",
+    spec: "OUTLOOK · GMAIL · ANYWHERE · ANYTIME",
     description:
-      "Every colleague needs an inbox. Your agent gets a real email address — forward it a bug report, CC it on a thread. It reads, reasons, and replies.",
+      "Talk to your agent from any email client. Forward a bug report, CC it on a thread — it reads, reasons, and replies just like a teammate would.",
     terminal: [
       "█████████████████████████",
       "█▓▒                   ▒▓█",
@@ -38,9 +38,9 @@ const features: Feature[] = [
   {
     number: "II",
     title: "Calendar",
-    spec: "SCHEDULING: AUTONOMOUS / SYNC: REAL-TIME",
+    spec: "SHOWS UP AT THE RIGHT TIME",
     description:
-      "Your colleague manages its own schedule. It knows when to work, when to follow up, and when to wait — time-aware, not just task-aware.",
+      "Your agent manages its own schedule. It knows when to work, when to follow up, and when to wait — always on time, never in the way.",
     terminal: [
       "▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓",
       "▓  M  T  W  T  F  S  S  ▓",
@@ -56,9 +56,9 @@ const features: Feature[] = [
   {
     number: "III",
     title: "Always-On",
-    spec: "PROCESS: PERSISTENT / UPTIME: CONTINUOUS",
+    spec: "NOT A TOOL — A TEAMMATE, 24/7",
     description:
-      "Your colleague never sleeps. A persistent daemon on your machine keeps agents always-on — polling for work, executing tasks, even while you're away.",
+      "A persistent daemon on your machine keeps your agent running around the clock — picking up work, executing tasks, even while you sleep.",
     terminal: [
       "                         ",
       "                         ",
@@ -75,9 +75,9 @@ const features: Feature[] = [
   {
     number: "IV",
     title: "Memory",
-    spec: "STORAGE: LOCAL / PERSISTENCE: INDEFINITE",
+    spec: "FULLY LOCAL · ALWAYS REMEMBERS",
     description:
-      "Your colleague remembers everything. Context from past conversations, decisions, and preferences — all stored locally, building up over time.",
+      "Context from past conversations, decisions, and preferences — all stored on your machine, building up over time. Nothing leaves, nothing fades.",
     terminal: [
       "           ▒░░░░░░       ",
       "           ░             ",
@@ -98,6 +98,17 @@ export function FeatureShowcase() {
 
   useGSAP(
     () => {
+      gsap.from(".feature-hero", {
+        y: 30,
+        opacity: 0,
+        duration: 0.6,
+        scrollTrigger: {
+          trigger: sectionRef.current,
+          start: "top 75%",
+          toggleActions: "play none none none",
+        },
+      });
+
       const panels = gsap.utils.toArray<HTMLElement>(".feature-row");
       panels.forEach((panel) => {
         gsap.from(panel, {
@@ -119,9 +130,42 @@ export function FeatureShowcase() {
   return (
     <section
       ref={sectionRef}
-      className="relative overflow-hidden py-24"
+      className="relative overflow-hidden py-24 lg:py-32"
       style={{ backgroundColor: "var(--landing-bg)" }}
     >
+      {/* Section hero */}
+      <div className="feature-hero mx-auto mb-20 max-w-4xl px-6 text-center lg:mb-28">
+        <div
+          className="mb-3 text-xs uppercase tracking-[0.3em]"
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: "var(--landing-text-muted)",
+          }}
+        >
+          Features
+        </div>
+        <h2
+          style={{
+            fontFamily: "var(--font-crt)",
+            color: "var(--landing-text)",
+            fontSize: "clamp(1.75rem, 4vw, 3rem)",
+          }}
+        >
+          Transform Agent into a Living Colleague
+        </h2>
+        <p
+          className="mx-auto mt-3 max-w-xl"
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: "var(--landing-text-muted)",
+            fontSize: "0.85rem",
+          }}
+        >
+          Your local agent is the brain. Alook wraps it in everything else
+          it needs to show up, stay present, and work like a real teammate.
+        </p>
+      </div>
+
       <div className="mx-auto flex max-w-5xl flex-col gap-24 px-6 lg:gap-32 lg:px-12">
         {features.map((feature, i) => (
           <FeaturePanel key={feature.number} feature={feature} reversed={i % 2 === 1} />
@@ -135,8 +179,8 @@ function FeaturePanel({ feature, reversed }: { feature: Feature; reversed: boole
   return (
     <div className={`feature-row grid w-full grid-cols-1 items-center gap-8 lg:grid-cols-2 lg:gap-16 ${reversed ? "lg:[direction:rtl]" : ""}`}>
       {/* Text side */}
-      <div className={`panel-text ${reversed ? "lg:[direction:ltr]" : ""}`}>
-        <div className="mb-2 flex items-center gap-3">
+      <div className={`panel-text text-center lg:text-left ${reversed ? "lg:[direction:ltr]" : ""}`}>
+        <div className="mb-2 flex items-baseline justify-center gap-3 lg:justify-start">
           <span
             className="text-3xl"
             style={{
@@ -146,17 +190,17 @@ function FeaturePanel({ feature, reversed }: { feature: Feature; reversed: boole
           >
             {feature.number}.
           </span>
+          <h2
+            className="leading-tight"
+            style={{
+              fontFamily: "var(--font-crt)",
+              color: "var(--landing-text)",
+              fontSize: "clamp(2rem, 4vw, 3rem)",
+            }}
+          >
+            {feature.title}
+          </h2>
         </div>
-        <h2
-          className="leading-tight"
-          style={{
-            fontFamily: "var(--font-crt)",
-            color: "var(--landing-text)",
-            fontSize: "clamp(2rem, 4vw, 3rem)",
-          }}
-        >
-          {feature.title}
-        </h2>
         <div
           className="mt-2 text-[10px] uppercase tracking-[0.2em]"
           style={{
@@ -167,7 +211,7 @@ function FeaturePanel({ feature, reversed }: { feature: Feature; reversed: boole
           {feature.spec}
         </div>
         <p
-          className="mt-4 max-w-md leading-relaxed text-[0.8125rem] sm:text-[0.875rem]"
+          className="mx-auto mt-4 max-w-md leading-relaxed text-[0.8125rem] sm:text-[0.875rem] lg:mx-0"
           style={{
             fontFamily: "var(--font-mono)",
             color: "var(--landing-text-muted)",

@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Monitor, Plus } from "lucide-react";
 import type { AgentRuntime as Runtime } from "@alook/shared";
 import { CLI_CMD } from "@/lib/utils";
+import { ProviderLogo } from "@/components/provider-logo";
 
 function ConnectMachineSteps({
   generatedToken,
@@ -358,7 +359,9 @@ export default function RuntimesPage() {
                           <Badge
                             key={runtime.id}
                             variant="secondary"
+                            className="gap-1.5"
                           >
+                            <ProviderLogo provider={runtime.provider} className="h-3.5 w-3.5" />
                             {runtime.provider}
                             {runtime.metadata?.version ? (
                               <span className="text-muted-foreground font-normal">
