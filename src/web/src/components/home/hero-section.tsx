@@ -183,7 +183,7 @@ export function HeroSection({ isLoggedIn }: { isLoggedIn: boolean }) {
             <div
               key={provider}
               className="flex items-center justify-center"
-              style={{ opacity: comingSoon ? 0.45 : 1 }}
+              style={{ opacity: comingSoon ? 0.45 : 1, color: "var(--landing-text)" }}
             >
               <ProviderLogo provider={provider} className="h-5 w-5" />
             </div>
