@@ -167,18 +167,10 @@ describe("email threading (inbound)", () => {
 
 describe("email folder: rejected", () => {
   it("GET /api/email?folder=rejected returns only non-whitelisted emails", async () => {
-    // Ensure we have a non-whitelisted email
-    const strangerFrom = `stranger-${randomUUID().slice(0, 8)}@external.com`
-    const to = `${seed.agentEmailHandle}@alook.ai`
-    await fetch(
-      `${EMAIL_WORKER_URL}/cdn-cgi/handler/email?from=${encodeURIComponent(strangerFrom)}&to=${encodeURIComponent(to)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: rawEmail(strangerFrom, to, "Rejected folder test", "Spam content"),
-      },
-    )
-    await waitForEmail(seed.agentId, strangerFrom)
+    const agentEmail = `${seed.agentEmailHandle}@alook.ai`
+    const now = new Date().toISOString()
+    const rejId = `erej_${randomUUID().slice(0, 8)}`
+    sql(`INSERT INTO emails (id, agent_id, workspace_id, from_email, to_email, subject, r2_key, is_whitelisted, forwarded, message_id, in_reply_to, "references", created_at) VALUES ('${rejId}', '${seed.agentId}', '${seed.workspaceId}', 'stranger@external.com', '${agentEmail}', 'Rejected folder test', 'emails/fake-rej/raw', 0, 0, '', '', '', '${now}')`)
 
     const res = await tokenRequest(
       `/api/email?workspace_id=${seed.workspaceId}&agentId=${seed.agentId}&folder=rejected`,
