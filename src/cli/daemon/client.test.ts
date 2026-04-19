@@ -172,7 +172,7 @@ describe("DaemonClient.poll() with mocked fetch", () => {
     );
   });
 
-  it("returns TaskApi[] on valid response", async () => {
+  it("returns tasks and evicted: false on valid response", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -180,12 +180,13 @@ describe("DaemonClient.poll() with mocked fetch", () => {
     });
 
     const client = new DaemonClient("http://localhost:8080");
-    const tasks = await client.poll("tok", "d1", 1);
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].id).toBe("t1");
+    const result = await client.poll("tok", "d1", 1);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].id).toBe("t1");
+    expect(result.evicted).toBe(false);
   });
 
-  it("returns empty array when no tasks", async () => {
+  it("returns empty tasks and evicted: false when no tasks", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -193,8 +194,22 @@ describe("DaemonClient.poll() with mocked fetch", () => {
     });
 
     const client = new DaemonClient("http://localhost:8080");
-    const tasks = await client.poll("tok", "d1", 1);
-    expect(tasks).toEqual([]);
+    const result = await client.poll("tok", "d1", 1);
+    expect(result.tasks).toEqual([]);
+    expect(result.evicted).toBe(false);
+  });
+
+  it("returns evicted: true when server signals eviction", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ tasks: [], evicted: true }),
+    });
+
+    const client = new DaemonClient("http://localhost:8080");
+    const result = await client.poll("tok", "d1", 1);
+    expect(result.tasks).toEqual([]);
+    expect(result.evicted).toBe(true);
   });
 
   it("throws ZodError when API returns wrong shape", async () => {

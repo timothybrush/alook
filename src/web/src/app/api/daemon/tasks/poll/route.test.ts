@@ -89,21 +89,32 @@ function postReq(body: unknown) {
 describe("POST /api/daemon/tasks/poll", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns empty tasks array when daemon has no runtimes but still updates liveness", async () => {
-    mockUpsertMachine.mockResolvedValue({});
+  it("returns evicted: true and skips heartbeat when daemon has no runtimes", async () => {
     mockGetRuntimeIdsByDaemon.mockResolvedValue([]);
-    mockBroadcastToUser.mockResolvedValue(undefined);
 
     const res = await POST(postReq({ daemon_id: "d1" }));
     const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(body.tasks).toEqual([]);
-    expect(mockUpsertMachine).toHaveBeenCalledWith({}, {
-      daemonId: "d1",
-      workspaceId: "w1",
-      deviceInfo: "d1",
-    });
+    expect(body.evicted).toBe(true);
+    expect(mockUpsertMachine).not.toHaveBeenCalled();
+    expect(mockBroadcastToUser).not.toHaveBeenCalled();
+  });
+
+  it("omits evicted field for normal polls with active runtimes", async () => {
+    mockUpsertMachine.mockResolvedValue({});
+    mockGetRuntimeIdsByDaemon.mockResolvedValue(["r1"]);
+    mockSweepStaleState.mockResolvedValue(undefined);
+    mockBroadcastToUser.mockResolvedValue(undefined);
+    mockClaimTasksForRuntimes.mockResolvedValue([]);
+
+    const res = await POST(postReq({ daemon_id: "d1" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.evicted).toBeUndefined();
+    expect(mockUpsertMachine).toHaveBeenCalled();
     expect(mockBroadcastToUser).toHaveBeenCalled();
   });
 

@@ -220,6 +220,33 @@ export async function startDaemon(
     }
   }
 
+  function evictWorkspace(workspaceId: string): void {
+    const idx = workspaceStates.findIndex((ws) => ws.workspaceId === workspaceId);
+    if (idx === -1) return;
+
+    const ws = workspaceStates[idx];
+    for (const rid of ws.runtimeIds) {
+      runtimeIndex.delete(rid);
+    }
+    workspaceStates.splice(idx, 1);
+
+    health.setRuntimeCount(
+      workspaceStates.reduce((sum, w) => sum + w.runtimeIds.length, 0),
+    );
+
+    try {
+      const cfg = loadCLIConfigForProfile(profile);
+      cfg.watched_workspaces = (cfg.watched_workspaces || []).filter(
+        (w) => w.id !== workspaceId,
+      );
+      saveCLIConfigForProfile(profile, cfg);
+    } catch {
+      // Best-effort — config write failure must not block eviction
+    }
+
+    log.info(`Workspace ${workspaceId} evicted — runtimes removed server-side`);
+  }
+
   // Staggered per-workspace polling
   const pollCycle = async () => {
     let remaining = config.maxConcurrentTasks - activeTasks.size;
@@ -227,6 +254,7 @@ export async function startDaemon(
 
     const N = workspaceStates.length;
     const staggerMs = N > 1 ? Math.floor(config.pollInterval / N) : 0;
+    const evictedIds: string[] = [];
 
     for (let i = 0; i < N; i++) {
       if (remaining <= 0) break;
@@ -237,8 +265,14 @@ export async function startDaemon(
       }
 
       try {
-        const tasks = await client.poll(ws.token, config.daemonId, remaining);
-        for (const apiTask of tasks) {
+        const { tasks: apiTasks, evicted } = await client.poll(ws.token, config.daemonId, remaining);
+
+        if (evicted) {
+          evictedIds.push(ws.workspaceId);
+          continue;
+        }
+
+        for (const apiTask of apiTasks) {
           const task = fromApiTask(apiTask);
           syncAgentId(task.agentId, ws.workspaceId);
           activeTasks.add(task.id);
@@ -252,6 +286,15 @@ export async function startDaemon(
       } catch (e) {
         log.debug("Poll error", e);
       }
+    }
+
+    for (const id of evictedIds) {
+      evictWorkspace(id);
+    }
+
+    if (workspaceStates.length === 0) {
+      log.info("All workspaces evicted — shutting down");
+      shutdown();
     }
   };
 

@@ -58,7 +58,7 @@ export class DaemonClient {
     });
   }
 
-  async poll(token: string, daemonId: string, maxTasks: number): Promise<TaskApi[]> {
+  async poll(token: string, daemonId: string, maxTasks: number): Promise<{ tasks: TaskApi[], evicted: boolean }> {
     const raw = await this.request<unknown>(
       "POST",
       "/api/daemon/tasks/poll",
@@ -66,7 +66,7 @@ export class DaemonClient {
       { daemon_id: daemonId, max_tasks: maxTasks },
     );
     const resp: PollResponse = PollResponseSchema.parse(raw);
-    return resp.tasks;
+    return { tasks: resp.tasks, evicted: resp.evicted ?? false };
   }
 
   startTask(token: string, taskId: string) {

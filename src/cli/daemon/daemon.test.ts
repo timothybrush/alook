@@ -7,7 +7,7 @@ const mockClientInstance = {
     runtimes: [{ id: "rt1" }],
   })),
   deregister: vi.fn(async () => {}),
-  poll: vi.fn(async () => []),
+  poll: vi.fn(async () => ({ tasks: [], evicted: false })),
   startTask: vi.fn(async () => ({})),
   completeTask: vi.fn(async () => ({})),
   failTask: vi.fn(async () => ({})),
@@ -216,9 +216,9 @@ describe("daemon session runner dispatch", () => {
     mockClientInstance.poll.mockImplementation(async () => {
       if (!claimed) {
         claimed = true;
-        return [fakeTask];
+        return { tasks: [fakeTask], evicted: false };
       }
-      return [];
+      return { tasks: [], evicted: false };
     });
 
     return fakeTask;
@@ -278,9 +278,9 @@ describe("daemon session runner dispatch", () => {
     mockClientInstance.poll.mockImplementation(async () => {
       if (!claimed) {
         claimed = true;
-        return [fakeTask];
+        return { tasks: [fakeTask], evicted: false };
       }
-      return [];
+      return { tasks: [], evicted: false };
     });
 
     await startDaemon();
@@ -326,7 +326,7 @@ describe("daemon session runner dispatch", () => {
 
     // After close, we verify indirectly: the next poll should request full capacity (20)
     // If activeTasks wasn't decremented, it would request 19
-    mockClientInstance.poll.mockResolvedValue([]);
+    mockClientInstance.poll.mockResolvedValue({ tasks: [], evicted: false });
     // Manually invoke a poll by calling the function startDaemon set up
     // We verify the listener was attached — the decrement logic is straightforward
   });
@@ -400,7 +400,7 @@ describe("daemon with multi-workspace config", () => {
   });
 
   it("polls each workspace with its own token", async () => {
-    mockClientInstance.poll.mockResolvedValue([]);
+    mockClientInstance.poll.mockResolvedValue({ tasks: [], evicted: false });
 
     await startDaemon();
 
@@ -447,8 +447,8 @@ describe("daemon with multi-workspace config", () => {
     let pollCall = 0;
     mockClientInstance.poll.mockImplementation(async () => {
       pollCall++;
-      if (pollCall === 1) return [fakeTask, { ...fakeTask, id: "t2" }, { ...fakeTask, id: "t3" }];
-      return [];
+      if (pollCall === 1) return { tasks: [fakeTask, { ...fakeTask, id: "t2" }, { ...fakeTask, id: "t3" }], evicted: false };
+      return { tasks: [], evicted: false };
     });
 
     await startDaemon();
@@ -489,9 +489,9 @@ describe("daemon with multi-workspace config", () => {
     let pollCall = 0;
     mockClientInstance.poll.mockImplementation(async () => {
       pollCall++;
-      if (pollCall === 1) return [fakeTaskWs1];
-      if (pollCall === 2) return [fakeTaskWs2];
-      return [];
+      if (pollCall === 1) return { tasks: [fakeTaskWs1], evicted: false };
+      if (pollCall === 2) return { tasks: [fakeTaskWs2], evicted: false };
+      return { tasks: [], evicted: false };
     });
 
     await startDaemon();
@@ -517,7 +517,7 @@ describe("daemon shutdown", () => {
 
     // Restore default mock implementations after clearAllMocks
     mockClientInstance.register.mockResolvedValue({ runtimes: [{ id: "rt1" }] });
-    mockClientInstance.poll.mockResolvedValue([]);
+    mockClientInstance.poll.mockResolvedValue({ tasks: [], evicted: false });
     mockClientInstance.startTask.mockResolvedValue({});
   });
 
@@ -603,9 +603,9 @@ describe("daemon shutdown", () => {
     mockClientInstance.poll.mockImplementation(async () => {
       if (!claimed) {
         claimed = true;
-        return [fakeTask];
+        return { tasks: [fakeTask], evicted: false };
       }
-      return [];
+      return { tasks: [], evicted: false };
     });
     mockClientInstance.startTask.mockResolvedValue({});
 
@@ -673,8 +673,8 @@ describe("daemon agent_ids lazy sync", () => {
 
     let claimed = false;
     mockClientInstance.poll.mockImplementation(async () => {
-      if (!claimed) { claimed = true; return [makeFakeTask()]; }
-      return [];
+      if (!claimed) { claimed = true; return { tasks: [makeFakeTask()], evicted: false }; }
+      return { tasks: [], evicted: false };
     });
 
     await startDaemon();
@@ -694,8 +694,8 @@ describe("daemon agent_ids lazy sync", () => {
 
     let claimed = false;
     mockClientInstance.poll.mockImplementation(async () => {
-      if (!claimed) { claimed = true; return [makeFakeTask()]; }
-      return [];
+      if (!claimed) { claimed = true; return { tasks: [makeFakeTask()], evicted: false }; }
+      return { tasks: [], evicted: false };
     });
 
     await startDaemon();
@@ -714,10 +714,9 @@ describe("daemon agent_ids lazy sync", () => {
     mockClientInstance.poll.mockImplementation(async () => {
       if (!claimed) {
         claimed = true;
-        // Two tasks from the same agent
-        return [makeFakeTask({ id: "t1" }), makeFakeTask({ id: "t2" })];
+        return { tasks: [makeFakeTask({ id: "t1" }), makeFakeTask({ id: "t2" })], evicted: false };
       }
-      return [];
+      return { tasks: [], evicted: false };
     });
 
     await startDaemon();
@@ -746,7 +745,7 @@ describe("daemon startup failures release pidfile", () => {
       ],
     });
     mockClientInstance.register.mockResolvedValue({ runtimes: [{ id: "rt1" }] });
-    mockClientInstance.poll.mockResolvedValue([]);
+    mockClientInstance.poll.mockResolvedValue({ tasks: [], evicted: false });
     const cp = await import("child_process");
     vi.mocked(cp.execSync).mockImplementation(() => undefined as never);
   });
@@ -961,5 +960,204 @@ describe("pruneSessionRunnerLogs", () => {
     pruneSessionRunnerLogs();
     // Only 2 .log files, well under 50 limit
     expect(mockUnlinkSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("daemon workspace eviction", () => {
+  beforeEach(() => {
+    signalHandlers.clear();
+    intervalTimers.length = 0;
+    clearedTimers.length = 0;
+    spawnedChildren.length = 0;
+    nextPid = 50000;
+    vi.clearAllMocks();
+    mockProcessExit.mockImplementation((() => {}) as any);
+  });
+
+  afterEach(() => {
+    for (const t of intervalTimers) realClearInterval(t);
+  });
+
+  it("removes workspace from polling on eviction and stops polling it", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [
+        { id: "ws1", name: "Personal", token: "al_tok_ws1" },
+        { id: "ws2", name: "Team", token: "al_tok_ws2" },
+      ],
+    });
+
+    let registerCall = 0;
+    mockClientInstance.register.mockImplementation(async () => {
+      registerCall++;
+      return { runtimes: [{ id: `rt${registerCall}` }] };
+    });
+
+    let pollCall = 0;
+    mockClientInstance.poll.mockImplementation(async () => {
+      pollCall++;
+      // First cycle: ws1 normal, ws2 evicted
+      if (pollCall === 1) return { tasks: [], evicted: false };
+      if (pollCall === 2) return { tasks: [], evicted: true };
+      // Subsequent cycles should only get ws1
+      return { tasks: [], evicted: false };
+    });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // ws2 was evicted — only ws1 should remain
+    // Verify config was saved to remove ws2
+    expect(saveCLIConfigForProfile).toHaveBeenCalled();
+    const savedConfig = vi.mocked(saveCLIConfigForProfile).mock.calls[0][1];
+    const wsIds = savedConfig.watched_workspaces!.map((w: any) => w.id);
+    expect(wsIds).toContain("ws1");
+    expect(wsIds).not.toContain("ws2");
+  });
+
+  it("removes evicted workspace from local config file", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [{ id: "ws1", name: "Test WS", token: "al_test_token" }],
+    });
+    mockClientInstance.register.mockResolvedValue({ runtimes: [{ id: "rt1" }] });
+    mockClientInstance.poll.mockResolvedValue({ tasks: [], evicted: true });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(saveCLIConfigForProfile).toHaveBeenCalled();
+    const savedConfig = vi.mocked(saveCLIConfigForProfile).mock.calls[0][1];
+    expect(savedConfig.watched_workspaces).toEqual([]);
+  });
+
+  it("shuts down gracefully when all workspaces are evicted", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [{ id: "ws1", name: "Test WS", token: "al_test_token" }],
+    });
+    mockClientInstance.register.mockResolvedValue({ runtimes: [{ id: "rt1" }] });
+    mockClientInstance.poll.mockResolvedValue({ tasks: [], evicted: true });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Should trigger shutdown → process.exit(0)
+    expect(mockProcessExit).toHaveBeenCalledWith(0);
+  });
+
+  it("continues polling remaining workspaces when middle one is evicted (3 workspaces)", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [
+        { id: "ws1", name: "First", token: "al_tok_ws1" },
+        { id: "ws2", name: "Middle", token: "al_tok_ws2" },
+        { id: "ws3", name: "Last", token: "al_tok_ws3" },
+      ],
+    });
+
+    let registerCall = 0;
+    mockClientInstance.register.mockImplementation(async () => {
+      registerCall++;
+      return { runtimes: [{ id: `rt${registerCall}` }] };
+    });
+
+    const pollTokens: string[] = [];
+    mockClientInstance.poll.mockImplementation(async (token: string) => {
+      pollTokens.push(token);
+      // Evict ws2 (middle workspace)
+      if (token === "al_tok_ws2") return { tasks: [], evicted: true };
+      return { tasks: [], evicted: false };
+    });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // First poll cycle should hit all 3
+    expect(pollTokens).toContain("al_tok_ws1");
+    expect(pollTokens).toContain("al_tok_ws2");
+    expect(pollTokens).toContain("al_tok_ws3");
+
+    // Verify config saved without ws2
+    expect(saveCLIConfigForProfile).toHaveBeenCalled();
+    const savedConfig = vi.mocked(saveCLIConfigForProfile).mock.calls[0][1];
+    const wsIds = savedConfig.watched_workspaces!.map((w: any) => w.id);
+    expect(wsIds).toEqual(["ws1", "ws3"]);
+
+    // Daemon should NOT have shut down (still has ws1 and ws3)
+    expect(mockProcessExit).not.toHaveBeenCalled();
+  });
+
+  it("updates health.setRuntimeCount after eviction", async () => {
+    const mockHealthSetRuntimeCount = vi.fn();
+    const { createHealthServer } = await import("./health.js");
+    vi.mocked(createHealthServer).mockReturnValue({
+      setRuntimeCount: mockHealthSetRuntimeCount,
+      server: { close: vi.fn() },
+    } as any);
+
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [
+        { id: "ws1", name: "First", token: "al_tok_ws1" },
+        { id: "ws2", name: "Second", token: "al_tok_ws2" },
+      ],
+    });
+
+    let registerCall = 0;
+    mockClientInstance.register.mockImplementation(async () => {
+      registerCall++;
+      return { runtimes: [{ id: `rt${registerCall}` }] };
+    });
+
+    mockClientInstance.poll.mockImplementation(async (token: string) => {
+      if (token === "al_tok_ws2") return { tasks: [], evicted: true };
+      return { tasks: [], evicted: false };
+    });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Initial count was 2 (one per workspace), after evicting ws2 it should be 1
+    const calls = mockHealthSetRuntimeCount.mock.calls;
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall[0]).toBe(1);
+  });
+
+  it("config write failure does not block in-memory eviction", async () => {
+    vi.mocked(loadCLIConfigForProfile).mockReturnValue({
+      server_url: "",
+      watched_workspaces: [
+        { id: "ws1", name: "First", token: "al_tok_ws1" },
+        { id: "ws2", name: "Second", token: "al_tok_ws2" },
+      ],
+    });
+
+    let registerCall = 0;
+    mockClientInstance.register.mockImplementation(async () => {
+      registerCall++;
+      return { runtimes: [{ id: `rt${registerCall}` }] };
+    });
+
+    // Make config save throw
+    vi.mocked(saveCLIConfigForProfile).mockImplementation(() => {
+      throw new Error("disk full");
+    });
+
+    mockClientInstance.poll.mockImplementation(async (token: string) => {
+      if (token === "al_tok_ws2") return { tasks: [], evicted: true };
+      return { tasks: [], evicted: false };
+    });
+
+    await startDaemon();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // saveCLIConfigForProfile threw, but daemon should NOT crash
+    // and should NOT shut down (ws1 still active)
+    expect(mockProcessExit).not.toHaveBeenCalled();
+
+    // ws2 should be evicted from in-memory state (only ws1 polled in future)
+    // Verify by checking the saveCLIConfigForProfile was attempted
+    expect(saveCLIConfigForProfile).toHaveBeenCalled();
   });
 });

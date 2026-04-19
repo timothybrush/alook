@@ -94,6 +94,7 @@ export type PollRequest = z.infer<typeof PollRequestSchema>;
 
 export const PollResponseSchema = z.object({
   tasks: z.array(TaskApiSchema),
+  evicted: z.boolean().optional(),
 });
 export type PollResponse = z.infer<typeof PollResponseSchema>;
 

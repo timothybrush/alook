@@ -198,6 +198,16 @@ describe("PollResponseSchema", () => {
     });
     expect(parsed.tasks[0].id).toBe("t1");
   });
+
+  it("accepts evicted: true", () => {
+    const parsed = PollResponseSchema.parse({ tasks: [], evicted: true });
+    expect(parsed.evicted).toBe(true);
+  });
+
+  it("accepts missing evicted field", () => {
+    const parsed = PollResponseSchema.parse({ tasks: [] });
+    expect(parsed.evicted).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

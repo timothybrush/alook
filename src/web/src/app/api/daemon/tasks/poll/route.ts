@@ -21,7 +21,18 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeError("Forbidden: machine token required", 403);
   }
 
-  // 1. Liveness: upsert machine row (creates if missing, updates lastSeenAt if exists)
+  // 1. Resolve runtime IDs from daemon_id + workspaceId
+  const runtimeIds = await queries.runtime.getRuntimeIdsByDaemon(
+    db,
+    body.daemon_id,
+    ctx.workspaceId,
+  );
+
+  if (runtimeIds.length === 0) {
+    return writeJSON({ tasks: [], evicted: true });
+  }
+
+  // 2. Liveness: upsert machine row only when runtimes exist
   await queries.machine.upsertMachine(db, {
     daemonId: body.daemon_id,
     workspaceId: ctx.workspaceId,
@@ -34,17 +45,6 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     workspaceId: ctx.workspaceId,
     status: "online",
   }).catch(() => {});
-
-  // 2. Resolve runtime IDs from daemon_id + workspaceId
-  const runtimeIds = await queries.runtime.getRuntimeIdsByDaemon(
-    db,
-    body.daemon_id,
-    ctx.workspaceId,
-  );
-
-  if (runtimeIds.length === 0) {
-    return writeJSON({ tasks: [] });
-  }
 
   // 3. Housekeeping: sweep stale state
   await sweepStaleState(db, ctx.workspaceId);
