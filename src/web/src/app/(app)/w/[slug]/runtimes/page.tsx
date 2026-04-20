@@ -430,6 +430,23 @@ export default function RuntimesPage() {
                           </Badge>
                         ))}
                       </div>
+                      {machine.status !== "online" && (
+                        <div className="pt-1.5 border-t border-border/50">
+                          <p className="text-[11px] text-muted-foreground mb-1.5">
+                            Bring this machine online:
+                          </p>
+                          <div
+                            className="rounded-md bg-muted px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground cursor-pointer hover:bg-muted/80 transition-colors"
+                            onClick={() => {
+                              navigator.clipboard.writeText(`${CLI_CMD} daemon start`);
+                              toast.success("Copied to clipboard");
+                            }}
+                            title="Click to copy"
+                          >
+                            {CLI_CMD} daemon start
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

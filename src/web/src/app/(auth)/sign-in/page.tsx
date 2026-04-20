@@ -24,6 +24,8 @@ import { TypewriterVisual, EMAILS_PLAYFUL } from "@/components/typewriter-visual
 
 const isProd = process.env.NODE_ENV === "production"
 
+const DEV_PASSWORD = "dev-password-000"
+
 function SignInForm() {
   const [email, setEmail] = useState("")
   const [error, setError] = useState("")
@@ -33,9 +35,6 @@ function SignInForm() {
   const [code, setCode] = useState("")
   const [step, setStep] = useState<"email" | "code">("email")
   const [retryAfter, setRetryAfter] = useState<number | null>(null)
-
-  // Password-specific state
-  const [password, setPassword] = useState("")
 
   useEffect(() => {
     if (retryAfter == null) return
@@ -103,22 +102,22 @@ function SignInForm() {
     setLoading(false)
   }
 
-  // Password handler
-  async function handlePasswordSubmit(e: React.FormEvent) {
+  // Dev mode: sign in/up with a fixed password, no user input needed
+  async function handleDevSignIn(e: React.FormEvent) {
     e.preventDefault()
     setError("")
     setLoading(true)
     const { error: signInErr } = await signIn.email(
-      { email, password },
+      { email, password: DEV_PASSWORD },
       { onError: () => {} },
     )
     if (signInErr) {
       const { error: signUpErr } = await signUp.email(
-        { name: email.split("@")[0], email, password },
+        { name: email.split("@")[0], email, password: DEV_PASSWORD },
         { onError: () => {} },
       )
       if (signUpErr) {
-        setError(signInErr.message ?? "Invalid email or password")
+        setError(signUpErr.message ?? "Failed to sign in")
         setLoading(false)
         return
       }
@@ -223,7 +222,7 @@ function SignInForm() {
           </>
         )
       ) : (
-        <form onSubmit={handlePasswordSubmit}>
+        <form onSubmit={handleDevSignIn}>
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor="email">Email</FieldLabel>
@@ -234,16 +233,7 @@ function SignInForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="password">Password</FieldLabel>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
+                autoFocus
               />
             </Field>
             <Field>
