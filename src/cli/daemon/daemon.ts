@@ -168,7 +168,20 @@ export async function startDaemon(
         runtimes,
       });
     } catch (e) {
-      log.error(`Failed to register workspace ${ws.id}, skipping`, e);
+      if (e instanceof Error && e.message.startsWith("HTTP 401")) {
+        log.warn(`Workspace ${ws.id} token invalid — removing from config`);
+        try {
+          const cfg = loadCLIConfigForProfile(profile);
+          cfg.watched_workspaces = (cfg.watched_workspaces || []).filter(
+            (w) => w.id !== ws.id,
+          );
+          saveCLIConfigForProfile(profile, cfg);
+        } catch {
+          // best-effort
+        }
+      } else {
+        log.error(`Failed to register workspace ${ws.id}, skipping`, e);
+      }
       continue;
     }
     log.info(`Workspace ${ws.id} registered — ${resp.runtimes.length} runtime(s)`);
@@ -294,7 +307,11 @@ export async function startDaemon(
             });
         }
       } catch (e) {
-        log.debug("Poll error", e);
+        if (e instanceof Error && e.message.startsWith("HTTP 401")) {
+          evictedIds.push(ws.workspaceId);
+        } else {
+          log.debug("Poll error", e);
+        }
       }
     }
 

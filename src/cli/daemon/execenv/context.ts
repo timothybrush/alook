@@ -21,8 +21,8 @@ const SYSTEM_PROMPT_BODY = `## Memory Management
 - For SPECIFIC yet LONG rules or pattern, write to experiences/[NAME].md, and add index to ./memory.md for later recall.
 ### whats is ESSENTIAL and SHORT Memory?
 - basic user profile, e.g.:
-  - "user name is gus"
-  - "user is working on alook"
+  - "user name is ..."
+  - "user is working on ..."
 - certain local project mapping, e.g.:
   - "alook means the project under /user/home/alook/"
 - when to read certain stuff, e.g.:
@@ -114,17 +114,18 @@ To reply to an email, add '--in-reply-to <EMAIL_ID>' to the send command. This s
   content += `\n### Calendar
 You have your own calendar to setup daily routines and reminders.
 Schedule future tasks for yourself. At the scheduled time, a new task is dispatched to you with the event as the prompt (task type 'calendar_event').
+
+!USE Calendar when you think the tasks are recurring or it should be conducted in the future.
 ---
 Create a one-off event:
-- Run 'npx @alook/cli calendar set --agent_id ${task.agentId} --event_title "<PROMPT_TEXT>" --datetime <YYYY-MM-DDTHH:MM>'
+- Run 'npx @alook/cli calendar set --agent_id ${task.agentId} --event_title "<TASK_TITLE>" --description "<TASK_BODY>" --datetime <YYYY-MM-DDTHH:MM>'
   - '--datetime' is LOCAL time, format 'YYYY-MM-DDTHH:MM' (e.g. '2026-04-17T09:30'). Do NOT pass UTC / ISO strings with 'Z'.
   - '--event_title' becomes the task prompt when the event fires — write it as the instruction you want future-you to receive.
-  - Optional '--description "<text>"' — longer notes/context shown alongside the event in the web UI. Use it for anything that wouldn't fit cleanly in the title.
 
 Create a repeating event:
 - Add '--repeat <interval>' where interval is like '1day', '2hour', '1week', '1month'.
 - Optionally add '--repeat_stop_date <YYYY-MM-DD>' to stop the recurrence (local date).
-- Example: 'npx @alook/cli calendar set --agent_id ${task.agentId} --event_title "daily standup summary" --datetime 2026-04-18T09:00 --repeat 1day --repeat_stop_date 2026-05-18'
+- Example: 'npx @alook/cli calendar set --agent_id ${task.agentId} --event_title "<REPEAT_TASK_TITLE>" --description "<REPEAT_TASK_BODY>" --datetime 2026-04-18T09:00 --repeat 1day --repeat_stop_date 2026-05-18'
 
 List upcoming events:
 - Run 'npx @alook/cli calendar list --agent_id ${task.agentId}' (defaults: next 30 days, past 0 days).
