@@ -914,15 +914,17 @@
 
 /* ── Streamdown code block: everything inside the dark area ── */
 
-/* Outer container: no padding, no border, no gap — code body IS the block */
+/* Outer container: owns border + radius + clipping */
 [data-streamdown="code-block"] {
   position: relative !important;
   padding: 0 !important;
   margin-top: 0.5em !important;
   margin-bottom: 0.5em !important;
   gap: 0 !important;
-  border: none !important;
-  background: transparent !important;
+  border: 1px solid oklch(1 0 0 / 8%) !important;
+  border-radius: var(--radius-md) !important;
+  overflow: hidden !important;
+  background: #24292e !important;
 }
 
 /* Header (language label): hidden, shows on hover inside the code body */
@@ -943,11 +945,11 @@
   opacity: 0.5;
 }
 
-/* Code body: the only visible element, owns the rounded corners */
-/* Force dark bg in both modes so code blocks always look the same */
+/* Code body: just padding + colors, border handled by parent */
 [data-streamdown="code-block-body"] {
   padding: 0.5rem 0.75rem !important;
-  border-radius: 0.5rem !important;
+  border-radius: 0 !important;
+  border: none !important;
   --sdm-bg: #24292e !important;
   --sdm-fg: #e1e4e8 !important;
   background-color: #24292e !important;
