@@ -52,19 +52,31 @@ export function withAuth(handler: AuthenticatedHandler) {
     }
 
     // Fall back to Better Auth session
-    try {
-      const auth = createAuth(cloudflareEnv)
-      const session = await auth.api.getSession({ headers: req.headers })
-      if (!session) {
-        return NextResponse.json({ error: "unauthorized" }, { status: 401 })
+    const auth = createAuth(cloudflareEnv)
+    let session: Awaited<ReturnType<typeof auth.api.getSession>> = null
+    let lastErr: unknown
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        session = await auth.api.getSession({ headers: req.headers })
+        lastErr = undefined
+        break
+      } catch (err) {
+        lastErr = err
       }
-      const authCtx: AuthContext = {
-        userId: session.user.id,
-        email: session.user.email,
-      }
-      return handler(req, { ...authCtx, params: resolvedParams })
-    } catch {
+    }
+
+    if (lastErr) {
+      return NextResponse.json({ error: "session validation failed" }, { status: 503 })
+    }
+    if (!session) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 })
     }
+
+    const authCtx: AuthContext = {
+      userId: session.user.id,
+      email: session.user.email,
+    }
+    return handler(req, { ...authCtx, params: resolvedParams })
   }
 }
