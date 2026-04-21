@@ -295,7 +295,7 @@ export default function AgentEmailPage() {
   );
 
   const emailListContent = (
-    <div className={cn("h-full", emails.length > 0 && !loading ? "overflow-y-auto" : "overflow-hidden")}>
+    <div className={cn("h-full thin-scrollbar", emails.length > 0 && !loading ? "overflow-y-auto" : "overflow-hidden")}>
       {loading ? (
         <>
           {Array.from({ length: 3 }).map((_, i) => (
@@ -347,7 +347,7 @@ export default function AgentEmailPage() {
   );
 
   const readingPaneContent = (
-    <div className="h-full overflow-auto flex flex-col min-w-0">
+    <div className="h-full overflow-auto flex flex-col min-w-0 thin-scrollbar">
       {composing ? (
         <EmailCompose
           key={JSON.stringify(composeInitial)}
