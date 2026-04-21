@@ -254,6 +254,9 @@ export const agentTaskQueue = sqliteTable(
     index("idx_task_queue_pending")
       .on(t.agentId, t.status)
       .where(sql`status IN ('queued', 'dispatched')`),
+    index("idx_task_queue_workspace_active")
+      .on(t.workspaceId, t.status, t.agentId)
+      .where(sql`status IN ('queued', 'dispatched', 'running')`),
     foreignKey({
       columns: [t.agentId, t.workspaceId],
       foreignColumns: [agent.id, agent.workspaceId],

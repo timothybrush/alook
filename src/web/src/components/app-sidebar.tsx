@@ -18,6 +18,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const { slug } = useWorkspace();
 
   const { resolvedTheme, setTheme } = useTheme();
+  const { activeTaskCounts: taskCounts } = useAgentContext();
   const sorted = [...agents].sort((a, b) => a.name.localeCompare(b.name));
 
   const prefix = `/w/${slug}`;
@@ -66,6 +67,9 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
                 )}
               >
                 {agent.name.charAt(0).toUpperCase()}
+                {(taskCounts[agent.id] ?? 0) > 0 && (
+                  <span className="absolute bottom-0 right-0 size-2 rounded-full bg-status-online animate-pulse ring-2 ring-background" />
+                )}
               </button>
             );
           })

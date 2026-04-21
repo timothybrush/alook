@@ -254,6 +254,49 @@ export async function countRunningTasks(db: Database, agentId: string, workspace
   return Number(rows[0]?.value ?? 0);
 }
 
+export async function listActiveTaskCountsByWorkspace(
+  db: Database,
+  workspaceId: string
+) {
+  return db
+    .select({
+      agentId: agentTaskQueue.agentId,
+      count: count(),
+    })
+    .from(agentTaskQueue)
+    .where(
+      and(
+        eq(agentTaskQueue.workspaceId, workspaceId),
+        inArray(agentTaskQueue.status, ["queued", "dispatched", "running"])
+      )
+    )
+    .groupBy(agentTaskQueue.agentId);
+}
+
+export async function listActiveTasksByAgent(
+  db: Database,
+  agentId: string,
+  workspaceId: string
+) {
+  return db
+    .select({
+      id: agentTaskQueue.id,
+      status: agentTaskQueue.status,
+      type: agentTaskQueue.type,
+      createdAt: agentTaskQueue.createdAt,
+    })
+    .from(agentTaskQueue)
+    .where(
+      and(
+        eq(agentTaskQueue.agentId, agentId),
+        eq(agentTaskQueue.workspaceId, workspaceId),
+        inArray(agentTaskQueue.status, ["queued", "dispatched", "running"])
+      )
+    )
+    .orderBy(desc(agentTaskQueue.priority), asc(agentTaskQueue.createdAt))
+    .limit(100);
+}
+
 export async function getActiveTaskByConversation(
   db: Database,
   conversationId: string,

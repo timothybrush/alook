@@ -329,6 +329,20 @@ export const createMachineToken = (name?: string, workspaceId?: string) =>
     }
   );
 
+// Agent active tasks
+export const listAgentActiveTaskCounts = (workspaceId: string) =>
+  apiFetch<{ counts: Record<string, number> }>(`/api/agents/active-task-counts${wsQuery(workspaceId)}`);
+
+export interface ActiveTask {
+  id: string;
+  status: string;
+  type: string;
+  created_at: string;
+}
+
+export const listAgentActiveTasks = (agentId: string, workspaceId: string) =>
+  apiFetch<{ tasks: ActiveTask[] }>(`/api/agents/${agentId}/active-tasks${wsQuery(workspaceId)}`);
+
 // Tasks (polling)
 export const getTask = (id: string, workspaceId: string) =>
   apiFetch<TaskApi>(`/api/tasks/${id}${wsQuery(workspaceId)}`);
