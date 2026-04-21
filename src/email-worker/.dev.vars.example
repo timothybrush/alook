@@ -1,22 +1,11 @@
 # =============================================================================
-# Cloudflare Worker Bindings — Local Development
+# Email Worker — Local Development Secrets
 # =============================================================================
 # Copy this file to .dev.vars and fill in your values.
 # Wrangler reads .dev.vars automatically for local dev secrets.
 # NEVER commit .dev.vars — it contains real secrets.
 # =============================================================================
 
-# Session signing secret (generate with: openssl rand -base64 32)
-BETTER_AUTH_SECRET=
-BETTER_AUTH_URL=http://localhost:3000
-
 # Encryption key for IMAP/SMTP credentials (generate with: openssl rand -base64 32)
+# Must match ENCRYPTION_KEY in web/.dev.vars — predev script syncs this automatically.
 ENCRYPTION_KEY=
-
-# GitHub OAuth App (https://github.com/settings/developers)
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-
-# Google OAuth (https://console.cloud.google.com/apis/credentials)
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
