@@ -305,3 +305,118 @@ export const AddWhitelistRequestSchema = z.object({
   email: z.string().email(),
 });
 export type AddWhitelistRequest = z.infer<typeof AddWhitelistRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Agent request schemas
+// ---------------------------------------------------------------------------
+
+const RuntimeConfigSchema = z
+  .object({ model: z.string().max(100).optional() })
+  .passthrough()
+  .optional();
+
+export const CreateAgentRequestSchema = z.object({
+  name: z.string().min(1, "name is required"),
+  description: z.string().optional().default(""),
+  instructions: z.string().optional().default(""),
+  runtime_id: z.string().min(1, "runtime_id is required"),
+  runtime_config: RuntimeConfigSchema,
+  max_concurrent_tasks: z.number().int().optional(),
+  email_handle: z.string().optional(),
+});
+export type CreateAgentRequest = z.infer<typeof CreateAgentRequestSchema>;
+
+export const UpdateAgentRequestSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    instructions: z.string().optional(),
+    runtime_id: z.string().min(1).optional(),
+    runtime_config: RuntimeConfigSchema,
+  })
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.description !== undefined ||
+      v.instructions !== undefined ||
+      v.runtime_id !== undefined ||
+      v.runtime_config !== undefined,
+    { message: "at least one field is required" },
+  );
+export type UpdateAgentRequest = z.infer<typeof UpdateAgentRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Conversation request schemas
+// ---------------------------------------------------------------------------
+
+export const CreateConversationRequestSchema = z.object({
+  agent_id: z.string().min(1, "agent_id is required"),
+});
+export type CreateConversationRequest = z.infer<
+  typeof CreateConversationRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Message request schema (JSON body only — FormData path is separate)
+// ---------------------------------------------------------------------------
+
+export const CreateMessageRequestSchema = z.object({
+  content: z.string().min(1, "content is required"),
+});
+export type CreateMessageRequest = z.infer<typeof CreateMessageRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Email request schemas
+// ---------------------------------------------------------------------------
+
+export const EmailAttachmentSchema = z.object({
+  key: z.string().min(1),
+  filename: z.string().min(1),
+  size: z.number().int().nonnegative().optional(),
+  contentType: z.string().min(1),
+});
+
+export const SendEmailRequestSchema = z.object({
+  agentId: z.string().min(1, "agentId is required"),
+  to: z.string().min(1, "to is required"),
+  subject: z.string().min(1, "subject is required"),
+  htmlBody: z.string().default(""),
+  inReplyTo: z.string().optional(),
+  references: z.string().optional(),
+  attachments: z.array(EmailAttachmentSchema).optional(),
+});
+export type SendEmailRequest = z.infer<typeof SendEmailRequestSchema>;
+
+export const UpdateEmailStatusRequestSchema = z.object({
+  status: z.enum(["unread", "read", "archived"]),
+});
+export type UpdateEmailStatusRequest = z.infer<
+  typeof UpdateEmailStatusRequestSchema
+>;
+
+export const EmailNotifyRequestSchema = z.object({
+  agentId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  r2Key: z.string().min(1),
+  from: z.string().min(1),
+  to: z.string().optional(),
+  subject: z.string().min(1),
+  isWhitelisted: z.boolean(),
+  forwarded: z.boolean().optional().default(false),
+  messageId: z.string().optional().default(""),
+  inReplyTo: z.string().optional().default(""),
+  references: z.string().optional().default(""),
+});
+export type EmailNotifyRequest = z.infer<typeof EmailNotifyRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Workspace request schemas
+// ---------------------------------------------------------------------------
+
+export const CreateWorkspaceRequestSchema = z.object({
+  name: z.string().min(1, "name is required"),
+  slug: z.string().min(1, "slug is required"),
+});
+export type CreateWorkspaceRequest = z.infer<
+  typeof CreateWorkspaceRequestSchema
+>;

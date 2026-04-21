@@ -1,10 +1,9 @@
 import { NextRequest } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { createDb, queries, DEV_EMAIL_WORKER_URL } from "@alook/shared";
-import type { EmailAttachment } from "@alook/shared";
+import { createDb, queries, DEV_EMAIL_WORKER_URL, SendEmailRequestSchema } from "@alook/shared";
 import { withAuth } from "@/lib/middleware/auth";
 import { withWorkspaceMember } from "@/lib/middleware/workspace";
-import { writeJSON, writeError } from "@/lib/middleware/helpers";
+import { writeJSON, writeError, parseBody } from "@/lib/middleware/helpers";
 import { emailToResponse } from "@/lib/api/responses";
 
 export const POST = withAuth(async (req: NextRequest, ctx) => {
@@ -15,24 +14,8 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   const cfEnv = env as Env;
   const db = createDb(cfEnv.DB);
 
-  let body: {
-    agentId: string;
-    to: string;
-    subject: string;
-    htmlBody: string;
-    inReplyTo?: string;
-    references?: string;
-    attachments?: EmailAttachment[];
-  };
-  try {
-    body = await req.json();
-  } catch {
-    return writeError("invalid request body", 400);
-  }
-
-  if (!body.agentId || !body.to || !body.subject) {
-    return writeError("agentId, to, and subject are required", 400);
-  }
+  const [body, valErr] = await parseBody(req, SendEmailRequestSchema);
+  if (valErr) return valErr;
 
   const agent = await queries.agent.getAgent(db, body.agentId, ws.workspaceId);
   if (!agent) return writeError("agent not found in workspace", 404);

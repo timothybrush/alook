@@ -84,6 +84,15 @@ export {
   FailTaskRequestSchema,
   MessageItemSchema,
   ReportMessagesRequestSchema,
+  CreateAgentRequestSchema,
+  UpdateAgentRequestSchema,
+  CreateConversationRequestSchema,
+  CreateMessageRequestSchema,
+  EmailAttachmentSchema,
+  SendEmailRequestSchema,
+  UpdateEmailStatusRequestSchema,
+  EmailNotifyRequestSchema,
+  CreateWorkspaceRequestSchema,
 } from "./schemas";
 
 export type {

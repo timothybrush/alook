@@ -1,8 +1,8 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare"
-import { createDb, queries } from "@alook/shared"
+import { createDb, queries, UpdateAgentRequestSchema } from "@alook/shared"
 import { withAuth } from "@/lib/middleware/auth";
 import { withWorkspaceMember } from "@/lib/middleware/workspace";
-import { writeJSON, writeError } from "@/lib/middleware/helpers";
+import { writeJSON, writeError, parseBody } from "@/lib/middleware/helpers";
 import { agentToResponse } from "@/lib/api/responses";
 
 export const GET = withAuth(async (req, ctx) => {
@@ -37,18 +37,14 @@ export const PATCH = withAuth(async (req, ctx) => {
     return writeError("agent id is required", 400);
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return writeError("invalid request body", 400);
-  }
+  const [body, valErr] = await parseBody(req, UpdateAgentRequestSchema);
+  if (valErr) return valErr;
 
   const data: Record<string, unknown> = {};
-  if (typeof body.name === "string") data.name = body.name;
-  if (typeof body.description === "string") data.description = body.description;
-  if (typeof body.instructions === "string") data.instructions = body.instructions;
-  if (typeof body.runtime_id === "string") {
+  if (body.name !== undefined) data.name = body.name;
+  if (body.description !== undefined) data.description = body.description;
+  if (body.instructions !== undefined) data.instructions = body.instructions;
+  if (body.runtime_id !== undefined) {
     const runtime = await queries.runtime.getAgentRuntimeForWorkspace(db, body.runtime_id, ws.workspaceId);
     if (!runtime) {
       return writeError("runtime not found in workspace", 400);
@@ -56,18 +52,12 @@ export const PATCH = withAuth(async (req, ctx) => {
     data.runtimeId = body.runtime_id;
   }
   if (body.runtime_config !== undefined) {
-    if (typeof body.runtime_config === "object" && body.runtime_config !== null && !Array.isArray(body.runtime_config)) {
-      const rc = body.runtime_config as Record<string, unknown>;
-      const sanitized: Record<string, unknown> = {};
-      if (typeof rc.model === "string" && rc.model.length <= 100) {
-        sanitized.model = rc.model;
-      }
-      data.runtimeConfig = sanitized;
+    const rc = body.runtime_config;
+    const sanitized: Record<string, unknown> = {};
+    if (typeof rc.model === "string") {
+      sanitized.model = rc.model;
     }
-  }
-
-  if (Object.keys(data).length === 0) {
-    return writeError("no fields to update", 400);
+    data.runtimeConfig = sanitized;
   }
 
   const updated = await queries.agent.updateAgent(db, id, ws.workspaceId, data as { name?: string; description?: string; instructions?: string; runtimeId?: string; runtimeConfig?: unknown });

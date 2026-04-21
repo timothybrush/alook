@@ -98,6 +98,15 @@ export {
   DeleteCalendarEventRequestSchema,
   CalendarEventApiSchema,
   AddWhitelistRequestSchema,
+  CreateAgentRequestSchema,
+  UpdateAgentRequestSchema,
+  CreateConversationRequestSchema,
+  CreateMessageRequestSchema,
+  EmailAttachmentSchema,
+  SendEmailRequestSchema,
+  UpdateEmailStatusRequestSchema,
+  EmailNotifyRequestSchema,
+  CreateWorkspaceRequestSchema,
 } from "./schemas";
 
 export type {

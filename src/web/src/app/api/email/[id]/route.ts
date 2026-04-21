@@ -1,8 +1,8 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { createDb, queries } from "@alook/shared";
+import { createDb, queries, UpdateEmailStatusRequestSchema } from "@alook/shared";
 import { withAuth } from "@/lib/middleware/auth";
 import { withWorkspaceMember } from "@/lib/middleware/workspace";
-import { writeJSON, writeError } from "@/lib/middleware/helpers";
+import { writeJSON, writeError, parseBody } from "@/lib/middleware/helpers";
 import { emailToResponse } from "@/lib/api/responses";
 
 export const GET = withAuth(async (req, ctx) => {
@@ -39,8 +39,6 @@ export const DELETE = withAuth(async (req, ctx) => {
   return new Response(null, { status: 204 });
 });
 
-const VALID_STATUSES = ["unread", "read", "archived"] as const;
-
 export const PATCH = withAuth(async (req, ctx) => {
   const ws = await withWorkspaceMember(req, ctx);
   if (ws instanceof Response) return ws;
@@ -51,16 +49,8 @@ export const PATCH = withAuth(async (req, ctx) => {
   const id = ctx.params?.id;
   if (!id) return writeError("email id is required", 400);
 
-  let body: { status?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return writeError("invalid JSON body", 400);
-  }
-
-  if (!body.status || !VALID_STATUSES.includes(body.status as typeof VALID_STATUSES[number])) {
-    return writeError("invalid status", 400);
-  }
+  const [body, valErr] = await parseBody(req, UpdateEmailStatusRequestSchema);
+  if (valErr) return valErr;
 
   const updated = await queries.email.updateEmailStatus(db, id, ws.workspaceId, body.status);
   if (!updated) return writeError("email not found", 404);
