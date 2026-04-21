@@ -245,6 +245,15 @@ export function HeroSection({ isLoggedIn }: { isLoggedIn: boolean }) {
             </a>
           )}
         </div>
+        <p
+          className="mt-4 sm:hidden text-center text-xs"
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: "var(--landing-text-muted)",
+          }}
+        >
+          For the full experience, open on a desktop browser.
+        </p>
       </div>
     </section>
   );
