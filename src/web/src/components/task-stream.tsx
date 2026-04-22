@@ -27,7 +27,6 @@ interface ToolCallGroup {
   id: string;
   tool: string;
   input?: Record<string, unknown>;
-  output?: string;
 }
 
 interface TextItem {
@@ -78,28 +77,8 @@ function groupMessages(messages: TaskMessage[]): StreamItem[] {
         items.push(group);
         break;
       }
-      case "tool-result": {
-        const callId = msg.call_id;
-        const existing = callId ? toolCalls.get(callId) : undefined;
-        if (existing) {
-          existing.output = msg.output || msg.content;
-        } else {
-          const lastTool = [...items]
-            .reverse()
-            .find((i): i is ToolCallGroup => i.kind === "tool-call" && !i.output);
-          if (lastTool) {
-            lastTool.output = msg.output || msg.content;
-          } else {
-            items.push({
-              kind: "status",
-              id: key,
-              content: msg.output || msg.content,
-              type: "tool-result",
-            });
-          }
-        }
+      case "tool-result":
         break;
-      }
       case "text":
         items.push({ kind: "text", id: key, content: msg.content });
         break;
@@ -125,8 +104,6 @@ function groupMessages(messages: TaskMessage[]): StreamItem[] {
 /* ── ToolCallBlock ── */
 
 function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: boolean }) {
-  const hasDetails = item.input || item.output;
-
   const inputStr = useMemo(() => {
     if (!item.input) return null;
     try {
@@ -146,29 +123,22 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
           "[&::-webkit-details-marker]:hidden [&::marker]:hidden"
         )}
       >
-        {hasDetails && (
+        {inputStr && (
           <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-open/tool:rotate-90" />
         )}
         <span className="font-medium text-foreground/80">
           {formatToolName(item.tool)}
         </span>
-        {!item.output && isRunning && (
+        {isRunning && (
           <span className="ml-auto size-1.5 rounded-full bg-primary/60 animate-pulse" />
         )}
       </summary>
 
-      {hasDetails && (
-        <div className="mt-1 mb-2 ml-5 space-y-2">
-          {inputStr && (
-            <pre className="task-stream-pre overflow-x-auto rounded-md bg-muted/40 p-2.5 font-mono text-xs leading-relaxed text-muted-foreground max-h-48 max-w-full min-w-0 overflow-y-auto">
-              {inputStr}
-            </pre>
-          )}
-          {item.output && (
-            <pre className="task-stream-pre overflow-x-auto rounded-md bg-muted/30 border border-border/50 p-2.5 font-mono text-xs leading-relaxed text-foreground/70 max-h-48 max-w-full min-w-0 overflow-y-auto">
-              {item.output}
-            </pre>
-          )}
+      {inputStr && (
+        <div className="mt-1 mb-2 ml-5">
+          <pre className="task-stream-pre overflow-x-auto rounded-md bg-muted/40 p-2.5 font-mono text-xs leading-relaxed text-muted-foreground max-h-48 max-w-full min-w-0 overflow-y-auto">
+            {inputStr}
+          </pre>
         </div>
       )}
     </details>

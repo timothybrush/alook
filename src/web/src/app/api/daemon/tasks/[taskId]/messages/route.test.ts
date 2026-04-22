@@ -9,8 +9,9 @@ const mockTaskMessageToResponse = vi.fn((m: any) => m);
 let mockAuthCtx: Record<string, unknown> = { userId: "u1", email: "u@t.com", workspaceId: "w1" };
 
 vi.mock("@opennextjs/cloudflare", () => ({
-  getCloudflareContext: vi.fn(() => ({ env: { DB: {} } })),
+  getCloudflareContext: vi.fn(() => ({ env: { DB: { withSession: () => ({}) } } })),
 }));
+vi.mock("@/lib/db", () => ({ getDb: vi.fn(() => ({})) }));
 vi.mock("@alook/shared", async () => {
   const real = await vi.importActual<typeof import("@alook/shared")>("@alook/shared");
   return {
