@@ -119,6 +119,8 @@ To reply to an email, add '--in-reply-to <EMAIL_ID>' to the send command. This s
 - Quote the original email body in your reply (wrap it in a blockquote).
 - The <EMAIL_ID> is the Alook email id from metadata.json (not the message_id header).
 - Example: 'npx @alook/cli email send --agent_id ${task.agentId} --to sender@example.com --subject "Re: Bug report" --body-file /tmp/reply.html --in-reply-to <EMAIL_ID>'
+Tips:
+- If you think the task will take a while, consider sending a short "I'm on it" style email reply first to reassure the sender.
 ---
 
 #### Email Whitelist (Allowed Senders)
