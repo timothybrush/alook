@@ -312,27 +312,43 @@ describe("timeline", () => {
       expect(findResumableSessionId(dir, "user_dm_message", "claude")).toBeNull();
     });
 
-    it("skips failed/running entries and finds the correct completed one", () => {
+    it("skips running entries but resumes from failed/killed/completed", () => {
+      const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
+      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+      const oneMinAgo = new Date(Date.now() - 1 * 60 * 1000);
+
       writeEntry(_todayFilename(), makeEntry({
         task_id: "t_completed",
         status: "completed",
-        session_id: "sess_good",
-        datetime: new Date().toISOString(),
+        session_id: "sess_completed",
+        datetime: threeMinAgo.toISOString(),
       }));
       writeEntry(_todayFilename(), makeEntry({
         task_id: "t_running",
         status: "running",
         session_id: null,
-        datetime: new Date().toISOString(),
+        datetime: oneMinAgo.toISOString(),
       }));
       writeEntry(_todayFilename(), makeEntry({
         task_id: "t_failed",
         status: "failed",
-        session_id: "sess_bad",
+        session_id: "sess_failed",
+        datetime: twoMinAgo.toISOString(),
+      }));
+
+      // Most recent non-running entry with a session_id wins (failed, 2min ago)
+      expect(findResumableSessionId(dir, "user_dm_message", "claude")).toBe("sess_failed");
+    });
+
+    it("resumes from killed sessions", () => {
+      writeEntry(_todayFilename(), makeEntry({
+        task_id: "t_killed",
+        status: "killed",
+        session_id: "sess_killed",
         datetime: new Date().toISOString(),
       }));
 
-      expect(findResumableSessionId(dir, "user_dm_message", "claude")).toBe("sess_good");
+      expect(findResumableSessionId(dir, "user_dm_message", "claude")).toBe("sess_killed");
     });
 
     it("searches across midnight boundary (yesterday's file)", () => {

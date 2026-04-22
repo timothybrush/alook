@@ -233,12 +233,11 @@ export function findResumableSessionId(
     entries.push(...readJsonl(join(timelineDir, filename)));
   }
 
-  // Sort by datetime descending, pick the first completed match
   entries.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
 
   for (const entry of entries) {
     if (
-      entry.status === "completed" &&
+      entry.status !== "running" &&
       entry.type === type &&
       entry.provider === provider &&
       entry.session_id &&
@@ -271,7 +270,7 @@ export function findResumableSessionByContextKey(
   entries.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
   for (const entry of entries) {
     if (
-      entry.status === "completed" &&
+      entry.status !== "running" &&
       entry.context_key === contextKey &&
       entry.provider === provider &&
       entry.session_id &&

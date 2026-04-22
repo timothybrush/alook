@@ -39,6 +39,7 @@ Your current context is only a fraction of the full timeline of what's your have
 The full context timeline is inside './.context_timeline/YYYY-MM-DD.jsonl'.
 Each line of a timeline JSONL is a JSON object with these fields:
 - "task_id" — unique task identifier
+- "context_key" — thread identifier, the same context key meaning those tasks are in the same thread.
 - "session_id" — agent session identifier (null until completion)
 - "pid" — daemon process ID (present while running, null when done)
 - "status" — "running", "completed", or "failed"
@@ -47,6 +48,7 @@ Each line of a timeline JSONL is a JSON object with these fields:
 - "prompt" — what the user asked
 - "agent_responses" — assistant text outputs during execution
 - "errmsg" — error message (null unless status is "failed")
+- "detailed_log" — the running log for this task, including the actually task agent messages with tool-calls and failed logs.
 those json are sorted by datetime in asc order.
 
 ## BE HUMAN
