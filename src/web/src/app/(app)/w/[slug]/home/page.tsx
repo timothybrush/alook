@@ -42,23 +42,12 @@ export default function HomePage() {
   }
 
   // Empty state — no agents
-  const hasMachines = runtimes.length > 0;
+  const hasOnline = runtimes.some((r) => r.status === "online");
 
   return (
     <div className="flex flex-1 items-center justify-center">
       <div className="text-center animate-[fade-up_400ms_ease-out_both]">
-        {hasMachines ? (
-          <>
-            <p className="text-muted-foreground text-sm">No agents yet.</p>
-            <Button
-              size="sm"
-              className="mt-4"
-              onClick={() => router.push(`/w/${slug}/agents/new`)}
-            >
-              Create Agent
-            </Button>
-          </>
-        ) : (
+        {runtimes.length === 0 ? (
           <>
             <p className="text-muted-foreground text-sm">No machines yet.</p>
             <Button
@@ -67,6 +56,28 @@ export default function HomePage() {
               onClick={() => router.push(`/w/${slug}/runtimes?connect`)}
             >
               Connect Machine
+            </Button>
+          </>
+        ) : !hasOnline ? (
+          <>
+            <p className="text-muted-foreground text-sm">No machines online.</p>
+            <Button
+              size="sm"
+              className="mt-4"
+              onClick={() => router.push(`/w/${slug}/runtimes`)}
+            >
+              Bring Machine Online
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="text-muted-foreground text-sm">No agents yet.</p>
+            <Button
+              size="sm"
+              className="mt-4"
+              onClick={() => router.push(`/w/${slug}/agents/new`)}
+            >
+              Create Agent
             </Button>
           </>
         )}
