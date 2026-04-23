@@ -38,4 +38,19 @@ describe("buildPrompt", () => {
       JSON.stringify({ type: "email_inbound", instruction: "Check inbox" }),
     );
   });
+
+  it("adds notice for email_notification tasks", () => {
+    const task = makeTask("New email from a@b.com: Hi", "email_notification");
+    const parsed = JSON.parse(buildPrompt(task));
+    expect(parsed.notice).toContain("no human in this session");
+    expect(parsed.notice).toContain("email sending tool");
+    expect(parsed.notice).toContain("send them an email asking for it and then exit");
+    expect(parsed.notice).toContain("new task will be triggered automatically");
+  });
+
+  it("does not add notice for non-email tasks", () => {
+    const task = makeTask("Fix the bug", "user_dm_message");
+    const parsed = JSON.parse(buildPrompt(task));
+    expect(parsed.notice).toBeUndefined();
+  });
 });
