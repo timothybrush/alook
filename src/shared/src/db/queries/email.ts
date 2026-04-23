@@ -35,7 +35,7 @@ export async function getInboxEmails(db: Database, agentId: string, agentEmail: 
 }
 
 export async function getSentEmails(db: Database, agentId: string, agentEmail: string, workspaceId: string, status?: string) {
-  const conditions = [eq(emails.agentId, agentId), eq(emails.workspaceId, workspaceId), eq(emails.direction, "outbound")];
+  const conditions = [eq(emails.agentId, agentId), eq(emails.fromEmail, agentEmail), eq(emails.workspaceId, workspaceId), eq(emails.direction, "outbound")];
   if (status) conditions.push(eq(emails.status, status));
   return db.select().from(emails)
     .where(and(...conditions))
