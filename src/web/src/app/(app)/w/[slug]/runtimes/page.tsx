@@ -454,14 +454,15 @@ export default function RuntimesPage() {
                             Bring this machine online:
                           </p>
                           <div
-                            className="rounded-md bg-muted px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground cursor-pointer hover:bg-muted/80 transition-colors"
+                            className="relative overflow-hidden rounded-md bg-muted px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground cursor-pointer hover:bg-muted/80 transition-colors"
                             onClick={() => {
                               navigator.clipboard.writeText(`${CLI_CMD} daemon start`);
                               toast.success("Copied to clipboard");
                             }}
                             title="Click to copy"
                           >
-                            {CLI_CMD} daemon start
+                            <span className="absolute inset-0 -translate-x-full animate-[shimmer_2.5s_infinite] bg-gradient-to-r from-transparent via-[var(--shimmer-peak)] to-transparent" />
+                            <span className="relative">{CLI_CMD} daemon start</span>
                           </div>
                         </div>
                       )}

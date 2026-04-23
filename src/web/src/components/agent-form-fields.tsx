@@ -87,7 +87,7 @@ export function GeneralFields({
   return (
     <>
       <div className="space-y-1.5">
-        <Label htmlFor="agent-name">Name</Label>
+        <Label htmlFor="agent-name">Name <span className="text-destructive">*</span></Label>
         <Input
           id="agent-name"
           value={name}
@@ -140,7 +140,7 @@ export function GeneralFields({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="agent-runtime">Runtime</Label>
+        <Label htmlFor="agent-runtime">Runtime <span className="text-destructive">*</span></Label>
         <RuntimeSelect
           value={runtimeId}
           onValueChange={(newId) => {

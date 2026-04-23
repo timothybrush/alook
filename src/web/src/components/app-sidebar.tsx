@@ -7,6 +7,7 @@ import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
 import { Monitor, SunMoon, Plus, LayoutGrid, CalendarDays, Settings, PinIcon, PinOffIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTheme } from "next-themes";
 import { NavUser } from "@/components/nav-user";
 import {
@@ -20,7 +21,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { agents, loading, pins, handlePinAgent, handleUnpinAgent } = useAgentContext();
+  const { agents, runtimes, loading, pins, handlePinAgent, handleUnpinAgent } = useAgentContext();
   const { slug } = useWorkspace();
 
   const { resolvedTheme, setTheme } = useTheme();
@@ -34,6 +35,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const prefix = `/w/${slug}`;
+  const isHome = pathname === `${prefix}/home`;
   const isRuntimes = pathname === `${prefix}/runtimes`;
   const isCalendar = pathname === `${prefix}/calendar`;
   const isSettings = pathname === `${prefix}/settings`;
@@ -115,80 +117,125 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
         )}
 
         {/* Create agent */}
-        <button
-          type="button"
-          title="New agent"
-          onClick={() => { router.push(`${prefix}/agents/new`); onNavigate?.(); }}
-          className={cn(
-            "flex shrink-0 items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-            "border border-dashed border-foreground/15 text-muted-foreground",
-            "hover:border-foreground/30 hover:text-foreground hover:bg-accent",
-            isCreateAgent &&
-              "border-solid border-foreground/25 bg-accent text-foreground"
-          )}
-        >
-          <Plus className="size-4" />
-        </button>
+        {!loading && agents.length === 0 && runtimes.some(r => r.status === "online") ? (
+          <Tooltip open>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={() => { router.push(`${prefix}/agents/new`); onNavigate?.(); }}
+                  className={cn(
+                    "relative flex shrink-0 items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                    "border border-dashed border-primary/50 text-primary",
+                    "hover:border-primary hover:bg-primary/10",
+                    "animate-pulse",
+                    isCreateAgent && "border-solid border-primary bg-primary/10 animate-none"
+                  )}
+                />
+              }
+            >
+              <Plus className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              Create your first agent
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <button
+            type="button"
+            title="New agent"
+            onClick={() => { router.push(`${prefix}/agents/new`); onNavigate?.(); }}
+            className={cn(
+              "flex shrink-0 items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+              "border border-dashed border-foreground/15 text-muted-foreground",
+              "hover:border-foreground/30 hover:text-foreground hover:bg-accent",
+              isCreateAgent &&
+                "border-solid border-foreground/25 bg-accent text-foreground"
+            )}
+          >
+            <Plus className="size-4" />
+          </button>
+        )}
       </div>
 
       {/* Bottom section */}
       <div className="flex flex-col items-center gap-1 pt-2 border-t border-border/50 mt-1">
-        <button
-          type="button"
-          title="Workspaces"
-          onClick={() => { router.push("/workspaces"); onNavigate?.(); }}
-          className="flex items-center justify-center size-10 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200 cursor-pointer"
-        >
-          <LayoutGrid className="size-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => { router.push("/workspaces"); onNavigate?.(); }}
+              className="flex items-center justify-center size-10 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200 cursor-pointer"
+            />
+          }>
+            <LayoutGrid className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Workspaces</TooltipContent>
+        </Tooltip>
 
-        <button
-          type="button"
-          title="Runtimes"
-          onClick={() => { router.push(`${prefix}/runtimes`); onNavigate?.(); }}
-          className={cn(
-            "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-            "text-muted-foreground hover:text-foreground hover:bg-accent",
-            isRuntimes && "bg-accent text-foreground"
-          )}
-        >
-          <Monitor className="size-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => { router.push(`${prefix}/runtimes`); onNavigate?.(); }}
+              className={cn(
+                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                "text-muted-foreground hover:text-foreground hover:bg-accent",
+                isRuntimes && "bg-accent text-foreground"
+              )}
+            />
+          }>
+            <Monitor className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Runtimes</TooltipContent>
+        </Tooltip>
 
-        <button
-          type="button"
-          title="Calendar"
-          onClick={() => { router.push(`${prefix}/calendar`); onNavigate?.(); }}
-          className={cn(
-            "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-            "text-muted-foreground hover:text-foreground hover:bg-accent",
-            isCalendar && "bg-accent text-foreground"
-          )}
-        >
-          <CalendarDays className="size-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => { router.push(`${prefix}/calendar`); onNavigate?.(); }}
+              className={cn(
+                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                "text-muted-foreground hover:text-foreground hover:bg-accent",
+                isCalendar && "bg-accent text-foreground"
+              )}
+            />
+          }>
+            <CalendarDays className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Calendar</TooltipContent>
+        </Tooltip>
 
-        <button
-          type="button"
-          title="Settings"
-          onClick={() => { router.push(`${prefix}/settings`); onNavigate?.(); }}
-          className={cn(
-            "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-            "text-muted-foreground hover:text-foreground hover:bg-accent",
-            isSettings && "bg-accent text-foreground"
-          )}
-        >
-          <Settings className="size-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => { router.push(`${prefix}/settings`); onNavigate?.(); }}
+              className={cn(
+                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                "text-muted-foreground hover:text-foreground hover:bg-accent",
+                isSettings && "bg-accent text-foreground"
+              )}
+            />
+          }>
+            <Settings className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
 
-        <button
-          type="button"
-          title="Toggle theme"
-          onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-          className="flex items-center justify-center size-10 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200 cursor-pointer"
-        >
-          <SunMoon className="size-4" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+              className="flex items-center justify-center size-10 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-200 cursor-pointer"
+            />
+          }>
+            <SunMoon className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Toggle theme</TooltipContent>
+        </Tooltip>
 
         <NavUser />
       </div>

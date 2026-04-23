@@ -889,23 +889,23 @@
   background: transparent;
 }
 .markdown-user code:not(pre code) {
-  background: hsl(var(--primary-foreground) / 0.15);
+  background: oklch(from var(--primary-foreground) l c h / 0.15);
 }
 .markdown-user blockquote {
-  border-left-color: hsl(var(--primary-foreground) / 0.4);
+  border-left-color: oklch(from var(--primary-foreground) l c h / 0.4);
   color: inherit;
   opacity: 0.85;
 }
 .markdown-user a {
   color: inherit;
-  text-decoration-color: hsl(var(--primary-foreground) / 0.6);
+  text-decoration-color: oklch(from var(--primary-foreground) l c h / 0.6);
 }
 .markdown-user th {
-  background: hsl(var(--primary-foreground) / 0.1);
+  background: oklch(from var(--primary-foreground) l c h / 0.1);
 }
 .markdown-user th,
 .markdown-user td {
-  border-color: hsl(var(--primary-foreground) / 0.2);
+  border-color: oklch(from var(--primary-foreground) l c h / 0.2);
 }
 
 /* ── TipTap editor styles ── */

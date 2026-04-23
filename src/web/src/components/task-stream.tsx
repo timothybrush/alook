@@ -113,6 +113,24 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
     }
   }, [item.input]);
 
+  if (!inputStr) {
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-2 py-1 px-2 -mx-2 rounded-md",
+          "text-sm text-muted-foreground"
+        )}
+      >
+        <span className="font-medium text-foreground/80">
+          {formatToolName(item.tool)}
+        </span>
+        {isRunning && (
+          <span className="ml-auto size-1.5 rounded-full bg-primary/60 animate-pulse" />
+        )}
+      </div>
+    );
+  }
+
   return (
     <details className="group/tool">
       <summary
@@ -123,9 +141,7 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
           "[&::-webkit-details-marker]:hidden [&::marker]:hidden"
         )}
       >
-        {inputStr && (
-          <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-open/tool:rotate-90" />
-        )}
+        <ChevronRight className="size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-open/tool:rotate-90" />
         <span className="font-medium text-foreground/80">
           {formatToolName(item.tool)}
         </span>
@@ -134,13 +150,11 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
         )}
       </summary>
 
-      {inputStr && (
-        <div className="mt-1 mb-2 ml-5">
-          <pre className="task-stream-pre overflow-x-auto rounded-md bg-muted/40 p-2.5 font-mono text-xs leading-relaxed text-muted-foreground max-h-48 max-w-full min-w-0 overflow-y-auto">
-            {inputStr}
-          </pre>
-        </div>
-      )}
+      <div className="mt-1 mb-2 ml-5">
+        <pre className="task-stream-pre overflow-x-auto rounded-md bg-muted/40 p-2.5 font-mono text-xs leading-relaxed text-muted-foreground max-h-48 max-w-full min-w-0 overflow-y-auto">
+          {inputStr}
+        </pre>
+      </div>
     </details>
   );
 }
@@ -148,6 +162,20 @@ function ToolCallBlock({ item, isRunning }: { item: ToolCallGroup; isRunning: bo
 /* ── ThinkingBlock ── */
 
 function ThinkingBlock({ item }: { item: ThinkingItem }) {
+  if (!item.content) {
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-2 py-1 px-2 -mx-2 rounded-md",
+          "text-sm text-muted-foreground/60 italic"
+        )}
+      >
+        <Brain className="size-3 shrink-0" />
+        <span>Thinking...</span>
+      </div>
+    );
+  }
+
   return (
     <details className="group/think">
       <summary
@@ -298,10 +326,10 @@ export function TaskStream({
 
       {/* Tool stream zone — foldable, height-limited, scrollable */}
       {toolItems.length > 0 && (
-        <details className="group/stream">
+        <details className="group/stream pl-1">
           <summary
             className={cn(
-              "flex items-center gap-2 py-1 cursor-pointer select-none",
+              "flex items-center gap-1.5 py-1 cursor-pointer select-none",
               "text-xs text-muted-foreground transition-colors duration-150",
               "hover:text-foreground",
               "[&::-webkit-details-marker]:hidden [&::marker]:hidden"

@@ -10,6 +10,7 @@ import {
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeScript } from "@/components/theme-script";
 import { ToasterProvider } from "@/components/toaster-provider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -82,7 +83,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          {children}
+          <TooltipProvider>
+            {children}
+          </TooltipProvider>
           <ToasterProvider />
         </ThemeProvider>
       </body>

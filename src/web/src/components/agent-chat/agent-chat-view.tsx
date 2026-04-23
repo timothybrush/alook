@@ -25,6 +25,7 @@ import { useAgentContext } from "@/contexts/agent-context";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { ArrowUp, Box, FileText, Loader2, Mic, Paperclip, RotateCcw, Square, X } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { ArtifactSheet, formatSize } from "@/components/agent-chat/artifact-sheet";
@@ -760,7 +761,7 @@ export function AgentChatView() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -988,34 +989,42 @@ export function AgentChatView() {
 
             <div className="flex items-center justify-between px-2 pb-2 pt-0.5">
               <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={handleReset}
-                  disabled={resetting || !conversation || messages.length === 0}
-                  className="rounded-lg text-muted-foreground/60 hover:text-foreground transition-colors duration-200"
-                  title="New conversation"
-                >
-                  {resetting ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <RotateCcw className="size-3.5" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => setArtifactSheetOpen(true)}
-                  className="relative rounded-lg text-muted-foreground/60 hover:text-foreground transition-colors duration-200"
-                  title="View artifacts"
-                >
-                  <Box className="size-3.5" />
-                  {agentArtifacts.length > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-medium text-primary-foreground">
-                      {agentArtifacts.length}
-                    </span>
-                  )}
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={handleReset}
+                      disabled={resetting || !conversation || messages.length === 0}
+                      className="rounded-lg text-muted-foreground/60 hover:text-foreground transition-colors duration-200"
+                    />
+                  }>
+                    {resetting ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="size-3.5" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent side="top">New conversation</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => setArtifactSheetOpen(true)}
+                      className="relative rounded-lg text-muted-foreground/60 hover:text-foreground transition-colors duration-200"
+                    />
+                  }>
+                    <Box className="size-3.5" />
+                    {agentArtifacts.length > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-medium text-primary-foreground">
+                        {agentArtifacts.length}
+                      </span>
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Artifacts</TooltipContent>
+                </Tooltip>
               </div>
               <div className="flex items-center gap-1">
                 <input
@@ -1025,62 +1034,80 @@ export function AgentChatView() {
                   className="hidden"
                   onChange={handleFileSelect}
                 />
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={sending}
-                  className="rounded-lg text-muted-foreground/60 hover:text-foreground transition-colors duration-200"
-                  title="Attach files"
-                >
-                  <Paperclip className="size-3.5" />
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={sending}
+                      className="rounded-lg text-muted-foreground/60 hover:text-foreground transition-colors duration-200"
+                    />
+                  }>
+                    <Paperclip className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Attach files</TooltipContent>
+                </Tooltip>
                 {speechSupported && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={toggleSpeech}
-                    disabled={sending}
-                    className={cn(
-                      "rounded-lg transition-colors duration-200",
-                      listening
-                        ? "text-red-500 hover:text-red-600 bg-red-500/10"
-                        : "text-muted-foreground/60 hover:text-foreground"
-                    )}
-                    title={listening ? "Stop recording" : "Voice input"}
-                  >
-                    <Mic className={cn("size-3.5", listening && "animate-pulse")} />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={toggleSpeech}
+                        disabled={sending}
+                        className={cn(
+                          "rounded-lg transition-colors duration-200",
+                          listening
+                            ? "text-red-500 hover:text-red-600 bg-red-500/10"
+                            : "text-muted-foreground/60 hover:text-foreground"
+                        )}
+                      />
+                    }>
+                      <Mic className={cn("size-3.5", listening && "animate-pulse")} />
+                    </TooltipTrigger>
+                    <TooltipContent side="top">{listening ? "Stop recording" : "Voice input"}</TooltipContent>
+                  </Tooltip>
                 )}
                 {isTaskActive && !input.trim() && !sending ? (
-                  <Button
-                    size="icon-sm"
-                    onClick={handleStop}
-                    disabled={cancelling}
-                    className="rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors duration-200"
-                  >
-                    {cancelling ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <Square className="size-3.5 fill-current" />
-                    )}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger render={
+                      <Button
+                        size="icon-sm"
+                        onClick={handleStop}
+                        disabled={cancelling}
+                        className="rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors duration-200"
+                      />
+                    }>
+                      {cancelling ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Square className="size-3.5 fill-current" />
+                      )}
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Stop task</TooltipContent>
+                  </Tooltip>
                 ) : (
-                  <Button
-                    size="icon-sm"
-                    onClick={handleSend}
-                    disabled={!input.trim() || sending}
-                    className={cn(
-                      "rounded-lg transition-opacity duration-200",
-                      !input.trim() && "opacity-40"
-                    )}
-                  >
-                    {sending ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <ArrowUp className="size-3.5" />
-                    )}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger render={
+                      <Button
+                        size="icon-sm"
+                        onClick={handleSend}
+                        disabled={!input.trim() || sending}
+                        className={cn(
+                          "rounded-lg transition-opacity duration-200",
+                          !input.trim() && "opacity-40"
+                        )}
+                      />
+                    }>
+                      {sending ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <ArrowUp className="size-3.5" />
+                      )}
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Send</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
             </div>
