@@ -851,8 +851,10 @@ export function AgentChatView() {
                 )}
                 {msg.role === "user" ? (
                   <div className="flex justify-end">
-                    <div className="max-w-[80%] rounded-lg px-4 py-2 bg-primary text-primary-foreground text-base whitespace-pre-wrap">
-                      {msg.content}
+                    <div className="max-w-[80%] rounded-lg px-4 py-2 bg-primary text-primary-foreground text-base">
+                      <div className="markdown markdown-user">
+                        <Streamdown controls={{ code: { copy: true, download: false }, table: { copy: false, download: false, fullscreen: false } }} linkSafety={{ enabled: false }}>{msg.content}</Streamdown>
+                      </div>
                       {msg.attachment_ids && msg.attachment_ids.length > 0 && (
                         <AttachmentChips attachmentIds={msg.attachment_ids} artifacts={artifacts} onArtifactClick={handleArtifactClick} />
                       )}

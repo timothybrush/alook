@@ -867,6 +867,32 @@
 .markdown strong { font-weight: 600; }
 .markdown em { font-style: italic; }
 
+/* User bubble markdown — inherit text color from primary-foreground parent */
+.markdown-user,
+.markdown-user code:not(pre code) {
+  color: inherit;
+  background: transparent;
+}
+.markdown-user code:not(pre code) {
+  background: hsl(var(--primary-foreground) / 0.15);
+}
+.markdown-user blockquote {
+  border-left-color: hsl(var(--primary-foreground) / 0.4);
+  color: inherit;
+  opacity: 0.85;
+}
+.markdown-user a {
+  color: inherit;
+  text-decoration-color: hsl(var(--primary-foreground) / 0.6);
+}
+.markdown-user th {
+  background: hsl(var(--primary-foreground) / 0.1);
+}
+.markdown-user th,
+.markdown-user td {
+  border-color: hsl(var(--primary-foreground) / 0.2);
+}
+
 /* ── TipTap editor styles ── */
 .tiptap { line-height: 1.6; }
 .tiptap p { margin: 0.25em 0; }
