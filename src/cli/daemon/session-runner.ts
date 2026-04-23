@@ -6,7 +6,7 @@
  * log capture, and server completion reporting.
  */
 
-import { mkdir, writeFile, rm } from "fs/promises";
+import { mkdir, writeFile, rm, rename } from "fs/promises";
 import path from "path";
 import { DaemonClient } from "./client.js";
 import { createBackend } from "./agent/index.js";
@@ -23,6 +23,55 @@ import { log } from "../lib/logger.js";
 import type { SessionRunnerInput, Attachment } from "./types.js";
 
 const ATTACHMENTS_BASE = "/tmp/alook-attachments";
+
+// --- Marker file support for resilient server reporting ---
+
+export type MarkerData =
+  | {
+      taskId: string;
+      type: "complete";
+      payload: { output: string; session_id?: string; branch_name?: string };
+      token: string;
+      serverURL: string;
+      createdAt: string;
+    }
+  | {
+      taskId: string;
+      type: "fail";
+      payload: { error: string };
+      token: string;
+      serverURL: string;
+      createdAt: string;
+    };
+
+export async function writeMarkerFile(
+  workspacesRoot: string,
+  marker: MarkerData,
+): Promise<void> {
+  const dir = path.join(workspacesRoot, ".pending_completions");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const tmpPath = path.join(dir, `${marker.taskId}.tmp`);
+  const finalPath = path.join(dir, `${marker.taskId}.json`);
+  await writeFile(tmpPath, JSON.stringify(marker), { mode: 0o600 });
+  await rename(tmpPath, finalPath);
+}
+
+export async function reportToServer(
+  fn: () => Promise<unknown>,
+  markerData: MarkerData,
+  workspacesRoot: string,
+): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    log.warn(`server report failed for task ${markerData.taskId}, writing marker: ${e}`);
+    try {
+      await writeMarkerFile(workspacesRoot, markerData);
+    } catch (writeErr) {
+      log.error(`marker write also failed for task ${markerData.taskId}: ${writeErr}`);
+    }
+  }
+}
 
 function sanitizeFilename(name: string): string {
   return path.basename(name).replace(/[/\\]/g, "_").replace(/\.\./g, "_").slice(0, 255) || "file";
@@ -190,9 +239,11 @@ export async function runSession(input: SessionRunnerInput): Promise<void> {
         entry.status = "cancelled";
         entry.errmsg = "cancelled by user";
       });
-      try {
-        await client.failTask(token, task.id, "cancelled by user");
-      } catch { /* best-effort */ }
+      await reportToServer(
+        () => client.failTask(token, task.id, "cancelled by user"),
+        { taskId: task.id, type: "fail", payload: { error: "cancelled by user" }, token, serverURL, createdAt: new Date().toISOString() },
+        workspacesRoot,
+      );
     } else {
       // No intent file: preserve existing behavior
       updateEntry(timelineDir, task.id, (entry) => {
@@ -200,9 +251,11 @@ export async function runSession(input: SessionRunnerInput): Promise<void> {
         entry.status = "killed";
         entry.errmsg = "killed by signal";
       });
-      try {
-        await client.failTask(token, task.id, "killed by signal");
-      } catch { /* best-effort */ }
+      await reportToServer(
+        () => client.failTask(token, task.id, "killed by signal"),
+        { taskId: task.id, type: "fail", payload: { error: "killed by signal" }, token, serverURL, createdAt: new Date().toISOString() },
+        workspacesRoot,
+      );
     }
 
     process.exit(1);
@@ -285,11 +338,20 @@ export async function runSession(input: SessionRunnerInput): Promise<void> {
     };
     if (result.sessionId) body.session_id = result.sessionId;
     // branchName is currently always undefined — forward-compat passthrough
-    await client.completeTask(token, task.id, body);
+    await reportToServer(
+      () => client.completeTask(token, task.id, body),
+      { taskId: task.id, type: "complete", payload: body, token, serverURL, createdAt: new Date().toISOString() },
+      workspacesRoot,
+    );
     const dur = (result.durationMs / 1000).toFixed(1);
     log.info(`completed (duration=${dur}s, messages=${seq}, tools=${toolCount})`);
   } else {
-    await client.failTask(token, task.id, result.error || "unknown error");
+    const errorMsg = result.error || "unknown error";
+    await reportToServer(
+      () => client.failTask(token, task.id, errorMsg),
+      { taskId: task.id, type: "fail", payload: { error: errorMsg }, token, serverURL, createdAt: new Date().toISOString() },
+      workspacesRoot,
+    );
     const dur = (result.durationMs / 1000).toFixed(1);
     log.info(`failed (duration=${dur}s, messages=${seq}, tools=${toolCount}) — ${result.error}`);
   }
@@ -320,11 +382,12 @@ async function main(): Promise<void> {
   } catch (e) {
     log.error(`session-runner: unhandled error for task ${input.task.id}`, e);
     await cleanupAttachments(input.task.id);
-    try {
-      await client.failTask(input.token, input.task.id, `session-runner crash: ${e}`);
-    } catch {
-      // best-effort
-    }
+    const errorMsg = `session-runner crash: ${e}`;
+    await reportToServer(
+      () => client.failTask(input.token, input.task.id, errorMsg),
+      { taskId: input.task.id, type: "fail", payload: { error: errorMsg }, token: input.token, serverURL: input.serverURL, createdAt: new Date().toISOString() },
+      input.workspacesRoot,
+    );
     process.exit(1);
   }
 }

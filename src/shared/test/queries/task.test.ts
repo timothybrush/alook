@@ -17,6 +17,10 @@ describe("task query module exports", () => {
   it("exports getActiveTaskByConversation", () => {
     expect(typeof taskQueries.getActiveTaskByConversation).toBe("function");
   });
+
+  it("exports failStaleRunningTasks", () => {
+    expect(typeof taskQueries.failStaleRunningTasks).toBe("function");
+  });
 });
 
 describe("task query function signatures", () => {

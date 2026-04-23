@@ -138,6 +138,17 @@ vi.mock("fs", () => ({
   unlinkSync: (...args: any[]) => mockUnlinkSync(...args),
 }));
 
+const mockReaddir = vi.fn(async () => [] as string[]);
+const mockReadFile = vi.fn(async () => "");
+const mockUnlink = vi.fn(async () => undefined);
+const mockFsStat = vi.fn(async () => ({ mtimeMs: Date.now() }));
+vi.mock("fs/promises", () => ({
+  readdir: (...args: any[]) => mockReaddir(...args),
+  readFile: (...args: any[]) => mockReadFile(...args),
+  unlink: (...args: any[]) => mockUnlink(...args),
+  stat: (...args: any[]) => mockFsStat(...args),
+}));
+
 vi.mock("url", () => ({
   fileURLToPath: vi.fn(() => "/fake/daemon.ts"),
 }));
@@ -198,7 +209,7 @@ import { spawn } from "child_process";
 import { loadCLIConfigForProfile, saveCLIConfigForProfile } from "../lib/config.js";
 import { releaseDaemonPid } from "./pidfile.js";
 import { handleCliUpdate, readUpdateMarker, clearUpdateMarker } from "./update-handler.js";
-import { startDaemon, spawnSessionRunner, pruneSessionRunnerLogs } from "./daemon.js";
+import { startDaemon, spawnSessionRunner, pruneSessionRunnerLogs, isClientError, reconcilePendingCompletions } from "./daemon.js";
 
 const mockReleaseDaemonPid = vi.mocked(releaseDaemonPid);
 
@@ -1579,5 +1590,215 @@ describe("daemon kill_task handling", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(mockClientInstance.startTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("isClientError", () => {
+  it("HTTP 400: bad request → true", () => {
+    expect(isClientError(new Error("HTTP 400: bad request"))).toBe(true);
+  });
+
+  it("HTTP 404: not found → true", () => {
+    expect(isClientError(new Error("HTTP 404: not found"))).toBe(true);
+  });
+
+  it("HTTP 408: request timeout → false (transient)", () => {
+    expect(isClientError(new Error("HTTP 408: request timeout"))).toBe(false);
+  });
+
+  it("HTTP 429: too many requests → false (transient)", () => {
+    expect(isClientError(new Error("HTTP 429: too many requests"))).toBe(false);
+  });
+
+  it("HTTP 500: internal server error → false", () => {
+    expect(isClientError(new Error("HTTP 500: internal server error"))).toBe(false);
+  });
+
+  it("HTTP 503: service unavailable → false", () => {
+    expect(isClientError(new Error("HTTP 503: service unavailable"))).toBe(false);
+  });
+
+  it("Network error (no HTTP prefix) → false", () => {
+    expect(isClientError(new Error("TypeError: fetch failed"))).toBe(false);
+  });
+
+  it("Non-Error value → false", () => {
+    expect(isClientError("some string")).toBe(false);
+    expect(isClientError(42)).toBe(false);
+    expect(isClientError(null)).toBe(false);
+  });
+});
+
+describe("reconcilePendingCompletions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockClientInstance.completeTask.mockResolvedValue({});
+    mockClientInstance.failTask.mockResolvedValue({});
+  });
+
+  function makeMarker(overrides?: Record<string, unknown>) {
+    return JSON.stringify({
+      taskId: "t1",
+      type: "complete",
+      payload: { output: "Done!" },
+      token: "tok_123",
+      serverURL: "http://localhost:8080",
+      createdAt: new Date().toISOString(),
+      ...overrides,
+    });
+  }
+
+  it("delivers 'complete' marker and deletes file", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker());
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.completeTask).toHaveBeenCalledWith("tok_123", "t1", { output: "Done!" });
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/t1.json");
+  });
+
+  it("delivers 'fail' marker and deletes file", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker({ type: "fail", payload: { error: "boom" } }));
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.failTask).toHaveBeenCalledWith("tok_123", "t1", "boom");
+    expect(mockUnlink).toHaveBeenCalled();
+  });
+
+  it("deletes marker on 4xx", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker());
+    mockClientInstance.completeTask.mockRejectedValueOnce(new Error("HTTP 400: bad request"));
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/t1.json");
+  });
+
+  it("retains marker on network error", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker());
+    mockClientInstance.completeTask.mockRejectedValueOnce(new Error("TypeError: fetch failed"));
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it("retains marker on 5xx", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker());
+    mockClientInstance.completeTask.mockRejectedValueOnce(new Error("HTTP 500: internal server error"));
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it("deletes stale markers (>24h)", async () => {
+    const oldDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    mockReaddir.mockResolvedValueOnce(["t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker({ createdAt: oldDate }));
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.completeTask).not.toHaveBeenCalled();
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/t1.json");
+  });
+
+  it("deletes malformed JSON marker files and continues processing", async () => {
+    mockReaddir.mockResolvedValueOnce(["bad.json", "t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce("{invalid json");
+    mockReadFile.mockResolvedValueOnce(makeMarker());
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/bad.json");
+    expect(mockClientInstance.completeTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes markers with invalid createdAt dates", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker({ createdAt: "not-a-date" }));
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.completeTask).not.toHaveBeenCalled();
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/t1.json");
+  });
+
+  it("skips structurally invalid marker files and deletes them", async () => {
+    mockReaddir.mockResolvedValueOnce(["bad.json"] as any);
+    mockReadFile.mockResolvedValueOnce(JSON.stringify({ type: "complete", taskId: "x", payload: {} }));
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.completeTask).not.toHaveBeenCalled();
+    expect(mockUnlink).toHaveBeenCalled();
+  });
+
+  it("handles empty directory", async () => {
+    mockReaddir.mockResolvedValueOnce([] as any);
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.completeTask).not.toHaveBeenCalled();
+    expect(mockClientInstance.failTask).not.toHaveBeenCalled();
+  });
+
+  it("handles missing directory", async () => {
+    mockReaddir.mockRejectedValueOnce(new Error("ENOENT"));
+
+    await expect(reconcilePendingCompletions("/tmp/ws")).resolves.toBeUndefined();
+  });
+
+  it("processes markers independently — failure on one doesn't abort rest", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.json", "t2.json", "t3.json"] as any);
+    mockReadFile.mockResolvedValueOnce(makeMarker({ taskId: "t1" }));
+    mockReadFile.mockResolvedValueOnce(makeMarker({ taskId: "t2" }));
+    mockReadFile.mockResolvedValueOnce(makeMarker({ taskId: "t3" }));
+    mockClientInstance.completeTask
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("TypeError: fetch failed"))
+      .mockResolvedValueOnce({});
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.completeTask).toHaveBeenCalledTimes(3);
+    // t1 and t3 delivered → deleted, t2 failed → retained
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/t1.json");
+    expect(mockUnlink).not.toHaveBeenCalledWith("/tmp/ws/.pending_completions/t2.json");
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/t3.json");
+  });
+
+  it("ignores .tmp files (not processed as markers)", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.tmp"] as any);
+    mockFsStat.mockResolvedValueOnce({ mtimeMs: Date.now() } as any);
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockClientInstance.completeTask).not.toHaveBeenCalled();
+    expect(mockReadFile).not.toHaveBeenCalled();
+  });
+
+  it("cleans up stale .tmp files (>1h)", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.tmp"] as any);
+    mockFsStat.mockResolvedValueOnce({ mtimeMs: Date.now() - 2 * 60 * 60 * 1000 } as any);
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockUnlink).toHaveBeenCalledWith("/tmp/ws/.pending_completions/t1.tmp");
+  });
+
+  it("keeps recent .tmp files", async () => {
+    mockReaddir.mockResolvedValueOnce(["t1.tmp"] as any);
+    mockFsStat.mockResolvedValueOnce({ mtimeMs: Date.now() - 5 * 60 * 1000 } as any);
+
+    await reconcilePendingCompletions("/tmp/ws");
+
+    expect(mockUnlink).not.toHaveBeenCalled();
   });
 });

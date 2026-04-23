@@ -1,5 +1,5 @@
 import { eq, and, desc, asc, inArray, notInArray, ne, count, lt, sql } from "drizzle-orm";
-import { agentTaskQueue } from "../schema";
+import { agentTaskQueue, taskMessage } from "../schema";
 import type { Database } from "../index";
 import { ClaimedTaskRowSchema } from "../../schemas";
 import { TASK_TYPES } from "../../constants";
@@ -497,5 +497,33 @@ export async function failStaleKillTasks(db: Database, workspaceId: string) {
       )
     )
     .returning({ id: agentTaskQueue.id });
+  return rows;
+}
+
+const DEFAULT_STALE_RUNNING_SECONDS = Number(process.env.ALOOK_STALE_RUNNING_TIMEOUT_S) || 3600;
+
+export async function failStaleRunningTasks(db: Database, workspaceId: string, staleSeconds = DEFAULT_STALE_RUNNING_SECONDS) {
+  const threshold = new Date(Date.now() - staleSeconds * 1000).toISOString();
+  const rows = await db
+    .update(agentTaskQueue)
+    .set({
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: `timed out in running state (no message activity for ${Math.round(staleSeconds / 60)} minutes)`,
+    })
+    .where(
+      and(
+        eq(agentTaskQueue.workspaceId, workspaceId),
+        eq(agentTaskQueue.status, "running"),
+        lt(
+          sql`coalesce(
+            (select max(${taskMessage.createdAt}) from ${taskMessage} where ${taskMessage.taskId} = ${agentTaskQueue.id}),
+            ${agentTaskQueue.startedAt}
+          )`,
+          threshold
+        )
+      )
+    )
+    .returning({ agentId: agentTaskQueue.agentId, workspaceId: agentTaskQueue.workspaceId, conversationId: agentTaskQueue.conversationId });
   return rows;
 }

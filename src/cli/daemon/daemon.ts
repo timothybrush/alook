@@ -3,6 +3,7 @@ import { type DaemonConfig, loadDaemonConfig, sessionRunnerLogDir, daemonLogFile
 import { createHealthServer } from "./health.js";
 import { detectVersion } from "./agent/index.js";
 import { type Task, type SessionRunnerInput, fromApiTask } from "./types.js";
+import type { MarkerData } from "./session-runner.js";
 import { loadCLIConfigForProfile, saveCLIConfigForProfile } from "../lib/config.js";
 import { log } from "../lib/logger.js";
 import { cmdPrefix } from "../lib/env.js";
@@ -18,6 +19,7 @@ import {
 } from "./execenv/steering.js";
 import { TASK_TYPES } from "@alook/shared";
 import { existsSync, mkdirSync, openSync, closeSync, readdirSync, statSync, unlinkSync } from "fs";
+import { readdir, readFile, unlink, stat as fsStat } from "fs/promises";
 import { execSync, spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -76,6 +78,113 @@ export function pruneSessionRunnerLogs(): void {
       unlinkSync(join(logDir, entry.name));
     } catch {
       // best-effort
+    }
+  }
+}
+
+export function isClientError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const match = error.message.match(/^HTTP (\d+):/);
+  if (!match) return false;
+  const status = Number(match[1]);
+  if (status === 408 || status === 429) return false;
+  return status >= 400 && status < 500;
+}
+
+function isValidMarker(data: unknown): data is MarkerData {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  if (typeof d.taskId !== "string") return false;
+  if (typeof d.token !== "string") return false;
+  if (typeof d.serverURL !== "string") return false;
+  if (typeof d.createdAt !== "string" || isNaN(new Date(d.createdAt).getTime())) return false;
+  if (!d.payload || typeof d.payload !== "object") return false;
+  const payload = d.payload as Record<string, unknown>;
+  if (d.type === "complete") {
+    return typeof payload.output === "string";
+  }
+  if (d.type === "fail") {
+    return typeof payload.error === "string";
+  }
+  return false;
+}
+
+const MARKER_STALE_MS = 24 * 60 * 60 * 1000;
+const TMP_STALE_MS = 60 * 60 * 1000;
+
+export async function reconcilePendingCompletions(workspacesRoot: string): Promise<void> {
+  const dir = join(workspacesRoot, ".pending_completions");
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return;
+  }
+
+  // Housekeeping: clean up stale .tmp files
+  for (const name of entries) {
+    if (!name.endsWith(".tmp")) continue;
+    try {
+      const s = await fsStat(join(dir, name));
+      if (Date.now() - s.mtimeMs > TMP_STALE_MS) {
+        await unlink(join(dir, name));
+      }
+    } catch { /* best-effort */ }
+  }
+
+  const jsonFiles = entries.filter((f) => f.endsWith(".json"));
+  for (const name of jsonFiles) {
+    const filePath = join(dir, name);
+    try {
+      let raw: string;
+      try {
+        raw = await readFile(filePath, "utf-8");
+      } catch {
+        continue;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        log.warn(`reconcile: malformed marker ${name}, deleting`);
+        try { await unlink(filePath); } catch { /* best-effort */ }
+        continue;
+      }
+
+      if (!isValidMarker(parsed)) {
+        log.warn(`reconcile: invalid marker structure ${name}, deleting`);
+        try { await unlink(filePath); } catch { /* best-effort */ }
+        continue;
+      }
+
+      const marker = parsed;
+      const age = Date.now() - new Date(marker.createdAt).getTime();
+      if (age > MARKER_STALE_MS) {
+        log.warn(`reconcile: stale marker ${name} (${Math.round(age / 3600000)}h old), deleting`);
+        try { await unlink(filePath); } catch { /* best-effort */ }
+        continue;
+      }
+
+      const client = new DaemonClient(marker.serverURL);
+      try {
+        if (marker.type === "complete") {
+          await client.completeTask(marker.token, marker.taskId, marker.payload);
+        } else {
+          await client.failTask(marker.token, marker.taskId, marker.payload.error);
+        }
+        try { await unlink(filePath); } catch (delErr) {
+          log.warn(`reconcile: delivered marker ${name} but failed to delete: ${delErr}`);
+        }
+      } catch (deliverErr) {
+        if (isClientError(deliverErr)) {
+          try { await unlink(filePath); } catch { /* best-effort */ }
+        } else {
+          log.debug(`reconcile: delivery failed for ${name}, will retry next cycle`);
+        }
+      }
+    } catch (e) {
+      log.debug(`reconcile: error processing ${name}`, e);
     }
   }
 }
@@ -324,6 +433,12 @@ export async function startDaemon(
 
     for (const id of evictedIds) {
       evictWorkspace(id);
+    }
+
+    try {
+      await reconcilePendingCompletions(config.workspacesRoot);
+    } catch (e) {
+      log.debug("reconciliation error", e);
     }
 
     if (workspaceStates.length === 0) {

@@ -86,7 +86,22 @@ vi.mock("../lib/logger.js", () => ({
   log: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { runSession } from "./session-runner.js";
+const mockMkdir = vi.fn(async () => undefined);
+const mockWriteFile = vi.fn(async () => undefined);
+const mockRename = vi.fn(async () => undefined);
+const mockRm = vi.fn(async () => undefined);
+vi.mock("fs/promises", () => ({
+  mkdir: (...args: any[]) => mockMkdir(...args),
+  writeFile: (...args: any[]) => mockWriteFile(...args),
+  rename: (...args: any[]) => mockRename(...args),
+  rm: (...args: any[]) => mockRm(...args),
+  readdir: vi.fn(async () => []),
+  readFile: vi.fn(async () => ""),
+  unlink: vi.fn(async () => undefined),
+  stat: vi.fn(async () => ({ mtimeMs: 0 })),
+}));
+
+import { runSession, writeMarkerFile, reportToServer, type MarkerData } from "./session-runner.js";
 import { createBackend } from "./agent/index.js";
 import { buildPrompt } from "./prompt.js";
 import { log as mockLog } from "../lib/logger.js";
@@ -951,5 +966,210 @@ describe("session-runner runSession", () => {
       killSpy.mockRestore();
       exitSpy.mockRestore();
     });
+  });
+});
+
+describe("writeMarkerFile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const marker: MarkerData = {
+    taskId: "t1",
+    type: "complete",
+    payload: { output: "Done!", session_id: "sess-1" },
+    token: "tok",
+    serverURL: "http://localhost",
+    createdAt: "2026-04-20T21:00:00Z",
+  };
+
+  it("writes marker with correct JSON structure", async () => {
+    await writeMarkerFile("/tmp/ws", marker);
+
+    expect(mockMkdir).toHaveBeenCalledWith("/tmp/ws/.pending_completions", { recursive: true, mode: 0o700 });
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      "/tmp/ws/.pending_completions/t1.tmp",
+      JSON.stringify(marker),
+      { mode: 0o600 },
+    );
+    expect(mockRename).toHaveBeenCalledWith(
+      "/tmp/ws/.pending_completions/t1.tmp",
+      "/tmp/ws/.pending_completions/t1.json",
+    );
+  });
+
+  it("creates .pending_completions/ directory if missing", async () => {
+    await writeMarkerFile("/tmp/ws", marker);
+    expect(mockMkdir).toHaveBeenCalledWith("/tmp/ws/.pending_completions", { recursive: true, mode: 0o700 });
+  });
+
+  it("works when directory already exists", async () => {
+    await writeMarkerFile("/tmp/ws", marker);
+    await writeMarkerFile("/tmp/ws", { ...marker, taskId: "t2" });
+    expect(mockMkdir).toHaveBeenCalledTimes(2);
+    expect(mockWriteFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("atomic write: uses .tmp then renames to .json", async () => {
+    await writeMarkerFile("/tmp/ws", marker);
+    const writeCall = mockWriteFile.mock.calls[0][0];
+    const renameArgs = mockRename.mock.calls[0];
+    expect(writeCall).toContain(".tmp");
+    expect(renameArgs[0]).toContain(".tmp");
+    expect(renameArgs[1]).toContain(".json");
+  });
+
+  it("write failure propagates", async () => {
+    mockWriteFile.mockRejectedValueOnce(new Error("ENOSPC"));
+    await expect(writeMarkerFile("/tmp/ws", marker)).rejects.toThrow("ENOSPC");
+  });
+});
+
+describe("reportToServer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const marker: MarkerData = {
+    taskId: "t1",
+    type: "complete",
+    payload: { output: "Done!" },
+    token: "tok",
+    serverURL: "http://localhost",
+    createdAt: "2026-04-20T21:00:00Z",
+  };
+
+  it("succeeds without writing marker", async () => {
+    await reportToServer(async () => ({}), marker, "/tmp/ws");
+    expect(mockWriteFile).not.toHaveBeenCalled();
+  });
+
+  it("writes marker on fn failure", async () => {
+    await reportToServer(async () => { throw new Error("network"); }, marker, "/tmp/ws");
+    expect(mockWriteFile).toHaveBeenCalled();
+    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    expect(written.taskId).toBe("t1");
+    expect(written.type).toBe("complete");
+  });
+
+  it("does not throw when fn fails", async () => {
+    await expect(
+      reportToServer(async () => { throw new Error("network"); }, marker, "/tmp/ws"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not throw when both fn and marker write fail", async () => {
+    mockWriteFile.mockRejectedValueOnce(new Error("ENOSPC"));
+    await expect(
+      reportToServer(async () => { throw new Error("network"); }, marker, "/tmp/ws"),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("session-runner marker integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("completeTask failure writes 'complete' marker", async () => {
+    mockClientInstance.completeTask.mockRejectedValueOnce(new Error("server down"));
+    setupBackend([], {
+      status: "completed",
+      output: "Done!",
+      error: "",
+      durationMs: 1000,
+      sessionId: "sess-1",
+    });
+
+    await runSession(makeInput());
+
+    expect(mockWriteFile).toHaveBeenCalled();
+    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    expect(written.type).toBe("complete");
+    expect(written.taskId).toBe("t1");
+    expect(written.payload.output).toBe("Done!");
+  });
+
+  it("failTask failure writes 'fail' marker", async () => {
+    mockClientInstance.failTask.mockRejectedValueOnce(new Error("server down"));
+    setupBackend([], {
+      status: "failed",
+      output: "",
+      error: "something broke",
+      durationMs: 100,
+      sessionId: "sess-1",
+    });
+
+    await runSession(makeInput());
+
+    expect(mockWriteFile).toHaveBeenCalled();
+    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    expect(written.type).toBe("fail");
+    expect(written.taskId).toBe("t1");
+    expect(written.payload.error).toBe("something broke");
+  });
+
+  it("onKill cancel writes marker on failure", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+    mockClientInstance.failTask.mockRejectedValueOnce(new Error("server down"));
+    mockReadKillIntent.mockReturnValueOnce({ reason: "cancelled", targetTaskId: "t1", expectedPid: process.pid });
+
+    let resolveMessage: (() => void) | null = null;
+    mockBackendExecute.mockReturnValue({
+      pid: 99999,
+      messages: (async function* () {
+        yield { type: "text", content: "working..." };
+        await new Promise<void>((resolve) => { resolveMessage = resolve; });
+      })(),
+      sessionId: Promise.resolve("sess-cancel"),
+      result: new Promise(() => {}),
+    });
+
+    const sessionPromise = runSession(makeInput());
+    await new Promise((r) => setTimeout(r, 50));
+    process.emit("SIGTERM", "SIGTERM");
+    if (resolveMessage) resolveMessage();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockWriteFile).toHaveBeenCalled();
+    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    expect(written.type).toBe("fail");
+    expect(written.payload.error).toBe("cancelled by user");
+
+    killSpy.mockRestore();
+    exitSpy.mockRestore();
+  });
+
+  it("onKill kill writes marker on failure", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+    mockClientInstance.failTask.mockRejectedValueOnce(new Error("server down"));
+    mockReadKillIntent.mockReturnValueOnce(null);
+
+    let resolveMessage: (() => void) | null = null;
+    mockBackendExecute.mockReturnValue({
+      pid: 99999,
+      messages: (async function* () {
+        yield { type: "text", content: "working..." };
+        await new Promise<void>((resolve) => { resolveMessage = resolve; });
+      })(),
+      sessionId: Promise.resolve("sess-kill"),
+      result: new Promise(() => {}),
+    });
+
+    const sessionPromise = runSession(makeInput());
+    await new Promise((r) => setTimeout(r, 50));
+    process.emit("SIGTERM", "SIGTERM");
+    if (resolveMessage) resolveMessage();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockWriteFile).toHaveBeenCalled();
+    const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string);
+    expect(written.type).toBe("fail");
+    expect(written.payload.error).toBe("killed by signal");
+
+    killSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 });
