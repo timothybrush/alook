@@ -16,7 +16,7 @@ export const GET = withAuth(async (req, ctx) => {
   const agentId = ctx.params?.id;
   if (!agentId) return writeError("agent id is required", 400);
 
-  const agent = await queries.agent.getAgent(db, agentId, ws.workspaceId);
+  const agent = await queries.agent.getAgent(db, agentId, ws.workspaceId, ctx.userId);
   if (!agent) return writeError("agent not found", 404);
 
   const entries = await queries.whitelist.getWhitelist(db, agentId, ws.workspaceId);
@@ -39,7 +39,7 @@ export const POST = withAuth(async (req, ctx) => {
   const agentId = ctx.params?.id;
   if (!agentId) return writeError("agent id is required", 400);
 
-  const agent = await queries.agent.getAgent(db, agentId, ws.workspaceId);
+  const agent = await queries.agent.getAgent(db, agentId, ws.workspaceId, ctx.userId);
   if (!agent) return writeError("agent not found", 404);
 
   const [body, err] = await parseBody(req, AddWhitelistRequestSchema);
@@ -49,12 +49,12 @@ export const POST = withAuth(async (req, ctx) => {
   const entry = await queries.whitelist.addWhitelist(db, agentId, ws.workspaceId, email);
   if (!entry) return writeError("email already whitelisted", 409);
 
-  if (agent.runtimeId && agent.emailHandle) {
+  if (agent.runtimeId && agent.emailHandle && agent.ownerId) {
     try {
       const conv = await queries.conversation.createConversation(db, {
         workspaceId: ws.workspaceId,
         agentId: agent.id,
-        userId: agent.ownerId!,
+        userId: agent.ownerId,
         title: `Welcome: ${email}`.slice(0, 50),
         type: TASK_TYPES.EMAIL_NOTIFICATION,
       });

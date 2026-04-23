@@ -76,6 +76,7 @@ describe("GET /api/agents/[id]", () => {
 
 describe("DELETE /api/agents/[id]", () => {
   it("returns 204 on successful deletion", async () => {
+    mockGetAgent.mockResolvedValue({ id: "a1", ownerId: "u1" });
     mockDeleteAgent.mockResolvedValue(true);
 
     const req = new NextRequest("http://localhost/api/agents/a1", { method: "DELETE" });
@@ -96,10 +97,23 @@ describe("DELETE /api/agents/[id]", () => {
     expect(res.status).toBe(404);
     expect(body.error).toBe("agent not found");
   });
+
+  it("returns 403 when user is not agent owner", async () => {
+    mockGetAgent.mockResolvedValue({ id: "a1", ownerId: "other-user" });
+
+    const req = new NextRequest("http://localhost/api/agents/a1", { method: "DELETE" });
+    const ctx = { params: Promise.resolve({ id: "a1" }) };
+    const res = await DELETE(req, ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error).toBe("agent owner access required");
+  });
 });
 
 describe("PATCH /api/agents/[id]", () => {
   it("updates agent and returns response", async () => {
+    mockGetAgent.mockResolvedValue({ id: "a1", ownerId: "u1" });
     mockUpdateAgent.mockResolvedValue({ id: "a1", name: "Updated" });
 
     const req = new NextRequest("http://localhost/api/agents/a1", {
@@ -156,6 +170,7 @@ describe("PATCH /api/agents/[id]", () => {
   });
 
   it("accepts and persists runtime_config", async () => {
+    mockGetAgent.mockResolvedValue({ id: "a1", ownerId: "u1" });
     mockUpdateAgent.mockResolvedValue({ id: "a1", name: "Agent" });
 
     const req = new NextRequest("http://localhost/api/agents/a1", {
@@ -171,10 +186,12 @@ describe("PATCH /api/agents/[id]", () => {
       "a1",
       "w1",
       expect.objectContaining({ runtimeConfig: { model: "claude-sonnet-4-6" } }),
+      "u1",
     );
   });
 
   it("runtime_config alone is a valid update", async () => {
+    mockGetAgent.mockResolvedValue({ id: "a1", ownerId: "u1" });
     mockUpdateAgent.mockResolvedValue({ id: "a1", name: "Agent" });
 
     const req = new NextRequest("http://localhost/api/agents/a1", {
@@ -190,10 +207,12 @@ describe("PATCH /api/agents/[id]", () => {
       "a1",
       "w1",
       expect.objectContaining({ runtimeConfig: { model: "x" } }),
+      "u1",
     );
   });
 
   it("PATCH with valid runtime_id (same workspace) updates agent successfully", async () => {
+    mockGetAgent.mockResolvedValue({ id: "a1", ownerId: "u1" });
     mockGetAgentRuntimeForWorkspace.mockResolvedValue({ id: "rt1", workspaceId: "w1" });
     mockUpdateAgent.mockResolvedValue({ id: "a1", name: "Agent" });
 
@@ -215,6 +234,7 @@ describe("PATCH /api/agents/[id]", () => {
       "a1",
       "w1",
       expect.objectContaining({ runtimeId: "rt1" }),
+      "u1",
     );
   });
 
@@ -248,6 +268,21 @@ describe("PATCH /api/agents/[id]", () => {
     expect(res.status).toBe(400);
     expect(body.error).toBe("runtime not found in workspace");
     expect(mockUpdateAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when user is not agent owner", async () => {
+    mockGetAgent.mockResolvedValue({ id: "a1", ownerId: "other-user" });
+
+    const req = new NextRequest("http://localhost/api/agents/a1", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "New" }),
+    });
+    const ctx = { params: Promise.resolve({ id: "a1" }) };
+    const res = await PATCH(req, ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error).toBe("agent owner access required");
   });
 
 });

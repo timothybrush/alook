@@ -19,7 +19,7 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
   const agentId = req.nextUrl.searchParams.get("agentId");
   if (!agentId) return writeError("agentId is required", 400);
 
-  const agent = await queries.agent.getAgent(db, agentId, ws.workspaceId);
+  const agent = await queries.agent.getAgent(db, agentId, ws.workspaceId, ctx.userId);
   if (!agent) return writeError("agent not found in workspace", 404);
 
   const status = req.nextUrl.searchParams.get("status") ?? undefined;
@@ -33,10 +33,10 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
 
   let emailList;
   if (folder === "inbox" && agentEmail) {
-    emailList = await queries.email.getInboxEmails(db, agentId, agentEmail, ws.workspaceId, status);
+    emailList = await queries.email.getTrustedEmails(db, agentId, agentEmail, ws.workspaceId, status);
   } else if (folder === "sent" && agentEmail) {
     emailList = await queries.email.getSentEmails(db, agentId, agentEmail, ws.workspaceId, status);
-  } else if (folder === "rejected" && agentEmail) {
+  } else if (folder === "untrust" && agentEmail) {
     emailList = await queries.email.getRejectedEmails(db, agentId, agentEmail, ws.workspaceId, status);
   } else {
     emailList = await queries.email.getEmailsByAgent(db, agentId, ws.workspaceId, status);

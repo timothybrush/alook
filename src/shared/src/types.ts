@@ -1,5 +1,7 @@
 import type { TaskApi } from "./schemas";
 
+export type EmailDirection = "inbound" | "outbound";
+
 export interface User {
   id: string;
   name: string;
@@ -29,6 +31,8 @@ export interface Agent {
   status: string;
   max_concurrent_tasks: number;
   email_handle: string | null;
+  visibility: string;
+  owner_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -139,7 +143,7 @@ export interface Email {
   html_body: string;
   attachments: EmailAttachment[];
   status: string;
-  direction: "inbound" | "outbound";
+  direction: EmailDirection;
   created_at: string;
 }
 

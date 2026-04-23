@@ -42,6 +42,8 @@ export function agentToResponse(a: any) {
     status: a.status,
     max_concurrent_tasks: a.maxConcurrentTasks,
     email_handle: a.emailHandle || null,
+    visibility: a.visibility ?? "private",
+    owner_id: a.ownerId ?? null,
     created_at: formatTimestamp(a.createdAt),
     updated_at: formatTimestamp(a.updatedAt),
   };
@@ -202,5 +204,43 @@ export function calendarEventToResponse(e: any) {
     last_triggered_at: formatTimestampNullable(e.lastTriggeredAt),
     created_at: formatTimestamp(e.createdAt),
     updated_at: formatTimestamp(e.updatedAt),
+  };
+}
+
+export function memberToResponse(m: {
+  id: string;
+  userId: string;
+  role: string;
+  createdAt: string;
+  userName: string;
+  userEmail: string;
+  userImage: string | null;
+}) {
+  return {
+    id: m.id,
+    user_id: m.userId,
+    role: m.role,
+    name: m.userName,
+    email: m.userEmail,
+    image: m.userImage,
+    created_at: formatTimestamp(m.createdAt),
+  };
+}
+
+export function inviteToResponse(inv: {
+  id: string;
+  token: string;
+  createdBy: string;
+  usedBy: string | null;
+  expiresAt: string;
+  createdAt: string;
+}) {
+  return {
+    id: inv.id,
+    token: inv.token,
+    created_by: inv.createdBy,
+    used_by: inv.usedBy,
+    expires_at: formatTimestamp(inv.expiresAt),
+    created_at: formatTimestamp(inv.createdAt),
   };
 }

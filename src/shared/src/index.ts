@@ -10,6 +10,7 @@ export type {
   TaskMessage,
   MachineToken,
   Email,
+  EmailDirection,
   EmailAttachment,
   Artifact,
   AgentEmailAccount,
@@ -115,6 +116,9 @@ export {
   CreateEmailAccountSchema,
   UpdateEmailAccountSchema,
   TestEmailConnectionSchema,
+  UpdateWorkspaceRequestSchema,
+  DeleteWorkspaceRequestSchema,
+  GrantAgentAccessRequestSchema,
 } from "./schemas";
 
 export type {

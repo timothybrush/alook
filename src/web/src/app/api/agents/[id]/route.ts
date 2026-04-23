@@ -18,7 +18,7 @@ export const GET = withAuth(async (req, ctx) => {
     return writeError("agent id is required", 400);
   }
 
-  const agent = await queries.agent.getAgent(db, id, ws.workspaceId);
+  const agent = await queries.agent.getAgent(db, id, ws.workspaceId, ctx.userId);
   if (!agent) {
     return writeError("agent not found", 404);
   }
@@ -60,8 +60,13 @@ export const PATCH = withAuth(async (req, ctx) => {
     }
     data.runtimeConfig = sanitized;
   }
+  if (body.visibility !== undefined) data.visibility = body.visibility;
 
-  const updated = await queries.agent.updateAgent(db, id, ws.workspaceId, data as { name?: string; description?: string; instructions?: string; runtimeId?: string; runtimeConfig?: unknown });
+  const existing = await queries.agent.getAgent(db, id, ws.workspaceId, ctx.userId);
+  if (!existing) return writeError("agent not found", 404);
+  if (existing.ownerId !== ctx.userId) return writeError("agent owner access required", 403);
+
+  const updated = await queries.agent.updateAgent(db, id, ws.workspaceId, data as { name?: string; description?: string; instructions?: string; runtimeId?: string; runtimeConfig?: unknown; visibility?: string }, ctx.userId);
   if (!updated) {
     return writeError("agent not found", 404);
   }
@@ -81,7 +86,11 @@ export const DELETE = withAuth(async (req, ctx) => {
     return writeError("agent id is required", 400);
   }
 
-  const deleted = await queries.agent.deleteAgent(db, id, ws.workspaceId);
+  const existing = await queries.agent.getAgent(db, id, ws.workspaceId, ctx.userId);
+  if (!existing) return writeError("agent not found", 404);
+  if (existing.ownerId !== ctx.userId) return writeError("agent owner access required", 403);
+
+  const deleted = await queries.agent.deleteAgent(db, id, ws.workspaceId, ctx.userId);
   if (!deleted) {
     return writeError("agent not found", 404);
   }
