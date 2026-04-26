@@ -8,14 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2 } from "lucide-react";
 import { getWorkspaceOverview, type WorkspaceOverview } from "@/lib/api";
-import { QuickStatsRow } from "./_components/quick-stats";
 import { AgentOverview } from "./_components/agent-overview";
-import { TaskHealth } from "./_components/task-health";
-import { EmailSummary } from "./_components/email-summary";
 import { RecentActivity } from "./_components/recent-activity";
 import { CalendarOverview } from "./_components/calendar-overview";
-import { RuntimeHealth } from "./_components/runtime-health";
-import { TeamAccess } from "./_components/team-access";
+import { DailyQuote } from "./_components/daily-quote";
 
 export default function HomePage() {
   const router = useRouter();
@@ -95,17 +91,11 @@ export default function HomePage() {
     return (
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 lg:p-6 space-y-4">
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 rounded-xl" />
-            ))}
-          </div>
           <Skeleton className="h-48 rounded-xl" />
           <div className="grid gap-4 lg:grid-cols-2">
             <Skeleton className="h-44 rounded-xl" />
             <Skeleton className="h-44 rounded-xl" />
           </div>
-          <Skeleton className="h-48 rounded-xl" />
         </div>
       </div>
     );
@@ -114,12 +104,6 @@ export default function HomePage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="p-4 lg:p-6 space-y-4">
-        <QuickStatsRow
-          agents={agents}
-          runtimes={runtimes}
-          activeTaskCounts={activeTaskCounts}
-          overview={overview}
-        />
         <AgentOverview
           agents={agents}
           runtimes={runtimes}
@@ -127,15 +111,10 @@ export default function HomePage() {
           overview={overview}
         />
         <div className="grid gap-4 lg:grid-cols-2">
-          <TaskHealth overview={overview} />
-          <EmailSummary overview={overview} agents={agents} />
-        </div>
-        <RecentActivity overview={overview} agents={agents} />
-        <div className="grid gap-4 lg:grid-cols-2">
+          <RecentActivity overview={overview} agents={agents} />
           <CalendarOverview overview={overview} agents={agents} />
-          <RuntimeHealth runtimes={runtimes} agents={agents} />
         </div>
-        <TeamAccess overview={overview} />
+        <DailyQuote />
       </div>
     </div>
   );

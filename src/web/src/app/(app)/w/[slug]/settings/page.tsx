@@ -8,12 +8,14 @@ import { GeneralTab } from "./general-tab";
 import { InstructionTab } from "./instruction-tab";
 import { MembersTab } from "./members-tab";
 import { NotificationTab } from "./notification-tab";
+import { UsagesTab } from "./usages-tab";
 
 const TABS = [
   { id: "general", label: "General" },
   { id: "instruction", label: "Instruction" },
   { id: "notifications", label: "Notifications" },
   { id: "members", label: "Members" },
+  { id: "usages", label: "Usages" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -67,6 +69,8 @@ export default function SettingsPage() {
           )}>
             {activeTab === "instruction" ? (
               <InstructionTab />
+            ) : activeTab === "usages" ? (
+              <UsagesTab />
             ) : (
               <div className="mx-auto max-w-md">
                 {activeTab === "general" && <GeneralTab />}
