@@ -20,6 +20,9 @@ export const GET = withAuth(async (req, ctx) => {
   weekEnd.setDate(weekEnd.getDate() + 7);
   const weekEndISO = weekEnd.toISOString();
 
+  const visibleAgents = await queries.agent.listAgents(db, ws.workspaceId, ctx.userId);
+  const visibleAgentIds = visibleAgents.map((a) => a.id);
+
   const [
     emailStats,
     emailAccounts,
@@ -33,8 +36,8 @@ export const GET = withAuth(async (req, ctx) => {
     queries.overview.getEmailStatsByWorkspace(db, ws.workspaceId),
     queries.overview.getEmailAccountsByWorkspace(db, ws.workspaceId),
     queries.overview.getTaskStatsByWorkspace(db, ws.workspaceId, todayISO),
-    queries.overview.getRecentTerminalTasks(db, ws.workspaceId, 15),
-    queries.overview.getConversationCountsByAgent(db, ws.workspaceId),
+    queries.overview.getRecentTerminalTasks(db, ws.workspaceId, visibleAgentIds, 15),
+    queries.overview.getConversationCountsByAgent(db, ws.workspaceId, visibleAgentIds),
     queries.member.listMembers(db, ws.workspaceId),
     queries.workspaceInvite.listActiveInvites(db, ws.workspaceId),
     queries.calendarEvent.listCalendarEvents(db, ws.workspaceId, {

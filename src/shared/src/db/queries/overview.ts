@@ -129,8 +129,10 @@ export async function getTaskStatsByWorkspace(
 export async function getRecentTerminalTasks(
   db: Database,
   workspaceId: string,
+  visibleAgentIds: string[],
   limit = 15
 ) {
+  if (visibleAgentIds.length === 0) return [];
   return db
     .select({
       id: agentTaskQueue.id,
@@ -146,6 +148,7 @@ export async function getRecentTerminalTasks(
     .where(
       and(
         eq(agentTaskQueue.workspaceId, workspaceId),
+        inArray(agentTaskQueue.agentId, visibleAgentIds),
         ne(agentTaskQueue.type, TASK_TYPES.KILL_TASK),
         inArray(agentTaskQueue.status, ["completed", "failed", "cancelled"])
       )
@@ -154,13 +157,19 @@ export async function getRecentTerminalTasks(
     .limit(limit);
 }
 
-export async function getConversationCountsByAgent(db: Database, workspaceId: string) {
+export async function getConversationCountsByAgent(db: Database, workspaceId: string, visibleAgentIds: string[]) {
+  if (visibleAgentIds.length === 0) return [];
   return db
     .select({
       agentId: conversation.agentId,
       cnt: count(),
     })
     .from(conversation)
-    .where(eq(conversation.workspaceId, workspaceId))
+    .where(
+      and(
+        eq(conversation.workspaceId, workspaceId),
+        inArray(conversation.agentId, visibleAgentIds)
+      )
+    )
     .groupBy(conversation.agentId);
 }
