@@ -102,21 +102,21 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="flex min-h-full lg:h-full lg:min-h-[600px] flex-col justify-between p-4 lg:p-6">
-        <div className="flex-1 min-h-0 flex flex-col gap-4">
-          <AgentOverview
-            agents={agents}
-            runtimes={runtimes}
-            activeTaskCounts={activeTaskCounts}
-            overview={overview}
-          />
-          <div className="grid gap-4 lg:grid-cols-2 lg:flex-1 lg:[&>*]:h-full">
-            <RecentActivity overview={overview} agents={agents} />
-            <CalendarOverview overview={overview} agents={agents} />
-          </div>
+    <div className="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
+      <div className="flex min-h-full flex-col gap-4 p-4 lg:h-full lg:min-h-[600px] lg:p-6">
+        <AgentOverview
+          agents={agents}
+          runtimes={runtimes}
+          activeTaskCounts={activeTaskCounts}
+          overview={overview}
+        />
+        <div className="grid gap-4 lg:grid-cols-2 lg:flex-1 lg:min-h-0 lg:auto-rows-fr">
+          <RecentActivity overview={overview} agents={agents} />
+          <CalendarOverview overview={overview} agents={agents} />
         </div>
-        <DailyQuote />
+        <div className="shrink-0">
+          <DailyQuote />
+        </div>
       </div>
     </div>
   );

@@ -23,7 +23,7 @@ export function AgentOverview({ agents, runtimes, activeTaskCounts, overview }: 
   if (agents.length === 0) return null;
 
   return (
-    <Card>
+    <Card className="flex flex-col lg:max-h-[33%]">
       <CardHeader>
         <CardTitle>Agents</CardTitle>
         <CardAction>
@@ -36,7 +36,7 @@ export function AgentOverview({ agents, runtimes, activeTaskCounts, overview }: 
           </button>
         </CardAction>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="p-0 flex-1 min-h-0 overflow-y-auto">
         <div className="divide-y divide-border/50">
           {agents.map((agent) => {
             const rt = runtimes.find((r) => r.id === agent.runtime_id);
