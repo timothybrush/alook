@@ -1044,7 +1044,9 @@
   border-radius: 0 !important;
   border: none !important;
   max-width: 100% !important;
+  max-height: 28rem !important;
   overflow-x: auto !important;
+  overflow-y: auto !important;
   --sdm-bg: #24292e !important;
   --sdm-fg: #e1e4e8 !important;
   background-color: #24292e !important;
