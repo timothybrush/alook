@@ -170,6 +170,8 @@ export {
 
 // Utils
 export { parseEmailHandle, toAlookAddress, isValidHandle } from "./utils/email";
+export { parsePromptMentions } from "./utils/prompt-parser";
+export type { PromptAgent, PromptMention, ParseResult } from "./utils/prompt-parser";
 export { isValidToken, isValidEmail } from "./utils/validation";
 export { isOnline, formatStatus } from "./utils/status";
 export { isUniqueConstraintError } from "./utils/db-errors";
