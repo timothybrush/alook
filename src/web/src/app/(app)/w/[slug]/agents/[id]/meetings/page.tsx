@@ -43,7 +43,7 @@ function formatTime(iso: string | null) {
 export default function AgentMeetingsPage() {
   const params = useParams();
   const agentId = params.id as string;
-  const { workspaceId, slug } = useWorkspace();
+  const { workspaceId } = useWorkspace();
 
   const [meetings, setMeetings] = useState<MeetingSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,8 +70,12 @@ export default function AgentMeetingsPage() {
   }, [agentId, workspaceId]);
 
   useEffect(() => {
-    loadMeetings();
-  }, [loadMeetings]);
+    let cancelled = false;
+    listMeetings(agentId, workspaceId)
+      .then((data) => { if (!cancelled) { setMeetings(data); setLoading(false); } })
+      .catch(() => { if (!cancelled) { toast.error("Failed to load meetings"); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [agentId, workspaceId]);
 
   // Auto-refresh for active meetings
   useEffect(() => {
