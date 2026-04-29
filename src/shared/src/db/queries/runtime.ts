@@ -1,4 +1,4 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, sql } from "drizzle-orm";
 import { agentRuntime, agent, agentTaskQueue, machine } from "../schema";
 import type { Database } from "../index";
 
@@ -14,6 +14,7 @@ export async function upsertAgentRuntime(
   }
 ) {
   const now = new Date().toISOString();
+  const metaJson = JSON.stringify(data.metadata ?? {});
   const rows = await db
     .insert(agentRuntime)
     .values({
@@ -33,7 +34,7 @@ export async function upsertAgentRuntime(
       set: {
         runtimeMode: data.runtimeMode,
         deviceInfo: data.deviceInfo,
-        metadata: data.metadata ?? null,
+        metadata: sql`json_patch(coalesce(${agentRuntime.metadata}, '{}'), ${metaJson})`,
         updatedAt: now,
       },
     })

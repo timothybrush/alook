@@ -410,7 +410,7 @@ export default function RuntimesPage() {
                         <div className="flex items-center gap-1">
                           {(() => {
                             const isUpdating = !!machine.pendingUpdateVersion || effectiveUpdatingDaemons.has(daemonId);
-                            const needsUpdate = latestCliVersion && machine.cliVersion && !semverGte(machine.cliVersion, latestCliVersion);
+                            const needsUpdate = latestCliVersion && (!machine.cliVersion || !semverGte(machine.cliVersion, latestCliVersion));
                             if (isUpdating) {
                               return (
                                 <Button variant="ghost" size="sm" disabled className="text-xs h-6 px-2">

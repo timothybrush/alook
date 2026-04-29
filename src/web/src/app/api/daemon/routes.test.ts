@@ -227,7 +227,7 @@ describe("daemon route body validation", () => {
       expect(upsertMock).toHaveBeenCalledWith(
         {},
         expect.objectContaining({
-          metadata: expect.objectContaining({ version: "3.5" }),
+          metadata: expect.objectContaining({ version: "3.5", cli_version: "0.5.1" }),
         })
       );
     });

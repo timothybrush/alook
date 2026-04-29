@@ -64,6 +64,53 @@ describe("daemon lifecycle", () => {
     expect(data.runtimes[0].id).toBe(registeredRuntimeId)
   })
 
+  it("register merges metadata (json_patch) instead of replacing", async () => {
+    // First register sets cli_version
+    const res1 = await tokenRequest("/api/daemon/register", seed.machineToken, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: seed.workspaceId,
+        daemon_id: daemonId,
+        device_name: "e2e-machine",
+        cli_version: "0.2.0",
+        runtimes: [{ provider: "claude", runtime_mode: "local", version: "5.0" }],
+      }),
+    })
+    expect(res1.status).toBe(200)
+
+    // Verify cli_version is stored
+    const rows1 = sqlQuery<{ metadata: string }>(
+      `SELECT metadata FROM agent_runtime WHERE id = '${registeredRuntimeId}'`
+    )
+    const meta1 = JSON.parse(rows1[0]!.metadata)
+    expect(meta1.cli_version).toBe("0.2.0")
+    expect(meta1.version).toBe("5.0")
+
+    // Second register without cli_version (simulates activate path)
+    // We call register with empty cli_version — metadata should preserve cli_version
+    const res2 = await tokenRequest("/api/daemon/register", seed.machineToken, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: seed.workspaceId,
+        daemon_id: daemonId,
+        device_name: "e2e-machine",
+        cli_version: "",
+        runtimes: [{ provider: "claude", runtime_mode: "local", version: "5.1" }],
+      }),
+    })
+    expect(res2.status).toBe(200)
+
+    // cli_version should still be preserved via json_patch merge
+    const rows2 = sqlQuery<{ metadata: string }>(
+      `SELECT metadata FROM agent_runtime WHERE id = '${registeredRuntimeId}'`
+    )
+    const meta2 = JSON.parse(rows2[0]!.metadata)
+    expect(meta2.cli_version).toBe("0.2.0")
+    expect(meta2.version).toBe("5.1")
+  })
+
   it("POST /api/daemon/tasks/poll updates last_seen_at", async () => {
     const res = await tokenRequest("/api/daemon/tasks/poll", seed.machineToken, {
       method: "POST",
