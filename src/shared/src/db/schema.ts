@@ -211,9 +211,7 @@ export const agent = sqliteTable(
     description: text("description").notNull().default(""),
     instructions: text("instructions").notNull().default(""),
     avatarUrl: text("avatar_url"),
-    runtimeId: text("runtime_id")
-      .notNull()
-      .references(() => agentRuntime.id, { onDelete: "cascade" }),
+    runtimeId: text("runtime_id").references(() => agentRuntime.id, { onDelete: "set null" }),
     runtimeMode: text("runtime_mode").notNull().default("local"),
     runtimeConfig: text("runtime_config", { mode: "json" }),
     visibility: text("visibility").notNull().default("private"),

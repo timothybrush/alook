@@ -50,10 +50,10 @@ export async function createAgent(
   data: {
     workspaceId: string;
     name: string;
-    runtimeId: string;
     description?: string;
     instructions?: string;
     avatarUrl?: string | null;
+    runtimeId?: string | null;
     runtimeMode?: string;
     runtimeConfig?: unknown;
     visibility?: string;
@@ -69,7 +69,7 @@ export async function createAgent(
     .values({
       workspaceId: data.workspaceId,
       name: data.name,
-      runtimeId: data.runtimeId,
+      runtimeId: data.runtimeId ?? null,
       description: data.description ?? "",
       instructions: data.instructions ?? "",
       avatarUrl: data.avatarUrl ?? null,
@@ -109,7 +109,7 @@ export async function updateAgent(
     name?: string;
     description?: string;
     instructions?: string;
-    runtimeId?: string;
+    runtimeId?: string | null;
     runtimeConfig?: unknown;
     visibility?: string;
   },

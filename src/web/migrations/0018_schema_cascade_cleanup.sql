@@ -1,5 +1,5 @@
 -- Fix FK cascade behavior for agent and workspace_file_request tables:
--- 1. agent.runtime_id: NOT NULL + ON DELETE CASCADE — agent cannot exist without runtime
+-- 1. agent.runtime_id: nullable + ON DELETE SET NULL — runtime removal keeps agent alive
 -- 2. agent.owner_id: ON DELETE CASCADE — deleting user deletes their agents
 -- 3. workspace_file_request: add composite FK to agent(id, workspace_id) ON DELETE CASCADE
 
@@ -13,7 +13,7 @@ CREATE TABLE agent_new (
   description TEXT NOT NULL DEFAULT '',
   instructions TEXT NOT NULL DEFAULT '',
   avatar_url TEXT,
-  runtime_id TEXT NOT NULL REFERENCES agent_runtime(id) ON DELETE CASCADE,
+  runtime_id TEXT REFERENCES agent_runtime(id) ON DELETE SET NULL,
   runtime_mode TEXT NOT NULL DEFAULT 'local',
   runtime_config TEXT,
   visibility TEXT NOT NULL DEFAULT 'private',
@@ -27,9 +27,6 @@ CREATE TABLE agent_new (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (id, workspace_id)
 );
-
--- Clean up orphan agents with NULL runtime_id (previously set by deleteRuntimesByDaemonId)
-DELETE FROM agent WHERE runtime_id IS NULL;
 
 INSERT INTO agent_new SELECT * FROM agent;
 
