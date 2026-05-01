@@ -56,7 +56,7 @@ describe("readDirectoryTree", () => {
     expect(entries[2].name).toBe("memory.md");
   });
 
-  it("skips dotfiles except .context_timeline", async () => {
+  it("skips all dotfiles and dotdirs", async () => {
     mkdirSync(join(workDir, ".git"));
     mkdirSync(join(workDir, ".context_timeline"));
     writeFileSync(join(workDir, ".hidden"), "secret");
@@ -65,8 +65,8 @@ describe("readDirectoryTree", () => {
     const entries = await readDirectoryTree(workDir, workDir);
     const names = entries.map((e) => e.name);
 
-    expect(names).toContain(".context_timeline");
     expect(names).toContain("visible.md");
+    expect(names).not.toContain(".context_timeline");
     expect(names).not.toContain(".git");
     expect(names).not.toContain(".hidden");
   });
