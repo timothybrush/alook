@@ -93,6 +93,7 @@ export interface UpdateAgentRequest {
   max_concurrent_tasks?: number;
   email_handle?: string;
   visibility?: string;
+  avatar_url?: string | null;
 }
 
 export interface SendMessageRequest {

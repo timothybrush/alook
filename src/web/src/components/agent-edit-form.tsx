@@ -18,6 +18,13 @@ import {
   AllowedSendersTab,
   AgentAccessTab,
 } from "@/components/agent-form-fields";
+import {
+  type AvatarConfig,
+  AvatarPickerDialog,
+  DEFAULT_CONFIG,
+  parseAvatarUrl,
+  serializeAvatarConfig,
+} from "@/components/avatar";
 
 const MAX_INSTRUCTION_LENGTH = 50_000;
 const DEBOUNCE_MS = 500;
@@ -57,6 +64,7 @@ interface AgentEditFormProps {
     description: string;
     runtime_id: string;
     runtime_config?: Record<string, unknown>;
+    avatar_url?: string | null;
   }) => Promise<boolean>;
   onCancel: () => void;
   saving: boolean;
@@ -77,6 +85,9 @@ export function AgentEditForm({
   const [name, setName] = useState(agent.name ?? "");
   const [description, setDescription] = useState(agent.description ?? "");
   const [runtimeId, setRuntimeId] = useState(agent.runtime_id ?? "");
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(
+    () => parseAvatarUrl(agent.avatar_url) ?? DEFAULT_CONFIG
+  );
   const [model, setModel] = useState(() => {
     const rc = agent.runtime_config;
     return typeof rc?.model === "string" ? rc.model : "";
@@ -159,6 +170,7 @@ export function AgentEditForm({
       description,
       runtime_id: runtimeId,
       runtime_config: model ? { model } : {},
+      avatar_url: serializeAvatarConfig(avatarConfig),
     });
   };
 
@@ -237,6 +249,10 @@ export function AgentEditForm({
               >
                 {activeTab === "general" && (
                   <>
+                    <AvatarPickerDialog
+                      config={avatarConfig}
+                      onChange={setAvatarConfig}
+                    />
                     <GeneralFields
                       name={name}
                       setName={setName}

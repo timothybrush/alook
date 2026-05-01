@@ -11,7 +11,7 @@ export function userToResponse(u: any) {
     id: u.id,
     name: u.name,
     email: u.email,
-    avatar_url: u.avatarUrl || null,
+    avatar_url: u.avatarUrl ?? null,
     created_at: formatTimestamp(u.createdAt),
     updated_at: formatTimestamp(u.updatedAt),
   };
@@ -42,7 +42,7 @@ export function agentToResponse(a: any) {
     status: a.status,
     max_concurrent_tasks: a.maxConcurrentTasks,
     email_handle: a.emailHandle || null,
-    avatar_url: a.avatarUrl || null,
+    avatar_url: a.avatarUrl ?? null,
     visibility: a.visibility ?? "private",
     owner_id: a.ownerId ?? null,
     created_at: formatTimestamp(a.createdAt),

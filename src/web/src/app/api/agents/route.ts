@@ -76,6 +76,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     maxConcurrentTasks,
     ownerId: ctx.userId,
     emailHandle: emailHandle || null,
+    avatarUrl: body.avatar_url ?? null,
   });
 
   if (emailHandle && ctx.email) {

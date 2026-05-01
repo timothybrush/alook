@@ -353,6 +353,7 @@ export const CreateAgentRequestSchema = z.object({
   runtime_config: RuntimeConfigSchema,
   max_concurrent_tasks: z.number().int().optional(),
   email_handle: z.string().optional(),
+  avatar_url: z.string().max(2000).nullable().optional(),
 });
 export type CreateAgentRequest = z.infer<typeof CreateAgentRequestSchema>;
 
@@ -364,6 +365,7 @@ export const UpdateAgentRequestSchema = z
     runtime_id: z.string().min(1).optional(),
     runtime_config: RuntimeConfigSchema,
     visibility: z.enum(["public", "private"]).optional(),
+    avatar_url: z.string().max(2000).nullable().optional(),
   })
   .refine(
     (v) =>
@@ -372,7 +374,8 @@ export const UpdateAgentRequestSchema = z
       v.instructions !== undefined ||
       v.runtime_id !== undefined ||
       v.runtime_config !== undefined ||
-      v.visibility !== undefined,
+      v.visibility !== undefined ||
+      v.avatar_url !== undefined,
     { message: "at least one field is required" },
   );
 export type UpdateAgentRequest = z.infer<typeof UpdateAgentRequestSchema>;

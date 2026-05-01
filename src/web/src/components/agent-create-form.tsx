@@ -14,6 +14,12 @@ import {
   type CustomEmailData,
 } from "@/components/custom-email-form";
 import { useWorkspace } from "@/contexts/workspace-context";
+import {
+  type AvatarConfig,
+  AvatarPickerDialog,
+  DEFAULT_CONFIG,
+  serializeAvatarConfig,
+} from "@/components/avatar";
 
 interface AgentCreateFormProps {
   runtimes: Runtime[];
@@ -27,6 +33,7 @@ interface AgentCreateFormProps {
     email_handle?: string;
     runtime_config?: Record<string, unknown>;
     custom_email?: CustomEmailData;
+    avatar_url?: string | null;
   }) => Promise<boolean>;
   onCancel: () => void;
   saving: boolean;
@@ -52,6 +59,7 @@ export function AgentCreateForm({
     null
   );
   const [model, setModel] = useState("");
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(DEFAULT_CONFIG);
 
   const selectedRuntime = runtimes.find((r) => r.id === runtimeId);
   const providerModels =
@@ -74,12 +82,17 @@ export function AgentCreateForm({
       runtime_config: model ? { model } : {},
       custom_email:
         customEmailGetDataRef.current?.() ?? customEmailData ?? undefined,
+      avatar_url: serializeAvatarConfig(avatarConfig),
     });
   };
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto thin-scrollbar px-5 py-6">
       <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
+        <AvatarPickerDialog
+          config={avatarConfig}
+          onChange={setAvatarConfig}
+        />
         <GeneralFields
           name={name}
           setName={setName}

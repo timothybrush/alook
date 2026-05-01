@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/context-menu";
 import { AgentPreviewCard } from "@/components/agent-preview-card";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { AvatarRenderer, parseAvatarUrl } from "@/components/avatar";
 
 function AgentSidebarButton({
   agent,
@@ -68,7 +69,13 @@ function AgentSidebarButton({
             />
           }
         >
-          {agent.name.charAt(0).toUpperCase()}
+          {(() => {
+            const avatarConfig = parseAvatarUrl(agent.avatar_url);
+            if (avatarConfig) {
+              return <AvatarRenderer config={avatarConfig} size={40} className="rounded-xl" />;
+            }
+            return agent.name.charAt(0).toUpperCase();
+          })()}
           {taskCount > 0 && (
             <span className="absolute bottom-0 right-0 size-2 rounded-full bg-status-online animate-pulse ring-2 ring-background" />
           )}

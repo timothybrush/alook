@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import type { Agent } from "@alook/shared";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
+import { AvatarRenderer, parseAvatarUrl } from "@/components/avatar";
 
 export function AgentPreviewCard({ agent }: { agent: Agent }) {
   const [copied, setCopied] = useState(false);
@@ -24,17 +25,17 @@ export function AgentPreviewCard({ agent }: { agent: Agent }) {
   return (
     <div className="flex flex-col gap-2.5 p-1">
       <div className="flex items-start gap-3">
-        {agent.avatar_url ? (
-          <img
-            src={agent.avatar_url}
-            alt={agent.name}
-            className="size-10 rounded-xl object-cover shrink-0"
-          />
-        ) : (
-          <div className="flex items-center justify-center size-10 rounded-xl bg-secondary text-secondary-foreground text-sm font-medium shrink-0">
-            {agent.name.charAt(0).toUpperCase()}
-          </div>
-        )}
+        {(() => {
+          const avatarConfig = parseAvatarUrl(agent.avatar_url);
+          if (avatarConfig) {
+            return <AvatarRenderer config={avatarConfig} size={40} className="shrink-0 rounded-xl" />;
+          }
+          return (
+            <div className="flex items-center justify-center size-10 rounded-xl bg-secondary text-secondary-foreground text-sm font-medium shrink-0">
+              {agent.name.charAt(0).toUpperCase()}
+            </div>
+          );
+        })()}
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium truncate">{agent.name}</p>
           {email && (

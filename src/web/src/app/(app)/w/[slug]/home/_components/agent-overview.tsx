@@ -8,6 +8,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { MessageSquare, Mail, Plus } from "lucide-react";
 import type { Agent, AgentRuntime } from "@alook/shared";
 import type { WorkspaceOverview } from "@/lib/api";
+import { AvatarRenderer, parseAvatarUrl } from "@/components/avatar";
 
 interface AgentOverviewProps {
   agents: Agent[];
@@ -51,9 +52,17 @@ export function AgentOverview({ agents, runtimes, activeTaskCounts, overview }: 
                 onClick={() => router.push(`/w/${slug}/agents/${agent.id}`)}
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/50 transition-colors cursor-pointer"
               >
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground text-sm font-medium">
-                  {agent.name.charAt(0).toUpperCase()}
-                </div>
+                {(() => {
+                  const avatarConfig = parseAvatarUrl(agent.avatar_url);
+                  if (avatarConfig) {
+                    return <AvatarRenderer config={avatarConfig} size={32} className="shrink-0 rounded-lg" />;
+                  }
+                  return (
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground text-sm font-medium">
+                      {agent.name.charAt(0).toUpperCase()}
+                    </div>
+                  );
+                })()}
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
