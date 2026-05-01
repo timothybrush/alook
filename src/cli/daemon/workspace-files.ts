@@ -33,8 +33,12 @@ export async function readDirectoryTree(
 
   const results: WorkspaceFileEntry[] = [];
   for (const entry of entries) {
-    if (entry.name.startsWith(".") && entry.name !== ".context_timeline") continue;
+    if (entry.name.startsWith(".")) continue;
     if (SKIP_DIRS.has(entry.name)) continue;
+    if (!entry.isDirectory()) {
+      const ext = extname(entry.name).toLowerCase();
+      if (ext !== "" && !TEXT_EXTENSIONS.has(ext)) continue;
+    }
 
     const fullPath = join(dirPath, entry.name);
     let info;
