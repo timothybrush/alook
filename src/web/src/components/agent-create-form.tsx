@@ -17,7 +17,7 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import {
   type AvatarConfig,
   AvatarPickerDialog,
-  DEFAULT_CONFIG,
+  randomConfig,
   serializeAvatarConfig,
 } from "@/components/avatar";
 
@@ -59,7 +59,7 @@ export function AgentCreateForm({
     null
   );
   const [model, setModel] = useState("");
-  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(DEFAULT_CONFIG);
+  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(() => randomConfig());
 
   const selectedRuntime = runtimes.find((r) => r.id === runtimeId);
   const providerModels =
