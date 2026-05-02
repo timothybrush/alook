@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { MarkdownEditor, isEmptyHtml } from "@/components/ui/markdown-editor";
+import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import {
   CalendarDays,
   CalendarOff,
@@ -105,9 +105,8 @@ function parseTime(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function normalizedDescription(html: string | null | undefined): string {
-  if (!html) return "";
-  return isEmptyHtml(html) ? "" : html;
+function normalizedDescription(value: string | null | undefined): string {
+  return value?.trim() || "";
 }
 
 const GHOST_CONTROL =
@@ -359,11 +358,11 @@ export function CalendarEventSheet({
     const err = validate();
     if (err) return toast.error(err);
     const scheduled = combineDateTime(dateValue, timeValue);
-    const descHtml = isEmptyHtml(description) ? undefined : description;
+    const desc = description?.trim() || undefined;
     await onCreate?.({
       agent_id: agentId,
       title: title.trim(),
-      description: descHtml,
+      description: desc,
       scheduled_at: scheduled.toISOString(),
       repeat_interval: repeat || undefined,
       repeat_stop_date: stopDate ? toYYYYMMDD(stopDate) : undefined,
@@ -687,6 +686,7 @@ export function CalendarEventSheet({
     <div ref={descriptionRef}>
       <MarkdownEditor
         key={event?.id ?? "new"}
+        contentType="markdown"
         value={description}
         onChange={setDescription}
         placeholder="Add a description…"

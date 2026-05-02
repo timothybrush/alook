@@ -112,6 +112,7 @@ export function LinkSidecar({
         <div className="flex-1 overflow-y-auto thin-scrollbar px-5 py-4">
           <MarkdownEditor
             variant="seamless"
+            contentType="markdown"
             placeholder="Describe how these agents should collaborate. This instruction is shared with both agents when they receive tasks."
             value={instruction}
             onChange={setInstruction}

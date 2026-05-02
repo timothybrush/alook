@@ -68,6 +68,23 @@ those json are sorted by datetime in asc order.
 - When access other local projects, make sure you read the CLAUDE.md/AGENTS.md file under the project root dir to understand the requirements.
 `;
 
+export function resolveInstruction(text: string, selfAgentId: string): string {
+  let result = text;
+  result = result.replace(
+    /\[@ id="([^"]*)" label="([^"]*)"\]/g,
+    (_, id, label) => (id === selfAgentId ? "YOU" : `@${label}`),
+  );
+  // Fallback: handle legacy HTML mentions (pre-markdown-switch data)
+  result = result.replace(
+    /<span[^>]*data-id="([^"]*)"[^>]*data-label="([^"]*)"[^>]*>[^<]*<\/span>/gi,
+    (_, id, label) => (id === selfAgentId ? "YOU" : `@${label ?? "unknown"}`),
+  );
+  result = result.replace(/<\/p>\s*<p[^>]*>/gi, "\n");
+  result = result.replace(/<[^>]+>/g, "");
+  result = result.replace(/\n{3,}/g, "\n\n").trim();
+  return result;
+}
+
 export function buildInstructionContent(task: Task): string {
   const displayName = task.agent?.name || "Alook Agent";
   const alookAddr = task.agent?.emailHandle ? toAlookAddress(task.agent.emailHandle) : null;
@@ -101,7 +118,7 @@ Below are your direct colleagues. You can reach them via email.
       const c = task.agent.colleagues[i];
       content += `### ${c.name}${c.email ? ` (${c.email})` : ""}\n`;
       if (c.description) content += `${c.description}\n`;
-      if (c.instruction) content += `**Relationship:** ${c.instruction}\n`;
+      if (c.instruction) content += `**When to involve:** ${resolveInstruction(c.instruction, task.agentId)}\n`;
       if (i < task.agent.colleagues.length - 1) content += "\n";
     }
   }

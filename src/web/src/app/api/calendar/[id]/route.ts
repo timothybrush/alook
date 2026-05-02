@@ -3,7 +3,6 @@ import {
   queries,
   UpdateCalendarEventRequestSchema,
   DeleteCalendarEventRequestSchema,
-  isEmptyHtml,
   computeNextScheduledAt,
 } from "@alook/shared";
 import { getDb } from "@/lib/db";
@@ -74,7 +73,7 @@ export const PATCH = withAuth(async (req, ctx) => {
   if (body.title !== undefined) patch.title = body.title;
   if (body.description !== undefined) {
     patch.description =
-      body.description && !isEmptyHtml(body.description) ? body.description : null;
+      body.description?.trim() || null;
   }
   if (body.agent_id !== undefined) patch.agentId = body.agent_id;
   if (body.scheduled_at !== undefined) {

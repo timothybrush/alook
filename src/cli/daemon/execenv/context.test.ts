@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInstructionContent } from "./context.js";
+import { buildInstructionContent, resolveInstruction } from "./context.js";
 import { tempDir } from "../../lib/platform.js";
 import type { Task } from "../types.js";
 
@@ -137,7 +137,7 @@ describe("buildInstructionContent email tool injection", () => {
         name: "test",
         instructions: "",
         colleagues: [
-          { name: "Scout", email: "scout@alook.ai", description: "A researcher agent", instruction: "Share findings via email" },
+          { name: "Scout", email: "scout@alook.ai", description: "A researcher agent", instruction: 'Share findings with [@ id="agent-123" label="test"]' },
           { name: "Writer", email: "writer@alook.ai", description: "", instruction: "Draft blog posts" },
         ],
       },
@@ -147,9 +147,9 @@ describe("buildInstructionContent email tool injection", () => {
     expect(content).toContain("## Your Colleagues");
     expect(content).toContain("### Scout (scout@alook.ai)");
     expect(content).toContain("A researcher agent");
-    expect(content).toContain("**Relationship:** Share findings via email");
+    expect(content).toContain("**When to involve:** Share findings with YOU");
     expect(content).toContain("### Writer (writer@alook.ai)");
-    expect(content).toContain("**Relationship:** Draft blog posts");
+    expect(content).toContain("**When to involve:** Draft blog posts");
   });
 
   it("omits colleagues section when no colleagues", () => {
@@ -183,9 +183,39 @@ describe("buildInstructionContent email tool injection", () => {
     const content = buildInstructionContent(task);
 
     expect(content).toContain("### Scout (scout@alook.ai)");
-    expect(content).toContain("**Relationship:** Share data");
+    expect(content).toContain("**When to involve:** Share data");
     // Only the header + relationship, no blank description line
     const scoutSection = content.split("### Scout")[1].split("##")[0];
     expect(scoutSection).not.toMatch(/\n\n\n/);
+  });
+});
+
+describe("resolveInstruction", () => {
+  it("converts self-mentions to YOU", () => {
+    const md = 'when [@ id="ag_abc" label="gus"] is asked to implement';
+    expect(resolveInstruction(md, "ag_abc")).toBe("when YOU is asked to implement");
+  });
+
+  it("preserves other agent mentions as @name", () => {
+    const md = 'share with [@ id="ag_other" label="planner"]';
+    expect(resolveInstruction(md, "ag_abc")).toBe("share with @planner");
+  });
+
+  it("handles both self and other mentions in the same instruction", () => {
+    const md = '[@ id="ag_abc" label="gus"] should report to [@ id="ag_other" label="planner"]';
+    expect(resolveInstruction(md, "ag_abc")).toBe("YOU should report to @planner");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(resolveInstruction("", "ag_abc")).toBe("");
+  });
+
+  it("passes through plain text unchanged", () => {
+    expect(resolveInstruction("just plain text", "ag_abc")).toBe("just plain text");
+  });
+
+  it("handles legacy HTML mentions as fallback", () => {
+    const html = '<p>when <span class="mention-highlight" data-type="mention" data-id="ag_abc" data-label="gus">@gus</span> asks YOU to help</p>';
+    expect(resolveInstruction(html, "ag_abc")).toBe("when YOU asks YOU to help");
   });
 });
