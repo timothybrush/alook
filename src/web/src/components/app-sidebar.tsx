@@ -21,6 +21,7 @@ import {
 import { AgentPreviewCard } from "@/components/agent-preview-card";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { AvatarRenderer, parseAvatarUrl } from "@/components/avatar";
+import { AnimatedAvatar } from "@/components/avatar/animated-avatar";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -75,7 +76,7 @@ function AgentSidebarButton({
           {(() => {
             const avatarConfig = parseAvatarUrl(agent.avatar_url);
             if (avatarConfig) {
-              return <AvatarRenderer config={avatarConfig} size={40} className="rounded-xl" />;
+              return <AnimatedAvatar config={avatarConfig} size={40} className="rounded-xl" isHovered={false} isWorking={taskCount > 0} />;
             }
             return agent.name.charAt(0).toUpperCase();
           })()}

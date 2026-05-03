@@ -21,22 +21,39 @@ interface AnimatedAvatarProps {
   size?: number;
   className?: string;
   isHovered: boolean;
+  isWorking?: boolean;
 }
 
-export function AnimatedAvatar({ config, size, className, isHovered }: AnimatedAvatarProps) {
+export function AnimatedAvatar({ config, size, className, isHovered, isWorking }: AnimatedAvatarProps) {
   const [animClass, setAnimClass] = useState<string | null>(null);
   const lastPickRef = useRef(-1);
 
+  function pickAnimation() {
+    let idx = Math.floor(Math.random() * ANIMATIONS.length);
+    if (idx === lastPickRef.current) idx = (idx + 1) % ANIMATIONS.length;
+    lastPickRef.current = idx;
+    return ANIMATIONS[idx]!;
+  }
+
   useEffect(() => {
     if (isHovered) {
-      let idx = Math.floor(Math.random() * ANIMATIONS.length);
-      if (idx === lastPickRef.current) idx = (idx + 1) % ANIMATIONS.length;
-      lastPickRef.current = idx;
-      setAnimClass(ANIMATIONS[idx]!);
-    } else {
+      setAnimClass(pickAnimation());
+    } else if (!isWorking) {
       setAnimClass(null);
     }
   }, [isHovered]);
+
+  useEffect(() => {
+    if (!isWorking) {
+      if (!isHovered) setAnimClass(null);
+      return;
+    }
+    setAnimClass(pickAnimation());
+    const interval = setInterval(() => {
+      setAnimClass(pickAnimation());
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [isWorking]);
 
   return (
     <div className={animClass ?? undefined}>
