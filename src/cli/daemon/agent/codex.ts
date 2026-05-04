@@ -46,7 +46,7 @@ export class CodexBackend implements AgentBackend {
   constructor(private cliPath: string) {}
 
   execute(prompt: string, options: ExecOptions): AgentSession {
-    const proc = spawn(this.cliPath, ["app-server", "--listen", "stdio://", "--sandbox", "danger-full-access"], {
+    const proc = spawn(this.cliPath, ["app-server", "--listen", "stdio://", "--config", "sandbox_mode=danger-full-access"], {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...options.env },

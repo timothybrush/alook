@@ -115,13 +115,13 @@ describe("CodexBackend", () => {
     backend = new CodexBackend("/usr/bin/codex");
   });
 
-  it("spawns codex with danger-full-access sandbox flag", async () => {
+  it("spawns codex with sandbox_mode=danger-full-access config override", async () => {
     const { spawn } = await import("child_process");
     const session = backend.execute("hello", { cwd: "/tmp" });
     const mock = getMock();
 
     const spawnCall = (spawn as any).mock.calls[0];
-    expect(spawnCall[1]).toEqual(["app-server", "--listen", "stdio://", "--sandbox", "danger-full-access"]);
+    expect(spawnCall[1]).toEqual(["app-server", "--listen", "stdio://", "--config", "sandbox_mode=danger-full-access"]);
 
     mock.proc.emit("close", 0);
     await session.result;
