@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import Image from "next/image";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { useChannel } from "@/contexts/channel-context";
-import { useSidebarTrigger } from "@/components/workspace-shell";
 import { cn } from "@/lib/utils";
 import {
   ContextMenu,
@@ -22,7 +20,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-export function ChannelBar({ isMobile = false }: { isMobile?: boolean }) {
+export function ChannelBar() {
   const {
     channels,
     activeChannel,
@@ -40,7 +38,6 @@ export function ChannelBar({ isMobile = false }: { isMobile?: boolean }) {
   if (loading) {
     return (
       <div className="h-8 flex items-center gap-1.5 px-2 mb-1 shrink-0">
-        {isMobile && <BarLogo />}
         <div className="h-5 w-14 rounded-md bg-muted animate-pulse" />
         <div className="h-5 w-12 rounded-md bg-muted animate-pulse" />
         <div className="h-5 w-16 rounded-md bg-muted animate-pulse" />
@@ -50,7 +47,6 @@ export function ChannelBar({ isMobile = false }: { isMobile?: boolean }) {
 
   return (
     <div className="h-8 flex items-center gap-1.5 px-2 mb-1 overflow-x-auto thin-scrollbar shrink-0">
-      {isMobile && <BarLogo />}
       {channels.map((ch) =>
         renamingId === ch.id ? (
           <RenameInput
@@ -157,7 +153,7 @@ function ChannelPill({
   if (isDefault) {
     return (
       <button onClick={onSelect} className={pillClasses}>
-        {name}
+        #{name}
       </button>
     );
   }
@@ -176,7 +172,7 @@ function ChannelPill({
                 <button onClick={onSelect} className={pillClasses} />
               }
             >
-              {name}
+              #{name}
             </PopoverTrigger>
           </TooltipTrigger>
           <ContextMenuContent>
@@ -303,28 +299,3 @@ function RenameInput({
   );
 }
 
-function BarLogo() {
-  const openSidebar = useSidebarTrigger();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
-
-  if (!openSidebar) return null;
-
-  const img = mounted ? (
-    <>
-      <Image src="/alook.svg" alt="Alook" width={20} height={20} className="dark:hidden" />
-      <Image src="/alook-dark.svg" alt="Alook" width={20} height={20} className="hidden dark:block" />
-    </>
-  ) : (
-    <span className="size-5" />
-  );
-
-  return (
-    <button
-      onClick={openSidebar}
-      className="shrink-0 cursor-pointer transition-opacity hover:opacity-70 mr-1"
-    >
-      {img}
-    </button>
-  );
-}

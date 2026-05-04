@@ -8,10 +8,10 @@ import { useWorkspace } from "@/contexts/workspace-context";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AgentEditForm } from "@/components/agent-edit-form";
+import { ChannelBar } from "@/components/channel-bar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AgentStatusBadge } from "@/components/agent-status-badge";
 import { CalendarDays, FolderOpen, History, Mail, MessageSquare, MoreHorizontal, Pencil, Trash2, Video, X } from "lucide-react";
-import { MobileSidebarLogo } from "@/components/mobile-sidebar-logo";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -300,7 +300,10 @@ export default function AgentDetailLayout({ children }: { children: ReactNode })
         />
 
       ) : (
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div>
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          {currentTab === "chat" && <ChannelBar />}
+          {children}
+        </div>
       )}
 
       {/* Delete agent confirmation */}
