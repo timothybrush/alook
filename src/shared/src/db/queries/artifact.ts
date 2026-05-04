@@ -25,7 +25,7 @@ export async function listArtifactsByConversation(
   db: Database,
   conversationId: string,
   workspaceId: string,
-  opts?: { source?: string },
+  opts?: { source?: string; limit?: number },
 ) {
   const conditions = [
     eq(artifact.conversationId, conversationId),
@@ -34,11 +34,15 @@ export async function listArtifactsByConversation(
   if (opts?.source) {
     conditions.push(eq(artifact.source, opts.source));
   }
-  return db
+  let query = db
     .select()
     .from(artifact)
     .where(and(...conditions))
     .orderBy(desc(artifact.createdAt));
+  if (opts?.limit != null) {
+    query = query.limit(opts.limit) as typeof query;
+  }
+  return query;
 }
 
 export async function getArtifact(db: Database, id: string, workspaceId: string) {

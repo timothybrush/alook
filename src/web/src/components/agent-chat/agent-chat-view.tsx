@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { useParams, useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { Button } from "@/components/ui/button";
@@ -347,7 +348,6 @@ export function AgentChatView() {
             setHasMore(data.has_more_messages);
             setArtifacts(data.artifacts);
             setBufferedMessages(data.buffered_messages);
-            setPreviousConversations(data.previous_conversations);
             setHasMoreConversations(data.has_more_conversations);
           }
         } else {
@@ -357,7 +357,6 @@ export function AgentChatView() {
           setHasMore(data.has_more_messages);
           setArtifacts(data.artifacts);
           setBufferedMessages(data.buffered_messages);
-          setPreviousConversations(data.previous_conversations);
           setHasMoreConversations(data.has_more_conversations);
 
           if (data.active_task) {
@@ -492,19 +491,23 @@ export function AgentChatView() {
           before: oldest!.created_at,
           beforeId: oldest!.id,
         });
-        if (older.length === 0) {
-          setHasMore(false);
-        } else {
-          setHasMore(older.length >= MESSAGE_LIMIT);
-          setMessages((prev) => {
-            const existingIds = new Set(prev.map((m) => m.id));
-            const unique = older.filter((m) => !existingIds.has(m.id));
-            return [...unique, ...prev];
-          });
-        }
+        flushSync(() => {
+          if (older.length === 0) {
+            setHasMore(false);
+          } else {
+            setHasMore(older.length >= MESSAGE_LIMIT);
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const unique = older.filter((m) => !existingIds.has(m.id));
+              return [...unique, ...prev];
+            });
+          }
+        });
       } else if (canLoadPrevConv) {
         let consumed = 0;
         let loadedOlder: Message[] = [];
+        let napTs = "";
+        let napId = "";
 
         while (consumed < prevConvsList.length) {
           const prevConv = prevConvsList[consumed]!;
@@ -519,16 +522,9 @@ export function AgentChatView() {
             continue;
           }
 
-          const napTs = oldestConvCreatedAtRef.current ?? conversation.created_at;
-          const napId = `nap-${prevConv.id}`;
-          setNapMarkers((prev) =>
-            prev.some((m) => m.id === napId)
-              ? prev
-              : [...prev, { agentName: currentAgentName, created_at: napTs, id: napId }],
-          );
-
+          napTs = oldestConvCreatedAtRef.current ?? conversation.created_at;
+          napId = `nap-${prevConv.id}`;
           loadedOlder = older;
-          setHasMore(older.length >= MESSAGE_LIMIT);
           oldestConvIdRef.current = prevConv.id;
           oldestConvCreatedAtRef.current = prevConv.created_at;
           break;
@@ -538,23 +534,29 @@ export function AgentChatView() {
           setPreviousConversations((prev) => prev.slice(consumed));
         }
 
-        if (loadedOlder.length > 0) {
-          setMessages((prev) => {
-            const existingIds = new Set(prev.map((m) => m.id));
-            const unique = loadedOlder.filter((m) => !existingIds.has(m.id));
-            return [...unique, ...prev];
-          });
-        } else {
-          setHasMore(false);
-        }
+        flushSync(() => {
+          if (loadedOlder.length > 0) {
+            setNapMarkers((prev) =>
+              prev.some((m) => m.id === napId)
+                ? prev
+                : [...prev, { agentName: currentAgentName, created_at: napTs, id: napId }],
+            );
+            setHasMore(loadedOlder.length >= MESSAGE_LIMIT);
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const unique = loadedOlder.filter((m) => !existingIds.has(m.id));
+              return [...unique, ...prev];
+            });
+          } else {
+            setHasMore(false);
+          }
+        });
       }
 
-      requestAnimationFrame(() => {
-        if (el) {
-          const newScrollHeight = el.scrollHeight;
-          el.scrollTop = newScrollHeight - prevScrollHeight;
-        }
-      });
+      if (el) {
+        const newScrollHeight = el.scrollHeight;
+        el.scrollTop = newScrollHeight - prevScrollHeight;
+      }
     } catch {
       toast.error("Failed to load older messages");
     } finally {

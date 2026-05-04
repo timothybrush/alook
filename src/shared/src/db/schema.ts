@@ -300,6 +300,8 @@ export const conversation = sqliteTable(
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (t) => [
+    index("idx_conversation_agent_lookup")
+      .on(t.workspaceId, t.agentId, t.userId, t.type, t.channel, t.createdAt),
     foreignKey({
       columns: [t.agentId, t.workspaceId],
       foreignColumns: [agent.id, agent.workspaceId],
@@ -363,6 +365,8 @@ export const agentTaskQueue = sqliteTable(
       .where(sql`status IN ('queued', 'dispatched', 'running')`),
     index("idx_task_queue_agent_history")
       .on(t.agentId, t.workspaceId, t.createdAt),
+    index("idx_task_queue_conversation_status")
+      .on(t.conversationId, t.status),
     foreignKey({
       columns: [t.agentId, t.workspaceId],
       foreignColumns: [agent.id, agent.workspaceId],

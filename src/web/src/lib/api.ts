@@ -213,8 +213,8 @@ export interface ChatInitResponse {
   active_task: TaskApi | null;
   task_messages: TaskMessage[];
   has_more_messages: boolean;
-  previous_conversations: PreviousConversation[];
   has_more_conversations: boolean;
+  has_more_artifacts: boolean;
 }
 
 export const listPreviousConversations = (

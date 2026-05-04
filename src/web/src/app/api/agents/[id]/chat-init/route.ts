@@ -12,7 +12,7 @@ import {
 } from "@/lib/api/responses";
 
 const MESSAGE_LIMIT = 20;
-const PREV_CONV_LIMIT = 10;
+const ARTIFACT_LIMIT = 50;
 
 export const POST = withAuth(async (req, ctx) => {
   const ws = await withWorkspaceMember(req, ctx);
@@ -49,15 +49,16 @@ export const POST = withAuth(async (req, ctx) => {
 
   const convId = conversation.id;
 
-  const [messagesResult, artifactsResult, bufferedResult, activeTaskResult, prevConvsResult] =
+  const [messagesResult, artifactsResult, bufferedResult, activeTaskResult, hasMoreConvsResult] =
     await Promise.allSettled([
       queries.message.listMessages(db, convId, { limit: MESSAGE_LIMIT }),
-      queries.artifact.listArtifactsByConversation(db, convId, ws.workspaceId),
+      queries.artifact.listArtifactsByConversation(db, convId, ws.workspaceId, {
+        limit: ARTIFACT_LIMIT,
+      }),
       queries.message.listBufferedMessages(db, convId),
       queries.task.getActiveTaskByConversation(db, convId, ws.workspaceId),
-      queries.conversation.listPreviousConversations(
+      queries.conversation.hasPreviousConversations(
         db, ws.workspaceId, ctx.userId, id, convId, channel,
-        { limit: PREV_CONV_LIMIT },
       ),
     ]);
 
@@ -71,8 +72,8 @@ export const POST = withAuth(async (req, ctx) => {
     activeTaskResult.status === "fulfilled"
       ? activeTaskResult.value
       : null;
-  const prevConvs =
-    prevConvsResult.status === "fulfilled" ? prevConvsResult.value : [];
+  const hasMoreConvs =
+    hasMoreConvsResult.status === "fulfilled" ? hasMoreConvsResult.value : false;
 
   let taskMessages: unknown[] = [];
   if (
@@ -98,10 +99,7 @@ export const POST = withAuth(async (req, ctx) => {
     active_task: activeTask ? taskToResponse(activeTask) : null,
     task_messages: taskMessages,
     has_more_messages: messages.length >= MESSAGE_LIMIT,
-    previous_conversations: prevConvs.map((c) => ({
-      id: c.id,
-      created_at: c.createdAt,
-    })),
-    has_more_conversations: prevConvs.length >= PREV_CONV_LIMIT,
+    has_more_conversations: hasMoreConvs,
+    has_more_artifacts: artifacts.length >= ARTIFACT_LIMIT,
   });
 });

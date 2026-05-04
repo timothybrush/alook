@@ -1,4 +1,4 @@
-import { eq, and, desc, count, ne, lt } from "drizzle-orm";
+import { eq, and, desc, count, ne, lt, sql } from "drizzle-orm";
 import { conversation, message } from "../schema";
 import type { Database } from "../index";
 import { TASK_TYPES, type TaskType } from "../../constants";
@@ -182,4 +182,30 @@ export async function listPreviousConversations(
     .where(and(...conditions))
     .orderBy(desc(conversation.createdAt))
     .limit(limit);
+}
+
+export async function hasPreviousConversations(
+  db: Database,
+  workspaceId: string,
+  userId: string,
+  agentId: string,
+  excludeId: string,
+  channel?: string,
+): Promise<boolean> {
+  const conditions = [
+    eq(conversation.workspaceId, workspaceId),
+    eq(conversation.userId, userId),
+    eq(conversation.agentId, agentId),
+    eq(conversation.type, TASK_TYPES.USER_DM_MESSAGE),
+    ne(conversation.id, excludeId),
+  ];
+  if (channel) {
+    conditions.push(eq(conversation.channel, channel));
+  }
+  const rows = await db
+    .select({ exists: sql<number>`1` })
+    .from(conversation)
+    .where(and(...conditions))
+    .limit(1);
+  return rows.length > 0;
 }

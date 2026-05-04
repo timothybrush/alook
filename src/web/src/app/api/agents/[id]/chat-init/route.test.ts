@@ -6,7 +6,7 @@ vi.mock("@opennextjs/cloudflare", () => ({
 
 const mockGetAgent = vi.fn();
 const mockGetOrCreateAgentConversation = vi.fn();
-const mockListPreviousConversations = vi.fn();
+const mockHasPreviousConversations = vi.fn();
 const mockListMessages = vi.fn();
 const mockListArtifactsByConversation = vi.fn();
 const mockListBufferedMessages = vi.fn();
@@ -34,8 +34,8 @@ vi.mock("@alook/shared", () => ({
     conversation: {
       getOrCreateAgentConversation: (...args: unknown[]) =>
         mockGetOrCreateAgentConversation(...args),
-      listPreviousConversations: (...args: unknown[]) =>
-        mockListPreviousConversations(...args),
+      hasPreviousConversations: (...args: unknown[]) =>
+        mockHasPreviousConversations(...args),
     },
     message: {
       listMessages: (...args: unknown[]) => mockListMessages(...args),
@@ -122,7 +122,7 @@ const CONV = {
 function setupDefaults() {
   mockGetAgent.mockResolvedValue({ id: "a1", name: "Agent" });
   mockGetOrCreateAgentConversation.mockResolvedValue(CONV);
-  mockListPreviousConversations.mockResolvedValue([]);
+  mockHasPreviousConversations.mockResolvedValue(false);
   mockListMessages.mockResolvedValue([]);
   mockListArtifactsByConversation.mockResolvedValue([]);
   mockListBufferedMessages.mockResolvedValue([]);
@@ -152,7 +152,7 @@ describe("POST /api/agents/[id]/chat-init", () => {
 
     mockGetAgent.mockResolvedValue({ id: "a1", name: "Agent" });
     mockGetOrCreateAgentConversation.mockResolvedValue(CONV);
-    mockListPreviousConversations.mockResolvedValue([]);
+    mockHasPreviousConversations.mockResolvedValue(false);
     mockListMessages.mockResolvedValue([msg]);
     mockListArtifactsByConversation.mockResolvedValue([artifact]);
     mockListBufferedMessages.mockResolvedValue([]);
@@ -171,8 +171,8 @@ describe("POST /api/agents/[id]/chat-init", () => {
     expect(body.active_task).toBeNull();
     expect(body.task_messages).toEqual([]);
     expect(body.has_more_messages).toBe(false);
-    expect(body.previous_conversations).toEqual([]);
     expect(body.has_more_conversations).toBe(false);
+    expect(body.has_more_artifacts).toBe(false);
   });
 
   it("returns 404 for non-existent agent", async () => {
@@ -266,6 +266,38 @@ describe("POST /api/agents/[id]/chat-init", () => {
 
     expect(body.has_more_messages).toBe(true);
     expect(body.messages).toHaveLength(20);
+  });
+
+  it("sets has_more_artifacts true when artifacts reach limit", async () => {
+    const arts = Array.from({ length: 50 }, (_, i) => ({
+      id: `art${i}`,
+      conversationId: "c1",
+      agentId: "a1",
+      filename: `file${i}.png`,
+      contentType: "image/png",
+      size: 100,
+      source: "agent",
+      createdAt: "2024-01-01T00:00:00.000Z",
+    }));
+
+    setupDefaults();
+    mockListArtifactsByConversation.mockResolvedValue(arts);
+
+    const res = await POST(makeReq(), makeCtx());
+    const body = await res.json();
+
+    expect(body.has_more_artifacts).toBe(true);
+    expect(body.artifacts).toHaveLength(50);
+  });
+
+  it("sets has_more_conversations true when previous conversations exist", async () => {
+    setupDefaults();
+    mockHasPreviousConversations.mockResolvedValue(true);
+
+    const res = await POST(makeReq(), makeCtx());
+    const body = await res.json();
+
+    expect(body.has_more_conversations).toBe(true);
   });
 
   it("returns empty state for new conversation", async () => {
