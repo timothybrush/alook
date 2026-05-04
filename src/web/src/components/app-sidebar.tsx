@@ -207,13 +207,33 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   return (
     <nav className="flex h-full w-14 flex-col items-center pt-1 pb-2 gap-0.5">
       {/* Top — logo as Home link */}
-      <div className="pb-1.5 border-b border-border/50 mb-1">
+      <div className="pb-1.5 mb-1">
         <div
           className="flex shrink-0 items-center justify-center size-8 cursor-pointer [&>button]:pointer-events-none"
           onClick={() => { router.push(`${prefix}/home`); onNavigate?.(); }}
         >
           <Logo size="sm" iconOnly />
         </div>
+      </div>
+
+      {/* Threads */}
+      <div className="pb-1.5 border-b border-border/50 mb-1">
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => { router.push(`${prefix}/traces`); onNavigate?.(); }}
+              className={cn(
+                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                "bg-primary text-primary-foreground hover:bg-primary/80",
+                isTraces && "ring-2 ring-primary/50"
+              )}
+            />
+          }>
+            <GitBranch className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Threads</TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Agent avatars */}
@@ -305,23 +325,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
             <CalendarDays className="size-4" />
           </TooltipTrigger>
           <TooltipContent side="right">Calendar</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger render={
-            <button
-              type="button"
-              onClick={() => { router.push(`${prefix}/traces`); onNavigate?.(); }}
-              className={cn(
-                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-                "text-muted-foreground hover:text-foreground hover:bg-accent",
-                isTraces && "bg-accent text-foreground"
-              )}
-            />
-          }>
-            <GitBranch className="size-4" />
-          </TooltipTrigger>
-          <TooltipContent side="right">Traces</TooltipContent>
         </Tooltip>
 
         <Tooltip>

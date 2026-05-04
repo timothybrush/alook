@@ -265,11 +265,17 @@ function RenameInput({
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const savedRef = useRef(false);
+  const readyRef = useRef(false);
   const [value, setValue] = useState(currentName);
 
   useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
+    // Delay focus so the ContextMenu finishes its close transition first
+    const id = requestAnimationFrame(() => {
+      ref.current?.focus();
+      ref.current?.select();
+      readyRef.current = true;
+    });
+    return () => cancelAnimationFrame(id);
   }, []);
 
   const handleSubmit = useCallback(() => {
@@ -291,7 +297,7 @@ function RenameInput({
         if (e.key === "Enter") handleSubmit();
         if (e.key === "Escape") onCancel();
       }}
-      onBlur={() => { if (!savedRef.current) onCancel(); }}
+      onBlur={() => { if (readyRef.current && !savedRef.current) onCancel(); }}
       className="h-5 w-24 px-1.5 rounded-md text-[11px] bg-transparent border border-input focus:border-ring focus:ring-2 focus:ring-ring/50 outline-none shrink-0"
     />
   );

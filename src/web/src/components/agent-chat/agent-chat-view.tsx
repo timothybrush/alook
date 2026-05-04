@@ -353,6 +353,16 @@ export function AgentChatView() {
                 .then(setStepCounts)
                 .catch(() => {});
             }
+            const task = await getTask(scrollToTaskId, workspaceId).catch(() => null);
+            if (task && !["completed", "failed", "cancelled", "superseded"].includes(task.status)) {
+              setActiveTask(task);
+              const tmsgs = await getTaskMessages(scrollToTaskId, workspaceId).catch(() => [] as TaskMessage[]);
+              setTaskMessages(tmsgs);
+              if (tmsgs.length > 0) {
+                lastSeqRef.current = Math.max(...tmsgs.map((m) => m.seq));
+              }
+              startPollingRef.current(task.id, targetConvId, lastSeqRef.current);
+            }
           } catch {
             const data = await chatInit(agentId, workspaceId, activeChannel);
             setConversation(data.conversation);
