@@ -79,13 +79,14 @@ function AgentSidebarButton({
           {(() => {
             const avatarConfig = parseAvatarUrl(agent.avatar_url);
             if (avatarConfig) {
-              return <AnimatedAvatar config={avatarConfig} size={40} className="rounded-xl" isHovered={false} isWorking={taskCount > 0} />;
+              return <AnimatedAvatar config={avatarConfig} size={40} className="rounded-xl" isHovered={false} />;
             }
             return agent.name.charAt(0).toUpperCase();
           })()}
-          {taskCount > 0 && (
-            <span className="absolute bottom-0 right-0 size-2 rounded-full bg-status-online animate-pulse ring-2 ring-background" />
-          )}
+          <span className={cn(
+            "absolute bottom-0 right-0 size-2 rounded-full ring-2 ring-background",
+            isOnline ? "bg-status-online" : "bg-status-offline"
+          )} />
         </PopoverTrigger>
         <ContextMenuContent>
           {isPinned ? (

@@ -35,13 +35,12 @@ function getTaskRoute(slug: string, agentId: string, type: string) {
   }
 }
 
-function StatusDot({ online, pulse }: { online: boolean; pulse?: boolean }) {
+function StatusDot({ online }: { online: boolean }) {
   return (
     <span
       className={cn(
         "size-1.5 rounded-full shrink-0",
-        online ? "bg-status-online" : "bg-status-offline",
-        pulse && "animate-pulse"
+        online ? "bg-status-online" : "bg-status-offline"
       )}
     />
   );
@@ -106,7 +105,7 @@ export function AgentStatusBadge({ isOnline, taskCount, agentId }: AgentStatusBa
           />
         }
       >
-        <StatusDot online pulse={taskCount > 0} />
+        <StatusDot online />
         {taskCount > 0 ? (
           <>
             <span className="hidden sm:inline">Working</span>

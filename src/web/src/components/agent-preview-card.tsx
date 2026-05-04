@@ -45,7 +45,7 @@ export function AgentPreviewCard({
         {(() => {
           const avatarConfig = parseAvatarUrl(agent.avatar_url);
           if (avatarConfig) {
-            return <AnimatedAvatar config={avatarConfig} size={32} className="shrink-0 rounded-xl" isHovered={isHovered ?? false} />;
+            return <AnimatedAvatar config={avatarConfig} size={32} className="shrink-0 rounded-xl" isHovered={isHovered ?? false} isWorking={!!isOnline && (activeTaskCount ?? 0) > 0} />;
           }
           return (
             <div className="flex items-center justify-center size-8 rounded-xl bg-secondary text-secondary-foreground text-xs font-medium shrink-0">
@@ -83,8 +83,7 @@ export function AgentPreviewCard({
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
             <span className={cn(
               "size-1.5 rounded-full",
-              !isOnline ? "bg-status-offline" : "bg-status-online",
-              isOnline && (activeTaskCount ?? 0) > 0 && "animate-pulse"
+              !isOnline ? "bg-status-offline" : "bg-status-online"
             )} />
             {!isOnline ? "Offline" : (activeTaskCount ?? 0) > 0 ? "Working" : "Online"}
           </span>
