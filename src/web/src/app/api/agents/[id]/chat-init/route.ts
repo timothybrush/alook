@@ -10,6 +10,7 @@ import {
   taskToResponse,
   taskMessageToResponse,
 } from "@/lib/api/responses";
+import { TaskService } from "@/lib/services/task";
 
 const MESSAGE_LIMIT = 20;
 const ARTIFACT_LIMIT = 50;
@@ -75,15 +76,33 @@ export const POST = withAuth(async (req, ctx) => {
   const hasMoreConvs =
     hasMoreConvsResult.status === "fulfilled" ? hasMoreConvsResult.value : false;
 
+  // Recover orphaned buffered messages: if there are buffered messages but no
+  // active task, dispatch the first one now (handles race where task completed
+  // just before/after the message was buffered).
+  let resolvedActiveTask = activeTask;
+  let resolvedBuffered = buffered;
+  if (resolvedBuffered.length > 0 && !resolvedActiveTask) {
+    try {
+      const taskService = new TaskService(db);
+      const dispatched = await taskService.dispatchNextBufferedMessage(convId, ws.workspaceId);
+      if (dispatched) {
+        resolvedActiveTask = dispatched;
+        resolvedBuffered = await queries.message.listBufferedMessages(db, convId);
+      }
+    } catch {
+      // non-critical — user can still send a new message to unstick
+    }
+  }
+
   let taskMessages: unknown[] = [];
   if (
-    activeTask &&
-    !["completed", "failed", "cancelled", "superseded"].includes(activeTask.status)
+    resolvedActiveTask &&
+    !["completed", "failed", "cancelled", "superseded"].includes(resolvedActiveTask.status)
   ) {
     try {
       const tmsgs = await queries.taskMessage.listTaskMessages(
         db,
-        activeTask.id,
+        resolvedActiveTask.id,
       );
       taskMessages = tmsgs.map(taskMessageToResponse);
     } catch {
@@ -95,8 +114,8 @@ export const POST = withAuth(async (req, ctx) => {
     conversation: conversationToResponse(conversation),
     messages: messages.map(messageToResponse),
     artifacts: artifacts.map(queries.artifact.artifactToResponse),
-    buffered_messages: buffered.map(messageToResponse),
-    active_task: activeTask ? taskToResponse(activeTask) : null,
+    buffered_messages: resolvedBuffered.map(messageToResponse),
+    active_task: resolvedActiveTask ? taskToResponse(resolvedActiveTask) : null,
     task_messages: taskMessages,
     has_more_messages: messages.length >= MESSAGE_LIMIT,
     has_more_conversations: hasMoreConvs,

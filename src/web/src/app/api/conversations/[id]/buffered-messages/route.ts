@@ -12,6 +12,7 @@ import { withWorkspaceMember } from "@/lib/middleware/workspace";
 import { writeJSON, writeError, parseBody } from "@/lib/middleware/helpers";
 import { messageToResponse } from "@/lib/api/responses";
 import { broadcastToUser } from "@/lib/broadcast";
+import { TaskService } from "@/lib/services/task";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES = 10;
@@ -142,6 +143,14 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     conversationId: id,
     message: messageToResponse(message),
   }).catch(() => {});
+
+  // If no active task, dispatch immediately (handles race where task completed
+  // just before this message was buffered)
+  const activeTask = await queries.task.getActiveTaskByConversation(db, id, ws.workspaceId);
+  if (!activeTask) {
+    const taskService = new TaskService(db);
+    taskService.dispatchNextBufferedMessage(id, ws.workspaceId).catch(() => {});
+  }
 
   return writeJSON({ message: messageToResponse(message) }, 201);
 });
