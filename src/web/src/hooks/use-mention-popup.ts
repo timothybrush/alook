@@ -19,26 +19,22 @@ interface UseMentionPopupParams {
   onInputChange: (value: string) => void
 }
 
-function isTriggerChar(ch: number): boolean {
-  if ((ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch === 95) return false
-  return true
-}
+const MAX_QUERY_LENGTH = 30
 
 function findMentionTrigger(input: string, caretIndex: number): { start: number; query: string } | null {
   let i = caretIndex - 1
-  while (i >= 0) {
+  while (i >= 0 && caretIndex - i <= MAX_QUERY_LENGTH) {
     const ch = input.charCodeAt(i)
     if (ch === 64) { // '@'
-      if (i === 0 || isTriggerChar(input.charCodeAt(i - 1))) {
-        return { start: i, query: input.slice(i + 1, caretIndex) }
-      }
-      return null
+      return { start: i, query: input.slice(i + 1, caretIndex) }
     }
-    if (ch === 10 || ch === 13) return null // newline breaks the scan
+    if (ch === 10 || ch === 13) return null
     i--
   }
   return null
 }
+
+const POPUP_WIDTH = 256 // w-64
 
 function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number): { top: number; left: number } {
   const mirror = document.createElement("div")
@@ -73,7 +69,7 @@ function getCaretCoordinates(textarea: HTMLTextAreaElement, position: number): {
 
   document.body.appendChild(mirror)
   const top = marker.offsetTop - textarea.scrollTop
-  const left = marker.offsetLeft
+  const left = Math.max(0, Math.min(marker.offsetLeft, textarea.offsetWidth - POPUP_WIDTH))
   document.body.removeChild(mirror)
 
   return { top, left }
