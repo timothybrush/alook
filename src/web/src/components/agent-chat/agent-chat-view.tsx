@@ -97,6 +97,12 @@ export function mergeMessages(existing: Message[], incoming: Message[]): Message
 
 export function addBufferedIfNew(prev: Message[], incoming: Message): Message[] {
   if (prev.some((m) => m.id === incoming.id)) return prev;
+  // Skip if there's a recent optimistic entry — avoids brief duplicate flash
+  // when WS followup.created arrives before createBufferedMessage HTTP response.
+  const t = new Date(incoming.created_at).getTime();
+  if (prev.some((m) => m.id.startsWith("temp-") && Math.abs(new Date(m.created_at).getTime() - t) < 2000)) {
+    return prev;
+  }
   return [...prev, incoming];
 }
 
@@ -703,17 +709,18 @@ export function AgentChatView() {
 
             // Fallback: if a follow-up was dispatched but the WebSocket
             // message was lost, detect the new active task via API.
+            // Also syncs buffered messages to catch orphans from race conditions.
             setTimeout(async () => {
               if (pollRef.current) return;
               try {
-                const nextTask = await getActiveTask(conversationId, workspaceId);
+                const [nextTask, latestBuffered] = await Promise.all([
+                  getActiveTask(conversationId, workspaceId),
+                  listBufferedMessages(conversationId, workspaceId),
+                ]);
+                setBufferedMessages(latestBuffered);
                 if (nextTask && nextTask.id !== taskId) {
-                  const [latestMsgs, latestBuffered] = await Promise.all([
-                    listMessages(conversationId, workspaceId),
-                    listBufferedMessages(conversationId, workspaceId),
-                  ]);
+                  const latestMsgs = await listMessages(conversationId, workspaceId);
                   setMessages((prev) => mergeMessages(prev, latestMsgs));
-                  setBufferedMessages(latestBuffered);
                   setActiveTask(nextTask);
                   setTaskMessages([]);
                   startPollingRef.current(nextTask.id, conversationId);
@@ -787,7 +794,11 @@ export function AgentChatView() {
         });
       }
       if (msg.type === "followup.dispatched" && msg.conversationId === conversation?.id) {
+        // Optimistically remove by real ID
         setBufferedMessages((prev) => prev.filter((m) => m.id !== msg.message.id));
+        // Always sync from server to handle temp-ID / duplicate edge cases
+        listBufferedMessages(msg.conversationId, workspaceId)
+          .then(setBufferedMessages).catch(() => {});
         listMessages(msg.conversationId, workspaceId)
           .then((latest) => setMessages((prev) => mergeMessages(prev, latest)))
           .catch(() => { });
@@ -884,10 +895,18 @@ export function AgentChatView() {
     try {
       const cancelled = await cancelActiveTask(conversation.id, workspaceId);
       if (cancelled) {
+        // If WS followup.dispatched already set a new active task, don't overwrite
+        if (activeTaskIdRef.current && activeTaskIdRef.current !== cancelled.id) {
+          return;
+        }
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
-        const latest = await listMessages(conversation.id, workspaceId);
+        const [latest, latestBuffered] = await Promise.all([
+          listMessages(conversation.id, workspaceId),
+          listBufferedMessages(conversation.id, workspaceId),
+        ]);
         setMessages((prev) => mergeMessages(prev, latest));
+        setBufferedMessages(latestBuffered);
         setActiveTask(cancelled as Task);
         setTaskMessages([]);
       }
@@ -1280,7 +1299,7 @@ export function AgentChatView() {
       </div>
 
       {/* Follow-up buffer indicator */}
-      <FollowUpBuffer
+      {conversation && <FollowUpBuffer
         bufferedMessages={bufferedMessages}
         onDelete={(messageId) => {
           const prev = bufferedMessages;
@@ -1290,7 +1309,7 @@ export function AgentChatView() {
             toast.error("Failed to delete follow-up");
           });
         }}
-      />
+      />}
 
       {/* Input */}
       <div className="px-3 md:px-5 py-3">
