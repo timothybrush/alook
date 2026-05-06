@@ -15,6 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  type WorkspaceFormErrors,
+  hasWorkspaceFormErrors,
+  validateWorkspaceForm,
+} from "@/lib/form-validation";
 
 export function GeneralTab() {
   const { workspaceId, slug } = useWorkspace();
@@ -29,6 +34,7 @@ export function GeneralTab() {
   const [savedWorkspaceName, setSavedWorkspaceName] = useState("");
   const [savedWorkspaceSlug, setSavedWorkspaceSlug] = useState("");
   const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [workspaceErrors, setWorkspaceErrors] = useState<WorkspaceFormErrors>({});
 
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -69,11 +75,18 @@ export function GeneralTab() {
     workspaceName !== savedWorkspaceName || workspaceSlug !== savedWorkspaceSlug;
 
   const handleSaveWorkspace = async () => {
+    const nextErrors = validateWorkspaceForm({
+      name: workspaceName,
+      slug: workspaceSlug,
+    });
+    setWorkspaceErrors(nextErrors);
+    if (hasWorkspaceFormErrors(nextErrors)) return;
+
     setSavingWorkspace(true);
     try {
       const updated = await updateWorkspace(workspaceId, {
-        name: workspaceName,
-        slug: workspaceSlug,
+        name: workspaceName.trim(),
+        slug: workspaceSlug.trim(),
       });
       setSavedWorkspaceName(updated.name);
       setSavedWorkspaceSlug(updated.slug);
@@ -130,18 +143,44 @@ export function GeneralTab() {
             <Input
               id="workspace-name"
               value={workspaceName}
-              onChange={(e) => setWorkspaceName(e.target.value)}
+              onChange={(e) => {
+                const nextName = e.target.value;
+                setWorkspaceName(nextName);
+                if (workspaceErrors.name && nextName.trim()) {
+                  setWorkspaceErrors((prev) => ({ ...prev, name: undefined }));
+                }
+              }}
               placeholder="Workspace name"
+              aria-invalid={Boolean(workspaceErrors.name)}
+              aria-describedby={workspaceErrors.name ? "workspace-name-error" : undefined}
             />
+            {workspaceErrors.name && (
+              <p id="workspace-name-error" className="text-xs text-destructive">
+                {workspaceErrors.name}
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="workspace-slug">Slug</Label>
             <Input
               id="workspace-slug"
               value={workspaceSlug}
-              onChange={(e) => setWorkspaceSlug(e.target.value)}
+              onChange={(e) => {
+                const nextSlug = e.target.value;
+                setWorkspaceSlug(nextSlug);
+                if (workspaceErrors.slug && nextSlug.trim()) {
+                  setWorkspaceErrors((prev) => ({ ...prev, slug: undefined }));
+                }
+              }}
               placeholder="workspace-slug"
+              aria-invalid={Boolean(workspaceErrors.slug)}
+              aria-describedby={workspaceErrors.slug ? "workspace-slug-error" : undefined}
             />
+            {workspaceErrors.slug && (
+              <p id="workspace-slug-error" className="text-xs text-destructive">
+                {workspaceErrors.slug}
+              </p>
+            )}
             <p className="text-xs text-muted-foreground/70">
               Used in URLs: /w/{workspaceSlug}/
             </p>

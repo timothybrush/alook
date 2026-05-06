@@ -8,6 +8,11 @@ import { Input } from "@/components/ui/input"
 import { GradientBackground } from "@/components/gradient-background"
 import { Logo } from "@/components/logo"
 import { Plus, ArrowRight, Loader2 } from "lucide-react"
+import {
+  type WorkspaceFormErrors,
+  hasWorkspaceFormErrors,
+  validateWorkspaceForm,
+} from "@/lib/form-validation"
 
 interface WorkspaceItem {
   id: string
@@ -34,12 +39,15 @@ export function WorkspaceListClient({
   const [name, setName] = useState("")
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<WorkspaceFormErrors>({})
 
   const slug = deriveSlug(name)
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
-    if (!name.trim() || !slug) return
+    const nextErrors = validateWorkspaceForm({ name, slug })
+    setFieldErrors(nextErrors)
+    if (hasWorkspaceFormErrors(nextErrors)) return
 
     setError("")
     setCreating(true)
@@ -100,13 +108,29 @@ export function WorkspaceListClient({
               <Input
                 placeholder="Workspace name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  const nextName = e.target.value
+                  setName(nextName)
+                  const nextSlug = deriveSlug(nextName)
+                  if (fieldErrors.name && nextName.trim()) {
+                    setFieldErrors((prev) => ({ ...prev, name: undefined }))
+                  }
+                  if (fieldErrors.slug && nextSlug) {
+                    setFieldErrors((prev) => ({ ...prev, slug: undefined }))
+                  }
+                }}
                 autoFocus
-                required
+                aria-invalid={Boolean(fieldErrors.name || fieldErrors.slug)}
+                aria-describedby={fieldErrors.name || fieldErrors.slug ? "workspace-name-error" : undefined}
               />
               {slug && (
                 <p className="text-xs text-muted-foreground pl-1">
                   Slug: {slug}
+                </p>
+              )}
+              {(fieldErrors.name || fieldErrors.slug) && (
+                <p id="workspace-name-error" className="text-xs text-destructive">
+                  {fieldErrors.name || fieldErrors.slug}
                 </p>
               )}
             </div>
@@ -129,7 +153,7 @@ export function WorkspaceListClient({
               <Button
                 type="submit"
                 size="sm"
-                disabled={creating || !name.trim() || !slug}
+                disabled={creating}
                 className="flex-1"
               >
                 {creating ? (

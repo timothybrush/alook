@@ -25,6 +25,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/contexts/workspace-context";
+import {
+  type CustomEmailErrors,
+  hasCustomEmailErrors,
+  validateCustomEmailFields,
+} from "@/lib/form-validation";
 
 const PRESETS: Record<string, { imapHost: string; imapPort: number; smtpHost: string; smtpPort: number }> = {
   Gmail: { imapHost: "imap.gmail.com", imapPort: 993, smtpHost: "smtp.gmail.com", smtpPort: 587 },
@@ -89,9 +94,11 @@ function useEmailFields() {
   return { fields, applyPreset, buildData };
 }
 
-function EmailFieldsForm({ fields, applyPreset }: {
+function EmailFieldsForm({ fields, applyPreset, errors, onClearError }: {
   fields: ReturnType<typeof useEmailFields>["fields"];
   applyPreset: (name: string) => void;
+  errors: CustomEmailErrors;
+  onClearError: (field: keyof CustomEmailErrors) => void;
 }) {
   return (
     <>
@@ -108,7 +115,18 @@ function EmailFieldsForm({ fields, applyPreset }: {
         <div>
           <Label className="text-xs">Email Address *</Label>
           <Input placeholder="you@gmail.com" value={fields.emailAddress}
-            onChange={(e) => fields.setEmailAddress(e.target.value)} className="h-8 text-sm" />
+            onChange={(e) => {
+              fields.setEmailAddress(e.target.value);
+              if (e.target.value.trim()) onClearError("emailAddress");
+            }}
+            aria-invalid={Boolean(errors.emailAddress)}
+            aria-describedby={errors.emailAddress ? "custom-email-address-error" : undefined}
+            className="h-8 text-sm" />
+          {errors.emailAddress && (
+            <p id="custom-email-address-error" className="mt-1 text-xs text-destructive">
+              {errors.emailAddress}
+            </p>
+          )}
         </div>
         <div>
           <Label className="text-xs">Display Name</Label>
@@ -121,24 +139,68 @@ function EmailFieldsForm({ fields, applyPreset }: {
         <div className="space-y-2">
           <Label className="text-xs font-medium">IMAP (Receive)</Label>
           <Input placeholder="imap.gmail.com" value={fields.imapHost}
-            onChange={(e) => fields.setImapHost(e.target.value)} className="h-8 text-sm" />
+            onChange={(e) => {
+              fields.setImapHost(e.target.value);
+              if (e.target.value.trim()) onClearError("imapHost");
+            }}
+            aria-invalid={Boolean(errors.imapHost)}
+            aria-describedby={errors.imapHost ? "custom-email-imap-host-error" : undefined}
+            className="h-8 text-sm" />
+          {errors.imapHost && (
+            <p id="custom-email-imap-host-error" className="text-xs text-destructive">
+              {errors.imapHost}
+            </p>
+          )}
           <Input type="number" placeholder="993" value={fields.imapPort}
             onChange={(e) => fields.setImapPort(Number(e.target.value))} className="h-8 text-sm" />
           <Input placeholder={fields.emailAddress || "Username (defaults to email)"} value={fields.imapUsername}
             onChange={(e) => fields.setImapUsername(e.target.value)} className="h-8 text-sm" />
           <Input type="password" placeholder="App Password" value={fields.imapPassword}
-            onChange={(e) => fields.setImapPassword(e.target.value)} className="h-8 text-sm" />
+            onChange={(e) => {
+              fields.setImapPassword(e.target.value);
+              if (e.target.value.trim()) onClearError("imapPassword");
+            }}
+            aria-invalid={Boolean(errors.imapPassword)}
+            aria-describedby={errors.imapPassword ? "custom-email-imap-password-error" : undefined}
+            className="h-8 text-sm" />
+          {errors.imapPassword && (
+            <p id="custom-email-imap-password-error" className="text-xs text-destructive">
+              {errors.imapPassword}
+            </p>
+          )}
         </div>
         <div className="space-y-2">
           <Label className="text-xs font-medium">SMTP (Send)</Label>
           <Input placeholder="smtp.gmail.com" value={fields.smtpHost}
-            onChange={(e) => fields.setSmtpHost(e.target.value)} className="h-8 text-sm" />
+            onChange={(e) => {
+              fields.setSmtpHost(e.target.value);
+              if (e.target.value.trim()) onClearError("smtpHost");
+            }}
+            aria-invalid={Boolean(errors.smtpHost)}
+            aria-describedby={errors.smtpHost ? "custom-email-smtp-host-error" : undefined}
+            className="h-8 text-sm" />
+          {errors.smtpHost && (
+            <p id="custom-email-smtp-host-error" className="text-xs text-destructive">
+              {errors.smtpHost}
+            </p>
+          )}
           <Input type="number" placeholder="587" value={fields.smtpPort}
             onChange={(e) => fields.setSmtpPort(Number(e.target.value))} className="h-8 text-sm" />
           <Input placeholder={fields.emailAddress || "Username (defaults to email)"} value={fields.smtpUsername}
             onChange={(e) => fields.setSmtpUsername(e.target.value)} className="h-8 text-sm" />
           <Input type="password" placeholder="App Password" value={fields.smtpPassword}
-            onChange={(e) => fields.setSmtpPassword(e.target.value)} className="h-8 text-sm" />
+            onChange={(e) => {
+              fields.setSmtpPassword(e.target.value);
+              if (e.target.value.trim()) onClearError("smtpPassword");
+            }}
+            aria-invalid={Boolean(errors.smtpPassword)}
+            aria-describedby={errors.smtpPassword ? "custom-email-smtp-password-error" : undefined}
+            className="h-8 text-sm" />
+          {errors.smtpPassword && (
+            <p id="custom-email-smtp-password-error" className="text-xs text-destructive">
+              {errors.smtpPassword}
+            </p>
+          )}
         </div>
       </div>
     </>
@@ -154,8 +216,15 @@ export function CustomEmailForm({ agentId, workspaceId, onDataChange, getDataRef
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<CustomEmailErrors>({});
 
   const { fields, applyPreset, buildData } = useEmailFields();
+  const effectiveImapUsername = fields.imapUsername || fields.emailAddress;
+  const effectiveSmtpUsername = fields.smtpUsername || fields.emailAddress;
+
+  const clearFieldError = useCallback((field: keyof CustomEmailErrors) => {
+    setFieldErrors((prev) => ({ ...prev, [field]: undefined }));
+  }, []);
 
   useEffect(() => {
     if (getDataRef) getDataRef.current = buildData;
@@ -188,11 +257,20 @@ export function CustomEmailForm({ agentId, workspaceId, onDataChange, getDataRef
   const existing = accounts[0] ?? null;
 
   async function handleCreate() {
+    const nextErrors = validateCustomEmailFields({
+      emailAddress: fields.emailAddress,
+      imapHost: fields.imapHost,
+      imapUsername: effectiveImapUsername,
+      imapPassword: fields.imapPassword,
+      smtpHost: fields.smtpHost,
+      smtpUsername: effectiveSmtpUsername,
+      smtpPassword: fields.smtpPassword,
+    });
+    setFieldErrors(nextErrors);
+    if (hasCustomEmailErrors(nextErrors)) return;
+
     const data = buildData();
-    if (!data) {
-      toast.error("Please fill in all required fields");
-      return;
-    }
+    if (!data) return;
     if (!agentId) return;
     setSaving(true);
     try {
@@ -343,7 +421,12 @@ export function CustomEmailForm({ agentId, workspaceId, onDataChange, getDataRef
               </div>
             ) : (
               <div className="space-y-4">
-                <EmailFieldsForm fields={fields} applyPreset={applyPreset} />
+                <EmailFieldsForm
+                  fields={fields}
+                  applyPreset={applyPreset}
+                  errors={fieldErrors}
+                  onClearError={clearFieldError}
+                />
                 {!isCreateMode && (
                   <Button type="button" size="sm" className="w-full" onClick={handleCreate} disabled={saving}>
                     {saving && <Loader2 className="size-3 animate-spin mr-1" />}

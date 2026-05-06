@@ -1,5 +1,6 @@
 "use client";
 
+import type { ComponentProps } from "react";
 import type { AgentRuntime as Runtime } from "@alook/shared";
 import { ProviderLogo } from "@/components/provider-logo";
 import {
@@ -17,6 +18,7 @@ interface RuntimeSelectProps {
   onValueChange: (value: string) => void;
   runtimes: Runtime[];
   disabled?: boolean;
+  triggerProps?: Omit<ComponentProps<typeof SelectTrigger>, "children">;
 }
 
 function groupRuntimes(runtimes: Runtime[]) {
@@ -47,6 +49,7 @@ export function RuntimeSelect({
   onValueChange,
   runtimes,
   disabled,
+  triggerProps,
 }: RuntimeSelectProps) {
   const groups = groupRuntimes(runtimes);
   const allDisabled =
@@ -69,7 +72,7 @@ export function RuntimeSelect({
         return { value: rt.id, label };
       })}
     >
-      <SelectTrigger>
+      <SelectTrigger {...triggerProps}>
         <SelectValue placeholder={getPlaceholder(runtimes)} />
       </SelectTrigger>
       <SelectPopup>

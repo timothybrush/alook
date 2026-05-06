@@ -20,6 +20,11 @@ import {
   randomConfig,
   serializeAvatarConfig,
 } from "@/components/avatar";
+import {
+  type AgentCreateFieldErrors,
+  hasAgentCreateFieldErrors,
+  validateAgentCreateRequiredFields,
+} from "@/components/agent-create-form-validation";
 
 interface AgentCreateFormProps {
   runtimes: Runtime[];
@@ -53,6 +58,7 @@ export function AgentCreateForm({
   const [instructions, setInstructions] = useState("");
   const [runtimeId, setRuntimeId] = useState(defaultRuntimeId);
   const [emailHandle, setEmailHandle] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<AgentCreateFieldErrors>({});
   const [customEmailData, setCustomEmailData] =
     useState<CustomEmailData | null>(null);
   const customEmailGetDataRef = useRef<(() => CustomEmailData | null) | null>(
@@ -71,10 +77,31 @@ export function AgentCreateForm({
   const effectiveHandle = emailHandle || derivedHandle;
   const handleError = getHandleError(effectiveHandle);
 
+  const updateName = (value: string) => {
+    setName(value);
+    if (fieldErrors.name && value.trim()) {
+      setFieldErrors((prev) => ({ ...prev, name: undefined }));
+    }
+  };
+
+  const updateRuntimeId = (value: string) => {
+    setRuntimeId(value);
+    if (fieldErrors.runtimeId && value) {
+      setFieldErrors((prev) => ({ ...prev, runtimeId: undefined }));
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const nextErrors = validateAgentCreateRequiredFields({ name, runtimeId });
+    setFieldErrors(nextErrors);
+
+    if (hasAgentCreateFieldErrors(nextErrors)) {
+      return;
+    }
+
     await onSave({
-      name,
+      name: name.trim(),
       description,
       instructions,
       runtime_id: runtimeId,
@@ -88,14 +115,14 @@ export function AgentCreateForm({
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto thin-scrollbar px-5 py-6">
-      <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="mx-auto max-w-md space-y-4">
         <AvatarPickerDialog
           config={avatarConfig}
           onChange={setAvatarConfig}
         />
         <GeneralFields
           name={name}
-          setName={setName}
+          setName={updateName}
           description={description}
           setDescription={setDescription}
           instructions={instructions}
@@ -103,9 +130,10 @@ export function AgentCreateForm({
           model={model}
           setModel={setModel}
           runtimeId={runtimeId}
-          setRuntimeId={setRuntimeId}
+          setRuntimeId={updateRuntimeId}
           runtimes={runtimes}
           providerModels={providerModels}
+          errors={fieldErrors}
         />
 
         <div className="border-t border-border/50 pt-4 mt-4 space-y-4">
@@ -129,7 +157,7 @@ export function AgentCreateForm({
           <Button
             type="submit"
             size="sm"
-            disabled={saving || !name || !!handleError}
+            disabled={saving || !!handleError}
           >
             {saving ? "Creating..." : "Create"}
           </Button>

@@ -93,7 +93,28 @@ describe("apiFetch", () => {
       await listAgents("w1");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).message).toBe("Name is required");
       expect((e as ApiError).details).toEqual(["name: required", "email: invalid"]);
+    }
+  });
+
+  it("turns validation details into a readable error message", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: "validation error",
+        details: ["runtime_id: runtime_id is required"],
+      }),
+    });
+
+    const { listAgents } = await getApiFetch();
+    try {
+      await listAgents("w1");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ApiError);
+      expect((e as ApiError).message).toBe("Runtime Id is required");
+      expect((e as ApiError).details).toEqual(["runtime_id: runtime_id is required"]);
     }
   });
 

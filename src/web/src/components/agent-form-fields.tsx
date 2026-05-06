@@ -69,6 +69,10 @@ interface GeneralFieldsProps {
   setRuntimeId: (v: string) => void;
   runtimes: Runtime[];
   providerModels: string[];
+  errors?: {
+    name?: string;
+    runtimeId?: string;
+  };
 }
 
 export function GeneralFields({
@@ -84,6 +88,7 @@ export function GeneralFields({
   setRuntimeId,
   runtimes,
   providerModels,
+  errors,
 }: GeneralFieldsProps) {
   return (
     <>
@@ -95,7 +100,14 @@ export function GeneralFields({
           onChange={(e) => setName(e.target.value)}
           placeholder="My Agent"
           required
+          aria-invalid={Boolean(errors?.name)}
+          aria-describedby={errors?.name ? "agent-name-error" : undefined}
         />
+        {errors?.name && (
+          <p id="agent-name-error" className="text-xs text-destructive">
+            {errors.name}
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
@@ -155,7 +167,18 @@ export function GeneralFields({
             }
           }}
           runtimes={runtimes}
+          triggerProps={{
+            "aria-invalid": Boolean(errors?.runtimeId),
+            "aria-describedby": errors?.runtimeId
+              ? "agent-runtime-error"
+              : undefined,
+          }}
         />
+        {errors?.runtimeId && (
+          <p id="agent-runtime-error" className="text-xs text-destructive">
+            {errors.runtimeId}
+          </p>
+        )}
       </div>
     </>
   );

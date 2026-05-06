@@ -29,6 +29,34 @@ import { ApiError } from "@/lib/errors";
 
 const API_BASE = "";
 
+function humanizeValidationDetail(detail: string): string {
+  const [rawField, ...rest] = detail.split(":");
+  const rawMessage = rest.join(":").trim();
+  if (!rawMessage) return detail;
+
+  const field = rawField.trim();
+  const label = field
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+  let message = rawMessage.replace(/^required$/i, "is required");
+
+  const normalizedMessage = message.toLowerCase().replace(/[_-]+/g, " ");
+  const normalizedField = field.toLowerCase().replace(/[_-]+/g, " ");
+  if (normalizedField && normalizedMessage.startsWith(`${normalizedField} `)) {
+    message = message.slice(field.length).trimStart();
+  }
+
+  return label ? `${label} ${message}` : message;
+}
+
+function getReadableErrorMessage(error: string | undefined, details: string[] | undefined) {
+  if (error === "validation error" && details?.length) {
+    return humanizeValidationDetail(details[0]);
+  }
+  return error;
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -71,14 +99,15 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
     if (res.status >= 500) {
       throw new ApiError(
-        serverError || "Something went wrong — please try again",
+        getReadableErrorMessage(serverError, details) ||
+          "Something went wrong — please try again",
         res.status,
         details,
       );
     }
 
     throw new ApiError(
-      serverError || "Something went wrong",
+      getReadableErrorMessage(serverError, details) || "Something went wrong",
       res.status,
       details,
     );
