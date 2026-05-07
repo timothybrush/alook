@@ -243,7 +243,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
         </div>
       </div>
 
-      {/* Home & Threads */}
+      {/* Main navigation */}
       <div className="flex flex-col items-center gap-1.5 pb-1.5 border-b border-border/50 mb-1">
         <Tooltip>
           <TooltipTrigger render={
@@ -266,17 +266,17 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           <TooltipTrigger render={
             <button
               type="button"
-              onClick={() => { router.push(`${prefix}/threads`); onNavigate?.(); }}
+              onClick={() => { router.push(`${prefix}/calendar`); onNavigate?.(); }}
               className={cn(
                 "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
                 "text-muted-foreground hover:text-foreground hover:bg-accent",
-                isTraces && "bg-accent text-foreground"
+                isCalendar && "bg-accent text-foreground"
               )}
             />
           }>
-            <GitBranch className="size-4" />
+            <CalendarDays className="size-4" />
           </TooltipTrigger>
-          <TooltipContent side="right">Threads</TooltipContent>
+          <TooltipContent side="right">Calendar</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -294,6 +294,23 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
             <CircleDot className="size-4" />
           </TooltipTrigger>
           <TooltipContent side="right">Issues</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => { router.push(`${prefix}/threads`); onNavigate?.(); }}
+              className={cn(
+                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                "text-muted-foreground hover:text-foreground hover:bg-accent",
+                isTraces && "bg-accent text-foreground"
+              )}
+            />
+          }>
+            <GitBranch className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Threads</TooltipContent>
         </Tooltip>
       </div>
 
@@ -371,23 +388,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
 
       {/* Bottom section */}
       <div className="flex flex-col items-center gap-1 pt-2 border-t border-border/50 mt-1">
-        <Tooltip>
-          <TooltipTrigger render={
-            <button
-              type="button"
-              onClick={() => { router.push(`${prefix}/calendar`); onNavigate?.(); }}
-              className={cn(
-                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-                "text-muted-foreground hover:text-foreground hover:bg-accent",
-                isCalendar && "bg-accent text-foreground"
-              )}
-            />
-          }>
-            <CalendarDays className="size-4" />
-          </TooltipTrigger>
-          <TooltipContent side="right">Calendar</TooltipContent>
-        </Tooltip>
-
         <Tooltip>
           <TooltipTrigger render={
             <button

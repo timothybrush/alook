@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
-import { CircleDot, GitBranch, Home } from "lucide-react";
+import { CalendarDays, CircleDot, GitBranch, Home } from "lucide-react";
 import { useSidebarTrigger } from "@/components/workspace-shell";
 import { useAgentContext } from "@/contexts/agent-context";
 import { useWorkspace } from "@/contexts/workspace-context";
@@ -18,6 +18,7 @@ export function MobileTopBar() {
   const { agents, pins, unpinnedOrder, runtimes, loading } = useAgentContext();
 
   const isHomeActive = pathname === `/w/${slug}/home`;
+  const isCalendarActive = pathname.includes("/calendar");
   const isTracesActive = pathname.includes("/threads");
   const isIssuesActive = pathname.includes("/issues");
   const activeAgentMatch = pathname.match(/^\/w\/[^/]+\/agents\/([^/]+)/);
@@ -74,16 +75,16 @@ export function MobileTopBar() {
       </button>
 
       <button
-        onClick={() => router.push(`/w/${slug}/threads`)}
-        aria-label="Threads"
+        onClick={() => router.push(`/w/${slug}/calendar`)}
+        aria-label="Calendar"
         className={cn(
           "shrink-0 p-1 rounded-md transition-colors",
-          isTracesActive
+          isCalendarActive
             ? "text-foreground bg-muted"
             : "text-muted-foreground hover:text-foreground"
         )}
       >
-        <GitBranch className="size-4" />
+        <CalendarDays className="size-4" />
       </button>
 
       <button
@@ -97,6 +98,19 @@ export function MobileTopBar() {
         )}
       >
         <CircleDot className="size-4" />
+      </button>
+
+      <button
+        onClick={() => router.push(`/w/${slug}/threads`)}
+        aria-label="Threads"
+        className={cn(
+          "shrink-0 p-1 rounded-md transition-colors",
+          isTracesActive
+            ? "text-foreground bg-muted"
+            : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        <GitBranch className="size-4" />
       </button>
 
       <div className="flex-1 overflow-x-auto flex items-center gap-1.5 py-1 px-0.5 scrollbar-none">
