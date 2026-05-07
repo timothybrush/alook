@@ -5,9 +5,10 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useAgentContext } from "@/contexts/agent-context";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { Agent } from "@alook/shared";
+import { useInboxCount } from "@/contexts/inbox-count-context";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
-import { Monitor, SunMoon, Plus, CalendarDays, GitBranch, Settings, PinIcon, PinOffIcon, ArrowLeftRight, Home, CircleDot } from "lucide-react";
+import { Monitor, SunMoon, Plus, CalendarDays, GitBranch, Settings, PinIcon, PinOffIcon, ArrowLeftRight, Home, CircleDot, Inbox } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTheme } from "next-themes";
@@ -133,6 +134,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
 
   const { resolvedTheme, setTheme } = useTheme();
   const { activeTaskCounts: taskCounts } = useAgentContext();
+  const { count: inboxCount } = useInboxCount();
 
   const pinned = agents
     .filter((a) => pins.has(a.id))
@@ -175,6 +177,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const isRuntimes = pathname === `${prefix}/runtimes`;
   const isCalendar = pathname === `${prefix}/calendar`;
   const isTraces = pathname.startsWith(`${prefix}/threads`);
+  const isInbox = pathname.startsWith(`${prefix}/inbox`);
   const isIssues = pathname.startsWith(`${prefix}/issues`);
   const isSettings = pathname === `${prefix}/settings`;
   const isCreateAgent = pathname === `${prefix}/agents/new`;
@@ -266,17 +269,22 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           <TooltipTrigger render={
             <button
               type="button"
-              onClick={() => { router.push(`${prefix}/calendar`); onNavigate?.(); }}
+              onClick={() => { router.push(`${prefix}/inbox`); onNavigate?.(); }}
               className={cn(
-                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                "relative flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
                 "text-muted-foreground hover:text-foreground hover:bg-accent",
-                isCalendar && "bg-accent text-foreground"
+                isInbox && "bg-accent text-foreground"
               )}
             />
           }>
-            <CalendarDays className="size-4" />
+            <Inbox className="size-4" />
+            {inboxCount > 0 && (
+              <span className="absolute top-1 right-1 flex items-center justify-center min-w-3.5 h-3.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-0.5">
+                {inboxCount > 99 ? "99+" : inboxCount}
+              </span>
+            )}
           </TooltipTrigger>
-          <TooltipContent side="right">Calendar</TooltipContent>
+          <TooltipContent side="right">Inbox</TooltipContent>
         </Tooltip>
 
         <Tooltip>
@@ -294,6 +302,23 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
             <CircleDot className="size-4" />
           </TooltipTrigger>
           <TooltipContent side="right">Issues</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger render={
+            <button
+              type="button"
+              onClick={() => { router.push(`${prefix}/calendar`); onNavigate?.(); }}
+              className={cn(
+                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
+                "text-muted-foreground hover:text-foreground hover:bg-accent",
+                isCalendar && "bg-accent text-foreground"
+              )}
+            />
+          }>
+            <CalendarDays className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="right">Calendar</TooltipContent>
         </Tooltip>
 
         <Tooltip>

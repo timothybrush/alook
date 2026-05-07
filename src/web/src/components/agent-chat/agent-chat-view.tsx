@@ -24,10 +24,12 @@ import {
   cancelActiveTask,
   getActiveTask,
   retryTask,
+  markInboxRead,
 } from "@/lib/api";
 import type { PreviousConversation } from "@/lib/api";
 import type { Artifact, Conversation, Message, TaskApi as Task, TaskMessage, WsMessage } from "@alook/shared";
 import { useAgentContext } from "@/contexts/agent-context";
+import { useInboxCount } from "@/contexts/inbox-count-context";
 import { useChannel } from "@/contexts/channel-context";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -324,6 +326,7 @@ export function AgentChatView() {
   const searchParams = useSearchParams();
   const { workspaceId } = useWorkspace();
   const { agents, activeTaskCounts, subscribeWs } = useAgentContext();
+  const { refresh: refreshInboxCount } = useInboxCount();
   const { activeChannel, loading: channelLoading } = useChannel();
   const agentId = params.id as string;
   const scrollToTaskId = searchParams.get("task");
@@ -525,6 +528,16 @@ export function AgentChatView() {
     load();
     return () => { ignore = true; };
   }, [agentId, workspaceId, targetConvId, scrollToTaskId, activeChannel, channelLoading]);
+
+  const markedReadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!conversation?.id || !workspaceId) return;
+    if (markedReadRef.current === conversation.id) return;
+    markedReadRef.current = conversation.id;
+    markInboxRead(conversation.id, workspaceId)
+      .then(() => refreshInboxCount())
+      .catch(() => {});
+  }, [conversation?.id, workspaceId, refreshInboxCount]);
 
   // Scroll to bottom on initial load (skip if scroll-to-task is active)
   useEffect(() => {

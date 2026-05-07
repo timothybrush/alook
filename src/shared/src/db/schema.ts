@@ -656,6 +656,25 @@ export const agentLink = sqliteTable(
   ]
 );
 
+export const conversationReadState = sqliteTable(
+  "conversation_read_state",
+  {
+    id: text("id").primaryKey().$defaultFn(() => nanoid()),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversation.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    lastReadAt: text("last_read_at").notNull().default("1970-01-01T00:00:00.000Z"),
+    createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [
+    unique("conversation_read_state_conv_user").on(t.conversationId, t.userId),
+    index("idx_conversation_read_state_user").on(t.userId),
+  ]
+);
+
 export const workspaceFileRequest = sqliteTable(
   "workspace_file_request",
   {

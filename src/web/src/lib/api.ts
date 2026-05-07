@@ -1040,6 +1040,46 @@ export const deleteMeeting = (agentId: string, meetingId: string, workspaceId: s
     method: "DELETE",
   });
 
+// Inbox
+export interface InboxItem {
+  id: string;
+  agent_id: string;
+  title: string;
+  channel: string;
+  latest_response: string;
+  latest_response_at: string;
+  root_prompt: string | null;
+  agent_name: string | null;
+  agent_avatar_url: string | null;
+  root_task_status: string | null;
+}
+
+export const listInboxItems = (
+  workspaceId: string,
+  opts?: { limit?: number; before?: string }
+) => {
+  const extra: Record<string, string> = {};
+  if (opts?.limit) extra.limit = String(opts.limit);
+  if (opts?.before) extra.before = opts.before;
+  return apiFetch<{ items: InboxItem[]; has_more: boolean }>(
+    `/api/inbox${wsQuery(workspaceId, extra)}`
+  );
+};
+
+export const getInboxCount = (workspaceId: string) =>
+  apiFetch<{ count: number }>(`/api/inbox/count${wsQuery(workspaceId)}`);
+
+export const markInboxRead = (conversationId: string, workspaceId: string) =>
+  apiFetch<void>(`/api/inbox/read${wsQuery(workspaceId)}`, {
+    method: "POST",
+    body: JSON.stringify({ conversationId }),
+  });
+
+export const markAllInboxRead = (workspaceId: string) =>
+  apiFetch<void>(`/api/inbox/read-all${wsQuery(workspaceId)}`, {
+    method: "POST",
+  });
+
 // Traces
 export interface TraceListItem {
   trace_id: string;

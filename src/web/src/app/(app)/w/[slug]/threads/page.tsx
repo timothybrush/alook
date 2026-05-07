@@ -263,7 +263,26 @@ export default function TracesPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5">
+      <div className="flex items-center justify-between border-b border-border/50 px-3 md:px-5 py-2.5 gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="text-sm font-medium">Threads</h1>
+          <p className="text-xs text-muted-foreground hidden md:block">
+            Execution traces across your agents.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadInitial}
+            className="p-1.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            title="Refresh"
+          >
+            <RefreshCw className="size-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 px-4 py-2">
         <Select value={statusFilter} onValueChange={(v) => updateFilter("status", v ?? "")}>
           <SelectTrigger className="w-35 border-none bg-transparent shadow-none text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
             <SelectValue placeholder="Status: All" />
@@ -307,18 +326,7 @@ export default function TracesPage() {
             ))}
           </SelectPopup>
         </Select>
-
-        <button
-          type="button"
-          onClick={loadInitial}
-          className="ml-auto p-1.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-          title="Refresh"
-        >
-          <RefreshCw className="size-3.5" />
-        </button>
       </div>
-
-      <p className="px-4 pb-1 text-xs text-muted-foreground/50">Showing tasks that involve multiple agents</p>
 
       <div
         ref={scrollRef}
