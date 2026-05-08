@@ -616,28 +616,37 @@ const DEFAULT_STALE_RUNNING_SECONDS = Number(process.env.ALOOK_STALE_RUNNING_TIM
 export async function failStaleRunningTasks(db: Database, workspaceId: string, staleSeconds = DEFAULT_STALE_RUNNING_SECONDS) {
   const threshold = new Date(Date.now() - staleSeconds * 1000).toISOString();
 
-  const lastMsg = db
+  const runningTasks = await db
+    .select({ id: agentTaskQueue.id, startedAt: agentTaskQueue.startedAt })
+    .from(agentTaskQueue)
+    .where(
+      and(
+        eq(agentTaskQueue.workspaceId, workspaceId),
+        eq(agentTaskQueue.status, "running"),
+      )
+    );
+
+  if (runningTasks.length === 0) return [];
+
+  const taskIds = runningTasks.map(t => t.id);
+  const lastMessages = await db
     .select({
       taskId: taskMessage.taskId,
       lastMessageAt: sql<string>`max(${taskMessage.createdAt})`.as("last_message_at"),
     })
     .from(taskMessage)
-    .groupBy(taskMessage.taskId)
-    .as("last_msg");
+    .where(inArray(taskMessage.taskId, taskIds))
+    .groupBy(taskMessage.taskId);
 
-  const staleTasks = await db
-    .select({ id: agentTaskQueue.id })
-    .from(agentTaskQueue)
-    .leftJoin(lastMsg, eq(lastMsg.taskId, agentTaskQueue.id))
-    .where(
-      and(
-        eq(agentTaskQueue.workspaceId, workspaceId),
-        eq(agentTaskQueue.status, "running"),
-        lt(sql`coalesce(${lastMsg.lastMessageAt}, ${agentTaskQueue.startedAt})`, threshold)
-      )
-    );
+  const lastMsgMap = new Map(lastMessages.map(m => [m.taskId, m.lastMessageAt]));
+  const staleIds = runningTasks
+    .filter(t => {
+      const lastActivity = lastMsgMap.get(t.id) ?? t.startedAt;
+      return lastActivity != null && lastActivity < threshold;
+    })
+    .map(t => t.id);
 
-  if (staleTasks.length === 0) return [];
+  if (staleIds.length === 0) return [];
 
   const rows = await db
     .update(agentTaskQueue)
@@ -646,7 +655,7 @@ export async function failStaleRunningTasks(db: Database, workspaceId: string, s
       completedAt: new Date().toISOString(),
       error: `timed out in running state (no message activity for ${Math.round(staleSeconds / 60)} minutes)`,
     })
-    .where(and(inArray(agentTaskQueue.id, staleTasks.map(t => t.id)), eq(agentTaskQueue.status, "running")))
+    .where(and(inArray(agentTaskQueue.id, staleIds), eq(agentTaskQueue.status, "running")))
     .returning({ agentId: agentTaskQueue.agentId, workspaceId: agentTaskQueue.workspaceId, conversationId: agentTaskQueue.conversationId });
   return rows;
 }

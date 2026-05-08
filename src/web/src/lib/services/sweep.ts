@@ -2,11 +2,25 @@ import type { Database } from "@alook/shared";
 import { queries } from "@alook/shared";
 import { TaskService } from "./task";
 
+const SWEEP_INTERVAL_MS = 30_000;
+const lastSweepAt = new Map<string, number>();
+
+/** @internal test-only */
+export function _resetSweepThrottle() {
+  lastSweepAt.clear();
+}
+
 /**
  * Unified workspace housekeeping. Any code path that wants to ensure
  * stale state is cleaned up just calls this one function.
+ * Rate-limited to once per 30s per workspace within the same isolate.
  */
 export async function sweepStaleState(db: Database, workspaceId: string) {
+  const now = Date.now();
+  const last = lastSweepAt.get(workspaceId) ?? 0;
+  if (now - last < SWEEP_INTERVAL_MS) return;
+  lastSweepAt.set(workspaceId, now);
+
   // 1. Fail tasks stuck in "dispatched" for >20s (daemon crashed between claim and start)
   const staleDispatched = await queries.task.failStaleDispatchedTasks(db, workspaceId);
 

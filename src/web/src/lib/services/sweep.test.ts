@@ -50,13 +50,14 @@ vi.mock("@/lib/api/responses", () => ({
   taskToResponse: (t: unknown) => t,
 }));
 
-import { sweepStaleState } from "./sweep";
+import { sweepStaleState, _resetSweepThrottle } from "./sweep";
 
 const db = {} as any;
 
 describe("sweepStaleState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetSweepThrottle();
     mockFailStaleKillTasks.mockResolvedValue([]);
     mockFailStaleRunningTasks.mockResolvedValue([]);
     mockActivateNextBufferedMessage.mockResolvedValue(null);
