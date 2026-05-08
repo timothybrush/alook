@@ -34,7 +34,7 @@ vi.mock("@alook/shared", async () => {
         setLatestTask: (...a: unknown[]) => mockSetLatestTask(...a),
       },
       conversation: { createConversation: (...a: unknown[]) => mockCreateConversation(...a) },
-      message: { createMessage: (...a: unknown[]) => mockCreateMessage(...a) },
+      message: { createMessage: (...a: unknown[]) => mockCreateMessage(...a), updateMessageTaskId: vi.fn().mockResolvedValue(undefined) },
       artifact: { createArtifact: (...a: unknown[]) => mockCreateArtifact(...a) },
     },
   };

@@ -4,6 +4,7 @@ import {
   queries,
   CreateCalendarEventRequestSchema,
   expandOccurrences,
+  getOccurrencesPerDay,
   isEmptyHtml,
 } from "@alook/shared";
 import { getDb } from "@/lib/db";
@@ -36,29 +37,64 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
   );
 
   // Expand recurring rows into per-occurrence virtual rows within [from, to].
-  // Non-recurring rows pass through with occurrence_at = scheduled_at.
+  // High-frequency events (>5 occurrences/day) are collapsed into one row per
+  // UTC day with a `collapsed_count` hint instead of expanding individually.
   const out: (ReturnType<typeof calendarEventToResponse> & { _type?: string; _status?: string })[] = [];
   for (const row of rows) {
     if (!row.repeatInterval || !from || !to) {
       out.push(calendarEventToResponse(row));
       continue;
     }
-    const occurrences = expandOccurrences(
-      row.scheduledAt,
-      row.repeatInterval,
-      row.repeatStopAt ?? null,
-      row.exceptions ?? [],
-      from,
-      to
-    );
-    for (const occIso of occurrences) {
-      out.push(
-        calendarEventToResponse({
-          ...row,
-          scheduledAt: occIso,
-          occurrenceAt: occIso,
-        })
+    const perDay = getOccurrencesPerDay(row.repeatInterval);
+    if (perDay > 5) {
+      // Collapse: emit one representative row per UTC day in the range
+      const fromD = new Date(from);
+      const toD = new Date(to);
+      const startD = new Date(row.scheduledAt);
+      const stopD = row.repeatStopAt ? new Date(row.repeatStopAt) : null;
+
+      // Iterate UTC days in [from, to], capped at 366 days
+      const cursor = new Date(Date.UTC(fromD.getUTCFullYear(), fromD.getUTCMonth(), fromD.getUTCDate()));
+      const endDay = new Date(Date.UTC(toD.getUTCFullYear(), toD.getUTCMonth(), toD.getUTCDate()));
+      const startDay = new Date(Date.UTC(startD.getUTCFullYear(), startD.getUTCMonth(), startD.getUTCDate()));
+      let dayCount = 0;
+      while (cursor <= endDay && dayCount < 366) {
+        if (cursor >= startDay && (!stopD || cursor <= stopD)) {
+          // First occurrence time on this day: use the event's time-of-day
+          const occIso = new Date(Date.UTC(
+            cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate(),
+            startD.getUTCHours(), startD.getUTCMinutes(), startD.getUTCSeconds()
+          )).toISOString();
+          out.push(
+            calendarEventToResponse({
+              ...row,
+              scheduledAt: occIso,
+              occurrenceAt: occIso,
+              collapsedCount: perDay,
+            })
+          );
+        }
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+        dayCount++;
+      }
+    } else {
+      const occurrences = expandOccurrences(
+        row.scheduledAt,
+        row.repeatInterval,
+        row.repeatStopAt ?? null,
+        row.exceptions ?? [],
+        from,
+        to
       );
+      for (const occIso of occurrences) {
+        out.push(
+          calendarEventToResponse({
+            ...row,
+            scheduledAt: occIso,
+            occurrenceAt: occIso,
+          })
+        );
+      }
     }
   }
 
@@ -77,6 +113,7 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
       description: m.meetingUrl,
       scheduled_at: m.scheduledAt,
       occurrence_at: m.scheduledAt,
+      collapsed_count: null,
       repeat_interval: null,
       repeat_stop_at: null,
       last_triggered_at: null,

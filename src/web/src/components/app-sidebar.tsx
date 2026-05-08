@@ -8,7 +8,7 @@ import type { Agent } from "@alook/shared";
 import { useInboxCount } from "@/contexts/inbox-count-context";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
-import { Monitor, SunMoon, Plus, CalendarDays, GitBranch, Settings, PinIcon, PinOffIcon, ArrowLeftRight, Home, CircleDot, Inbox } from "lucide-react";
+import { Monitor, SunMoon, Plus, CalendarDays, Settings, PinIcon, PinOffIcon, ArrowLeftRight, Home, CircleDot, Inbox } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTheme } from "next-themes";
@@ -176,7 +176,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const isHome = pathname === `${prefix}/home`;
   const isRuntimes = pathname === `${prefix}/runtimes`;
   const isCalendar = pathname === `${prefix}/calendar`;
-  const isTraces = pathname.startsWith(`${prefix}/threads`);
   const isInbox = pathname.startsWith(`${prefix}/inbox`);
   const isIssues = pathname.startsWith(`${prefix}/issues`);
   const isSettings = pathname === `${prefix}/settings`;
@@ -321,22 +320,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           <TooltipContent side="right">Calendar</TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger render={
-            <button
-              type="button"
-              onClick={() => { router.push(`${prefix}/threads`); onNavigate?.(); }}
-              className={cn(
-                "flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-                "text-muted-foreground hover:text-foreground hover:bg-accent",
-                isTraces && "bg-accent text-foreground"
-              )}
-            />
-          }>
-            <GitBranch className="size-4" />
-          </TooltipTrigger>
-          <TooltipContent side="right">Threads</TooltipContent>
-        </Tooltip>
       </div>
 
       {/* Agent avatars */}

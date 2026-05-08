@@ -38,6 +38,7 @@ vi.mock("@alook/shared", () => ({
       createMessage: vi.fn(),
       activateNextBufferedMessage: vi.fn(),
       revertToBuffered: vi.fn().mockResolvedValue(null),
+      updateMessageTaskId: vi.fn().mockResolvedValue(undefined),
     },
     conversation: {
       getConversation: vi.fn(),

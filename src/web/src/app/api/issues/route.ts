@@ -182,6 +182,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
         parentTaskId: null,
       }
     );
+    queries.message.updateMessageTaskId(db, eventMessage.id, task.id).catch(() => {});
     const issue = await queries.issue.setLatestTask(db, created.id, ws.workspaceId, task.id) ?? created;
     broadcastToUser(ctx.userId, { type: "task.updated", taskId: task.id, agentId: task.agentId, status: "queued" }).catch(() => {});
     return writeJSON(

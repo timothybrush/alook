@@ -332,6 +332,7 @@ export const CalendarEventApiSchema = z.object({
   description: z.string().nullable(),
   scheduled_at: z.string(),
   occurrence_at: z.string(),
+  collapsed_count: z.number().nullable().optional(),
   repeat_interval: z.string().nullable(),
   repeat_stop_at: z.string().nullable(),
   last_triggered_at: z.string().nullable(),

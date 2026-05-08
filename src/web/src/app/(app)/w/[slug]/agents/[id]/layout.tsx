@@ -11,7 +11,7 @@ import { AgentEditForm } from "@/components/agent-edit-form";
 import { ChannelBar } from "@/components/channel-bar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AgentStatusBadge } from "@/components/agent-status-badge";
-import { CalendarDays, FolderOpen, History, Mail, MessageSquare, MoreHorizontal, Pencil, Trash2, Video, X } from "lucide-react";
+import { FolderOpen, GitBranch, History, Mail, MessageSquare, MoreHorizontal, Pencil, Trash2, Video, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -180,11 +180,11 @@ export default function AgentDetailLayout({ children }: { children: ReactNode })
                     }`}>Files</span>
                   </Link>
                   <Link
-                    href={`/w/${slug}/calendar?agents=${agentId}`}
+                    href={`/w/${slug}/threads?agentId=${agentId}`}
                     className="group inline-flex items-center rounded-lg text-xs text-muted-foreground h-7 px-2 hover:bg-muted hover:text-foreground transition-all"
                   >
-                    <CalendarDays className="size-3 shrink-0" />
-                    <span className="max-w-0 opacity-0 group-hover:max-w-20 group-hover:opacity-100 group-hover:ml-1 group-hover:delay-300 overflow-hidden transition-all duration-500 ease-out">Calendar</span>
+                    <GitBranch className="size-3 shrink-0" />
+                    <span className="max-w-0 opacity-0 group-hover:max-w-20 group-hover:opacity-100 group-hover:ml-1 group-hover:delay-300 overflow-hidden transition-all duration-500 ease-out">Threads</span>
                   </Link>
                   <div className="w-px h-4 bg-border mx-1" />
                   <button
@@ -249,11 +249,11 @@ export default function AgentDetailLayout({ children }: { children: ReactNode })
                       )}
                       <DropdownMenuItem
                         onClick={() =>
-                          router.push(`/w/${slug}/calendar?agents=${agentId}`)
+                          router.push(`/w/${slug}/threads?agentId=${agentId}`)
                         }
                       >
-                        <CalendarDays className="size-3.5" />
-                        Calendar
+                        <GitBranch className="size-3.5" />
+                        Threads
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => setEditing(true)}>

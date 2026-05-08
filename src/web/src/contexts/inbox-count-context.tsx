@@ -36,21 +36,23 @@ export function InboxCountProvider({ children }: { children: ReactNode }) {
   const prevCountRef = useRef<number | null>(null);
   const pendingAgentIdRef = useRef<string | null>(null);
 
+  const agentsRef = useRef(agents);
+  agentsRef.current = agents;
+
   const refresh = useCallback(() => {
     getInboxCount(workspaceId).then((r) => {
       const prev = prevCountRef.current;
       prevCountRef.current = r.count;
       setCount(r.count);
-      // Only notify when count increases after initial load
       if (prev !== null && r.count > prev) {
         const agent = pendingAgentIdRef.current
-          ? agents.find((a) => a.id === pendingAgentIdRef.current)
+          ? agentsRef.current.find((a) => a.id === pendingAgentIdRef.current)
           : undefined;
         sendTaskNotification("completed", agent?.name);
       }
       pendingAgentIdRef.current = null;
     }).catch(() => {});
-  }, [workspaceId, agents]);
+  }, [workspaceId]);
 
   const decrement = useCallback(() => {
     setCount((c) => {

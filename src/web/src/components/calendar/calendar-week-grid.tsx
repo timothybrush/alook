@@ -366,6 +366,9 @@ export function CalendarWeekGrid({
                           title={`${event.title}${agentName ? ` \u2014 ${agentName}` : ""}`}
                         >
                           {event.title}
+                          {event.collapsed_count != null && event.collapsed_count > 1 && (
+                            <span className="ml-0.5 opacity-70">&times;{event.collapsed_count}</span>
+                          )}
                         </button>
                       );
                     })}

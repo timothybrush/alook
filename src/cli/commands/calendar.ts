@@ -11,6 +11,8 @@ interface CalendarEventResponse {
   title: string;
   description: string | null;
   scheduled_at: string;
+  occurrence_at?: string;
+  collapsed_count?: number | null;
   repeat_interval: string | null;
   repeat_stop_at: string | null;
   last_triggered_at: string | null;
@@ -199,7 +201,7 @@ export function calendarCommand(): Command {
         }
         for (const ev of events) {
           const repeatBadge = ev.repeat_interval
-            ? ` [every ${ev.repeat_interval}${ev.repeat_stop_at ? ` until ${formatLocalDatetime(ev.repeat_stop_at)}` : ""}]`
+            ? ` [every ${ev.repeat_interval}${ev.collapsed_count ? ` · ${ev.collapsed_count} occurrences` : ""}${ev.repeat_stop_at ? ` until ${formatLocalDatetime(ev.repeat_stop_at)}` : ""}]`
             : "";
           const descBadge = ev.description ? " [has description]" : "";
           console.log(

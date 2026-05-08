@@ -142,6 +142,11 @@ export function CalendarAgenda({
                         {formatRepeatDisplay(ev.repeat_interval!)}
                       </span>
                     )}
+                    {ev.collapsed_count != null && ev.collapsed_count > 1 && (
+                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        &times; {ev.collapsed_count} today
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}

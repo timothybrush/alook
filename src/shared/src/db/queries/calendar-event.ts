@@ -282,6 +282,21 @@ export function expandOccurrences(
   return out;
 }
 
+/**
+ * Returns how many times a recurring event fires per day.
+ * Used to decide whether to collapse high-frequency events (threshold: >5/day).
+ */
+export function getOccurrencesPerDay(repeatInterval: string): number {
+  const match = /^(\d+)(min|hour|day|week|month)$/.exec(repeatInterval);
+  if (!match) return 1;
+  const amount = parseInt(match[1]!, 10);
+  const unit = match[2]!;
+  if (unit === "month" || unit === "week" || unit === "day") return 1;
+  if (amount === 0) return 1;
+  const intervalSeconds = unit === "min" ? amount * 60 : amount * 3600;
+  return Math.floor(86400 / intervalSeconds);
+}
+
 export function computeNextScheduledAt(
   currentScheduledAt: string,
   repeatInterval: string,

@@ -292,6 +292,9 @@ export function CalendarMonthGrid({
                           />
                         )}
                         <span className="truncate">{ev.title}</span>
+                        {ev.collapsed_count != null && ev.collapsed_count > 1 && (
+                          <span className="shrink-0 text-[9px] text-muted-foreground">&times;{ev.collapsed_count}</span>
+                        )}
                       </span>
                     );
                   })}

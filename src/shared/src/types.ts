@@ -84,6 +84,7 @@ export interface CalendarEvent {
    * row represents.
    */
   occurrence_at: string;
+  collapsed_count?: number | null;
   repeat_interval: string | null;
   repeat_stop_at: string | null;
   last_triggered_at: string | null;

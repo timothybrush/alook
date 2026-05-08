@@ -186,6 +186,10 @@ export async function countBufferedMessages(db: Database, conversationId: string
   return rows[0]?.count ?? 0;
 }
 
+export async function updateMessageTaskId(db: Database, messageId: string, taskId: string) {
+  await db.update(message).set({ taskId }).where(eq(message.id, messageId));
+}
+
 export async function listMessagesAroundTask(
   db: Database,
   conversationId: string,

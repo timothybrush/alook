@@ -203,6 +203,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
         parentTaskId: null,
       },
     );
+    queries.message.updateMessageTaskId(db, message.id, task.id).catch(() => {});
     broadcastToUser(ctx.userId, { type: "task.updated", taskId: task.id, agentId: task.agentId, status: "queued" }).catch(() => {});
     return writeJSON(
       { message: messageToResponse(message), task: taskToResponse(task) },

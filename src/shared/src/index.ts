@@ -219,6 +219,7 @@ export {
   addRepeatInterval,
   computeNextScheduledAt,
   expandOccurrences,
+  getOccurrencesPerDay,
 } from "./db/queries/calendar-event";
 
 // Utils

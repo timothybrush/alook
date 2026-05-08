@@ -1422,7 +1422,7 @@ export function AgentChatView() {
                   const isLastUser = messages.length > 0 && messages[messages.length - 1].id === msg.id;
                   const awaitingRun = isLastUser && !!activeTask && activeTask.status !== "running" && !["completed", "failed", "cancelled", "superseded"].includes(activeTask.status);
                   return (
-                    <div className="flex justify-end">
+                    <div className="flex justify-end" {...(msg.task_id ? { "data-task-id": msg.task_id } : {})}>
                       <div className={cn(
                         "max-w-[80%] rounded-lg px-4 py-2 bg-primary text-primary-foreground text-base relative",
                       )}>
@@ -1444,7 +1444,7 @@ export function AgentChatView() {
                 })() : msg.role === "event" ? (() => {
                   const eventEmailId = msg.metadata?.emailId as string | undefined;
                   return (
-                    <div className="flex justify-start">
+                    <div className="flex justify-start" {...(msg.task_id ? { "data-task-id": msg.task_id } : {})}>
                       <div
                         className={cn(
                           "w-full rounded-md border bg-muted/50 text-muted-foreground text-sm px-3 py-2 flex items-start gap-2",

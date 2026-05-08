@@ -250,6 +250,7 @@ export function calendarEventToResponse(e: any) {
     description: e.description ?? null,
     scheduled_at: scheduled,
     occurrence_at: occurrence,
+    collapsed_count: e.collapsedCount ?? null,
     repeat_interval: e.repeatInterval ?? null,
     repeat_stop_at: formatTimestampNullable(e.repeatStopAt),
     last_triggered_at: formatTimestampNullable(e.lastTriggeredAt),

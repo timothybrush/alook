@@ -316,6 +316,8 @@ export class TaskService {
         },
       );
 
+      await messageQueries.updateMessageTaskId(this.db, activated.id, task.id);
+
       broadcastToUser(userId, {
         type: "followup.dispatched",
         conversationId,

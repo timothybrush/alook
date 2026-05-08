@@ -120,8 +120,8 @@ export default function InboxPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isFetchingRef = useRef(false);
 
-  const loadInitial = useCallback(async () => {
-    setLoading(true);
+  const loadInitial = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const result = await listInboxItems(workspaceId, { limit: INBOX_LIMIT });
       setItems(result.items);
@@ -133,15 +133,21 @@ export default function InboxPage() {
     }
   }, [workspaceId]);
 
+  const refreshInboxCountRef = useRef(refreshInboxCount);
+  refreshInboxCountRef.current = refreshInboxCount;
+
   useEffect(() => {
     loadInitial();
-    refreshInboxCount();
-  }, [loadInitial, refreshInboxCount]);
+  }, [loadInitial]);
+
+  useEffect(() => {
+    refreshInboxCountRef.current();
+  }, []);
 
   useEffect(() => {
     return subscribeWs((msg: WsMessage) => {
       if (msg.type === "task.updated" && (msg.status === "completed" || msg.status === "failed")) {
-        loadInitial();
+        loadInitial({ silent: true });
       }
     });
   }, [subscribeWs, loadInitial]);

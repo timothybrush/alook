@@ -36,6 +36,7 @@ vi.mock("@alook/shared", async () => {
       message: {
         listMessages: (...args: any[]) => mockListMessages(...args),
         createMessage: (...args: any[]) => mockCreateMessage(...args),
+        updateMessageTaskId: vi.fn().mockResolvedValue(undefined),
       },
     },
   };

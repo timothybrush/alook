@@ -129,6 +129,7 @@ export async function POST(req: NextRequest) {
     const traceId = body.traceId || ("tr_" + nanoid());
     const parentTaskId = body.traceId ? (body.sourceTaskId || null) : null;
     const task = await taskService.enqueueTask(agent.id, conversationId, agent.workspaceId, prompt, TASK_TYPES.EMAIL_NOTIFICATION, { contextKey: conversationId, context, traceId, parentTaskId })
+    queries.message.updateMessageTaskId(db, msg.id, task.id).catch(() => {})
 
     if (conversationType === TASK_TYPES.USER_DM_MESSAGE) {
       broadcastToUser(agent.ownerId, {
