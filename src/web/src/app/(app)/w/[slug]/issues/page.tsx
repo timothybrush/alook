@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 import { Check, CheckCircle2, CircleDot, ExternalLink, File as FileIcon, GitBranch, Loader2, MessageSquare, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import type { Agent, Artifact, Issue, IssueComment, Message, WsMessage } from "@alook/shared";
@@ -71,11 +72,11 @@ function AgentAvatar({ agent, size = 24 }: { agent?: Agent | null; size?: number
   );
 }
 
-function AgentIdentity({ agent, muted = false }: { agent: Agent; muted?: boolean }) {
+function AgentIdentity({ agent, muted = false, size = 24 }: { agent: Agent; muted?: boolean; size?: number }) {
   const email = agent.email_handle ? `${agent.email_handle}@alook.ai` : "";
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <AgentAvatar agent={agent} />
+      <AgentAvatar agent={agent} size={size} />
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <div className={cn("truncate text-sm font-medium", muted && "text-muted-foreground")}>{agent.name}</div>
         {email ? (
@@ -91,14 +92,14 @@ function IssueCard({
   selected,
   onClick,
   onDelete,
-  agentName,
+  agent,
   compact = false,
 }: {
   issue: Issue;
   selected: boolean;
   onClick: () => void;
   onDelete?: () => void;
-  agentName?: string;
+  agent?: Agent | null;
   compact?: boolean;
 }) {
   return (
@@ -137,7 +138,12 @@ function IssueCard({
             </div>
           ) : null}
           <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[11px] text-muted-foreground">
-            {agentName ? <span className="truncate">{agentName}</span> : <span />}
+            {agent ? (
+              <span className="flex items-center gap-1 truncate">
+                <AgentAvatar agent={agent} size={14} />
+                <span className="truncate">{agent.name}</span>
+              </span>
+            ) : <span />}
             <span className="shrink-0">{formatDate(issue.updated_at)}</span>
           </div>
         </div>
@@ -256,6 +262,7 @@ function AttachmentList({ artifacts, workspaceId }: { artifacts: Artifact[]; wor
 export default function IssuesPage() {
   const { workspaceId, slug } = useWorkspace();
   const { agents, loading: agentsLoading, subscribeWs } = useAgentContext();
+  const [recentAgentId, setRecentAgentId] = useLocalStorage<string>("issue-recent-agent-id", "");
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -276,10 +283,11 @@ export default function IssuesPage() {
     () => issues.filter((issue) => !TERMINAL_STATUSES.includes(issue.status)),
     [issues]
   );
-  const selectedFormAgent = agents.find((agent) => agent.id === form.agentId) ?? null;
+  const agentsById = useMemo(() => new Map(agents.map(a => [a.id, a])), [agents]);
+  const selectedFormAgent = agentsById.get(form.agentId) ?? null;
 
   function agentName(agentId: string) {
-    return agents.find((agent) => agent.id === agentId)?.name ?? agentId;
+    return agentsById.get(agentId)?.name ?? agentId;
   }
 
   async function reload() {
@@ -303,10 +311,13 @@ export default function IssuesPage() {
   }, [workspaceId]);
 
   useEffect(() => {
-    if (!form.agentId && agents.length > 0) {
-      setForm((prev) => ({ ...prev, agentId: agents[0].id }));
+    if (agents.length === 0) return;
+    const preferredValid = recentAgentId && agents.some(a => a.id === recentAgentId);
+    const preferred = preferredValid ? recentAgentId : agents[0].id;
+    if (!form.agentId || (form.agentId !== preferred && form.agentId === agents[0]?.id && preferredValid)) {
+      setForm((prev) => ({ ...prev, agentId: preferred }));
     }
-  }, [agents, form.agentId]);
+  }, [agents, form.agentId, recentAgentId]);
 
   async function openIssue(issueId: string) {
     setSelectedId(issueId);
@@ -396,6 +407,7 @@ export default function IssuesPage() {
       });
       setIssues((prev) => [res.issue, ...prev]);
       setDialogOpen(false);
+      setRecentAgentId(form.agentId);
       setForm({ title: "", description: "", agentId: form.agentId });
       await openIssue(res.issue.id);
       toast.success("Issue created");
@@ -429,18 +441,12 @@ export default function IssuesPage() {
   }
 
   const boardLoading = loading || agentsLoading;
-  const activeCount = activeIssues.length;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-background/30">
       <div className="flex shrink-0 flex-col gap-3 border-b border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
         <div className="min-w-0">
           <h1 className="text-base font-semibold tracking-normal">Issues</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>{activeCount} active</span>
-            <span className="text-border">/</span>
-            <span>{completedIssues.length} completed</span>
-          </div>
         </div>
         <Dialog
           open={dialogOpen}
@@ -485,7 +491,7 @@ export default function IssuesPage() {
                     }
                   >
                     {selectedFormAgent ? (
-                      <AgentIdentity agent={selectedFormAgent} />
+                      <AgentIdentity agent={selectedFormAgent} size={18} />
                     ) : (
                       <span className="text-sm text-muted-foreground">Select an agent</span>
                     )}
@@ -501,7 +507,7 @@ export default function IssuesPage() {
                         }}
                         className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
                       >
-                        <AgentIdentity agent={agent} />
+                        <AgentIdentity agent={agent} size={18} />
                         {form.agentId === agent.id ? <Check className="size-3.5 shrink-0" /> : null}
                       </button>
                     ))}
@@ -580,7 +586,7 @@ export default function IssuesPage() {
                         </div>
                       ) : (
                         columnIssues.map((issue) => (
-                          <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agentName={agentName(issue.agent_id)} />
+                          <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agent={agentsById.get(issue.agent_id) ?? null} />
                         ))
                       )}
                     </div>
@@ -607,7 +613,7 @@ export default function IssuesPage() {
                 <div className="py-8 text-center text-xs text-muted-foreground">No completed issues.</div>
               ) : (
                 completedIssues.map((issue) => (
-                  <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agentName={agentName(issue.agent_id)} compact />
+                  <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agent={agentsById.get(issue.agent_id) ?? null} compact />
                 ))
               )}
             </div>
@@ -639,7 +645,7 @@ export default function IssuesPage() {
                   </div>
                   <div className="space-y-2 p-3">
                     {columnIssues.map((issue) => (
-                      <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agentName={agentName(issue.agent_id)} compact />
+                      <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agent={agentsById.get(issue.agent_id) ?? null} compact />
                     ))}
                   </div>
                 </section>
@@ -653,7 +659,7 @@ export default function IssuesPage() {
                 </div>
                 <div className="space-y-2 p-3">
                   {completedIssues.map((issue) => (
-                    <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agentName={agentName(issue.agent_id)} compact />
+                    <IssueCard key={issue.id} issue={issue} selected={selectedId === issue.id} onClick={() => openIssue(issue.id)} onDelete={() => handleDeleteIssue(issue.id)} agent={agentsById.get(issue.agent_id) ?? null} compact />
                   ))}
                 </div>
               </section>
