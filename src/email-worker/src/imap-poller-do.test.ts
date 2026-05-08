@@ -58,6 +58,7 @@ vi.mock("@alook/shared/crypto", () => ({
 const mockGetEmailAccount = vi.fn()
 const mockUpdateEmailAccount = vi.fn()
 const mockIsWhitelisted = vi.fn().mockResolvedValue(true)
+const mockBuildWhitelistSet = vi.fn()
 
 vi.mock("@alook/shared", async () => {
   const real = await vi.importActual<typeof import("@alook/shared")>("@alook/shared")
@@ -82,6 +83,7 @@ vi.mock("@alook/shared", async () => {
       },
       whitelist: {
         isWhitelisted: (...args: any[]) => mockIsWhitelisted(...args),
+        buildWhitelistSet: (...args: any[]) => mockBuildWhitelistSet(...args),
       },
     },
   }
@@ -164,7 +166,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockGetEmailAccount.mockResolvedValue({ ...ACCOUNT })
   mockUpdateEmailAccount.mockResolvedValue(undefined)
-  mockIsWhitelisted.mockResolvedValue(true)
+  mockIsWhitelisted.mockReturnValue(true)
+  mockBuildWhitelistSet.mockResolvedValue({ check: (email: string) => mockIsWhitelisted(email) })
   mockPostalParse.mockResolvedValue({
     from: { name: "", address: "alice@example.com" },
     subject: "Hi",
@@ -253,7 +256,8 @@ describe("alarm — whitelist filtering", () => {
       .mockResolvedValueOnce("* SEARCH 50\r\nS1 OK UID SEARCH completed\r\n")
       .mockResolvedValueOnce(buildFetchResponse(50, RAW_EMAIL_1))
     mockGetEmailAccount.mockResolvedValue({ ...ACCOUNT, lastSyncedUid: "0" })
-    mockIsWhitelisted.mockResolvedValue(true)
+    mockIsWhitelisted.mockReturnValue(true)
+    mockBuildWhitelistSet.mockResolvedValue({ check: () => true })
 
     await ctx.storage.put("accountId", "aea_test1")
     await durable.alarm()
@@ -268,7 +272,8 @@ describe("alarm — whitelist filtering", () => {
       .mockResolvedValueOnce("* SEARCH 50\r\nS1 OK UID SEARCH completed\r\n")
       .mockResolvedValueOnce(buildFetchResponse(50, RAW_EMAIL_1))
     mockGetEmailAccount.mockResolvedValue({ ...ACCOUNT, lastSyncedUid: "0" })
-    mockIsWhitelisted.mockResolvedValue(false)
+    mockIsWhitelisted.mockReturnValue(false)
+    mockBuildWhitelistSet.mockResolvedValue({ check: () => false })
 
     await ctx.storage.put("accountId", "aea_test1")
     await durable.alarm()

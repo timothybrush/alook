@@ -18,7 +18,11 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
   const { env } = getCloudflareContext();
   const db = getDb((env as Env).DB);
 
-  const rows = await queries.agentLink.listByWorkspace(db, ws.workspaceId);
+  const url = new URL(req.url);
+  const limit = Math.min(Number(url.searchParams.get("limit")) || 200, 500);
+  const offset = Number(url.searchParams.get("offset")) || 0;
+
+  const rows = await queries.agentLink.listByWorkspace(db, ws.workspaceId, { limit, offset });
   return writeJSON(rows.map(agentLinkToResponse));
 });
 

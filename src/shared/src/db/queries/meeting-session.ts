@@ -1,4 +1,4 @@
-import { eq, and, desc, lte, isNotNull } from "drizzle-orm";
+import { eq, and, desc, lte, isNotNull, inArray } from "drizzle-orm";
 import { meetingSession, agent } from "../schema";
 import type { Database } from "../index";
 
@@ -118,6 +118,26 @@ export async function claimMeetingSession(
     )
     .returning();
   return rows[0] ?? null;
+}
+
+export async function claimMeetingSessions(
+  db: Database,
+  ids: string[],
+  workspaceId: string,
+  startedAt: string,
+) {
+  if (ids.length === 0) return [];
+  return db
+    .update(meetingSession)
+    .set({ status: "joining", startedAt, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        inArray(meetingSession.id, ids),
+        eq(meetingSession.workspaceId, workspaceId),
+        eq(meetingSession.status, "scheduled"),
+      )
+    )
+    .returning();
 }
 
 export async function deleteMeetingSession(

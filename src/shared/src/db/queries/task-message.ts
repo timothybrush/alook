@@ -75,7 +75,8 @@ export async function deleteTaskMessages(db: Database, taskId: string) {
 }
 
 const HIDDEN_STEP_TYPES = ["status", "log", "tool-result", "text"];
-const CHUNK_SIZE = 50;
+const SQLITE_MAX_PARAMS = 999;
+const FIXED_PARAMS = 1 + HIDDEN_STEP_TYPES.length; // workspaceId + notInArray values
 
 export async function countTaskMessagesByTaskIds(
   db: Database,
@@ -84,9 +85,30 @@ export async function countTaskMessagesByTaskIds(
 ): Promise<Array<{ taskId: string; count: number }>> {
   if (taskIds.length === 0) return [];
 
+  const chunkSize = SQLITE_MAX_PARAMS - FIXED_PARAMS;
+
+  if (taskIds.length <= chunkSize) {
+    const rows = await db
+      .select({
+        taskId: taskMessage.taskId,
+        count: count(taskMessage.id),
+      })
+      .from(taskMessage)
+      .innerJoin(agentTaskQueue, eq(taskMessage.taskId, agentTaskQueue.id))
+      .where(
+        and(
+          inArray(taskMessage.taskId, taskIds),
+          eq(agentTaskQueue.workspaceId, workspaceId),
+          notInArray(taskMessage.type, HIDDEN_STEP_TYPES)
+        )
+      )
+      .groupBy(taskMessage.taskId);
+    return rows.map((r) => ({ taskId: r.taskId, count: r.count }));
+  }
+
   const results: Array<{ taskId: string; count: number }> = [];
-  for (let i = 0; i < taskIds.length; i += CHUNK_SIZE) {
-    const chunk = taskIds.slice(i, i + CHUNK_SIZE);
+  for (let i = 0; i < taskIds.length; i += chunkSize) {
+    const chunk = taskIds.slice(i, i + chunkSize);
     const rows = await db
       .select({
         taskId: taskMessage.taskId,

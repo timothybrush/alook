@@ -15,6 +15,11 @@ const FIRST_SYNC_DAYS = 7
 
 export class ImapPollerDO extends DurableObject<EmailEnv> {
   private accountId: string | null = null
+  private _db: ReturnType<typeof createDb> | null = null
+
+  private get db() {
+    return (this._db ??= createDb(this.env.DB))
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
@@ -42,7 +47,7 @@ export class ImapPollerDO extends DurableObject<EmailEnv> {
     if (url.pathname === "/status" && request.method === "GET") {
       const accountId = await this.ctx.storage.get<string>("accountId")
       if (!accountId) return Response.json({ status: "stopped" })
-      const db = createDb(this.env.DB)
+      const db = this.db
       const account = await queries.emailAccount.getEmailAccountById(db, accountId)
       if (!account) return Response.json({ status: "not_found" })
       return Response.json({
@@ -63,7 +68,7 @@ export class ImapPollerDO extends DurableObject<EmailEnv> {
     const accountId = this.accountId ?? await this.ctx.storage.get<string>("accountId")
     if (!accountId) return
 
-    const db = createDb(this.env.DB)
+    const db = this.db
     const account = await queries.emailAccount.getEmailAccountById(db, accountId)
     if (!account) {
       await this.ctx.storage.deleteAlarm()
@@ -124,6 +129,10 @@ export class ImapPollerDO extends DurableObject<EmailEnv> {
       const sorted = uids.sort((a, b) => a - b)
       const batch = sorted.slice(0, MAX_EMAILS_PER_POLL)
 
+      const whitelist = await queries.whitelist.buildWhitelistSet(
+        db, account.agentId, account.workspaceId
+      )
+
       let maxUid = lastUid
       for (const uid of batch) {
         const tag = `F${uid}`
@@ -145,9 +154,7 @@ export class ImapPollerDO extends DurableObject<EmailEnv> {
         })
 
         const fromAddr = parsed.from?.address || parsed.from?.name || ""
-        const isWhitelisted = await queries.whitelist.isWhitelisted(
-          db, account.agentId, account.workspaceId, fromAddr
-        )
+        const isWhitelisted = whitelist.check(fromAddr)
 
         let meetingInfo: MeetingInfo | null = null
         const icsAttachment = parsed.attachments?.find(

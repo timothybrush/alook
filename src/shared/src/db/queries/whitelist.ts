@@ -71,3 +71,30 @@ export async function isWhitelisted(db: Database, agentId: string, workspaceId: 
     .limit(1);
   return rows.length > 0;
 }
+
+/** Pre-fetch whitelist + workspace agent handles for O(1) batch lookups. */
+export async function buildWhitelistSet(
+  db: Database, agentId: string, workspaceId: string
+): Promise<{ check: (email: string) => boolean }> {
+  const [whitelistRows, agentRows] = await Promise.all([
+    db.select({ email: agentWhitelist.email })
+      .from(agentWhitelist)
+      .where(and(eq(agentWhitelist.agentId, agentId), eq(agentWhitelist.workspaceId, workspaceId))),
+    db.select({ emailHandle: agent.emailHandle })
+      .from(agent)
+      .where(eq(agent.workspaceId, workspaceId)),
+  ]);
+
+  const emailSet = new Set(whitelistRows.map(r => r.email));
+  const handleSet = new Set(
+    agentRows.filter(r => r.emailHandle).map(r => r.emailHandle!)
+  );
+
+  return {
+    check(email: string): boolean {
+      const handle = parseEmailHandle(email);
+      if (handle && handleSet.has(handle)) return true;
+      return emailSet.has(email);
+    },
+  };
+}

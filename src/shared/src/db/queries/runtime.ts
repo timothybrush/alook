@@ -1,4 +1,4 @@
-import { eq, and, asc, sql } from "drizzle-orm";
+import { eq, and, asc, sql, inArray } from "drizzle-orm";
 import { agentRuntime, agent, machine } from "../schema";
 import type { Database } from "../index";
 
@@ -126,12 +126,11 @@ export async function deleteRuntimesByDaemonId(
 
   if (runtimes.length === 0) return;
 
-  for (const r of runtimes) {
-    await db
-      .update(agent)
-      .set({ runtimeId: null, updatedAt: new Date().toISOString() })
-      .where(eq(agent.runtimeId, r.id));
-  }
+  const runtimeIds = runtimes.map(r => r.id);
+  await db
+    .update(agent)
+    .set({ runtimeId: null, updatedAt: new Date().toISOString() })
+    .where(inArray(agent.runtimeId, runtimeIds));
 
   await db
     .delete(agentRuntime)

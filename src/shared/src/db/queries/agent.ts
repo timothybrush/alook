@@ -1,4 +1,4 @@
-import { eq, and, desc, or, exists } from "drizzle-orm";
+import { eq, and, desc, or, exists, inArray } from "drizzle-orm";
 import { agent, agentAccess } from "../schema";
 import type { Database } from "../index";
 
@@ -146,4 +146,12 @@ export async function getAgentByHandle(db: Database, emailHandle: string) {
     .from(agent)
     .where(eq(agent.emailHandle, emailHandle));
   return rows[0] ?? null;
+}
+
+export async function getAgentsByIds(db: Database, ids: string[], workspaceId: string) {
+  if (ids.length === 0) return [];
+  return db
+    .select()
+    .from(agent)
+    .where(and(inArray(agent.id, ids), eq(agent.workspaceId, workspaceId)));
 }

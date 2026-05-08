@@ -209,20 +209,46 @@ export async function claimTask(db: Database, agentId: string, workspaceId: stri
 
   if (candidates.length === 0) return null;
 
-  const rows = await db
-    .update(agentTaskQueue)
-    .set({ status: "dispatched", dispatchedAt: new Date().toISOString() })
-    .where(
-      and(
-        eq(agentTaskQueue.id, candidates[0].id),
-        eq(agentTaskQueue.status, "queued")
-      )
-    )
-    .returning();
+  // Atomic claim: UPDATE WHERE status = 'queued' prevents double-dispatch.
+  // If another runtime raced us to this candidate, retry with a fresh candidate.
+  const now = new Date().toISOString();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const targetId = attempt === 0
+      ? candidates[0].id
+      : (await db
+          .select({ id: agentTaskQueue.id })
+          .from(agentTaskQueue)
+          .where(
+            and(
+              eq(agentTaskQueue.agentId, agentId),
+              eq(agentTaskQueue.workspaceId, workspaceId),
+              eq(agentTaskQueue.status, "queued"),
+              ...(allBlockedConvIds.length > 0
+                ? [notInArray(agentTaskQueue.conversationId, allBlockedConvIds)]
+                : [])
+            )
+          )
+          .orderBy(desc(agentTaskQueue.priority), asc(agentTaskQueue.createdAt))
+          .limit(1)
+          .then(r => r[0]?.id));
 
-  const row = rows[0] ?? null;
-  if (!row) return null;
-  return ClaimedTaskRowSchema.parse(row);
+    if (!targetId) return null;
+
+    const rows = await db
+      .update(agentTaskQueue)
+      .set({ status: "dispatched", dispatchedAt: now })
+      .where(
+        and(
+          eq(agentTaskQueue.id, targetId),
+          eq(agentTaskQueue.status, "queued")
+        )
+      )
+      .returning();
+
+    const row = rows[0];
+    if (row) return ClaimedTaskRowSchema.parse(row);
+  }
+  return null;
 }
 
 export async function startTask(db: Database, id: string, workspaceId: string) {
@@ -546,22 +572,20 @@ export async function claimKillTasks(
     .orderBy(asc(agentTaskQueue.createdAt))
     .limit(limit);
 
-  const claimed = [];
-  for (const candidate of candidates) {
-    const rows = await db
-      .update(agentTaskQueue)
-      .set({ status: "dispatched", dispatchedAt: new Date().toISOString() })
-      .where(
-        and(
-          eq(agentTaskQueue.id, candidate.id),
-          eq(agentTaskQueue.status, "queued")
-        )
+  const ids = candidates.map(c => c.id);
+  if (ids.length === 0) return [];
+
+  const rows = await db
+    .update(agentTaskQueue)
+    .set({ status: "dispatched", dispatchedAt: new Date().toISOString() })
+    .where(
+      and(
+        inArray(agentTaskQueue.id, ids),
+        eq(agentTaskQueue.status, "queued")
       )
-      .returning();
-    const row = rows[0];
-    if (row) claimed.push(ClaimedTaskRowSchema.parse(row));
-  }
-  return claimed;
+    )
+    .returning();
+  return rows.map(r => ClaimedTaskRowSchema.parse(r));
 }
 
 const KILL_TASK_STALE_SECONDS = 30;
@@ -591,6 +615,30 @@ const DEFAULT_STALE_RUNNING_SECONDS = Number(process.env.ALOOK_STALE_RUNNING_TIM
 
 export async function failStaleRunningTasks(db: Database, workspaceId: string, staleSeconds = DEFAULT_STALE_RUNNING_SECONDS) {
   const threshold = new Date(Date.now() - staleSeconds * 1000).toISOString();
+
+  const lastMsg = db
+    .select({
+      taskId: taskMessage.taskId,
+      lastMessageAt: sql<string>`max(${taskMessage.createdAt})`.as("last_message_at"),
+    })
+    .from(taskMessage)
+    .groupBy(taskMessage.taskId)
+    .as("last_msg");
+
+  const staleTasks = await db
+    .select({ id: agentTaskQueue.id })
+    .from(agentTaskQueue)
+    .leftJoin(lastMsg, eq(lastMsg.taskId, agentTaskQueue.id))
+    .where(
+      and(
+        eq(agentTaskQueue.workspaceId, workspaceId),
+        eq(agentTaskQueue.status, "running"),
+        lt(sql`coalesce(${lastMsg.lastMessageAt}, ${agentTaskQueue.startedAt})`, threshold)
+      )
+    );
+
+  if (staleTasks.length === 0) return [];
+
   const rows = await db
     .update(agentTaskQueue)
     .set({
@@ -598,19 +646,7 @@ export async function failStaleRunningTasks(db: Database, workspaceId: string, s
       completedAt: new Date().toISOString(),
       error: `timed out in running state (no message activity for ${Math.round(staleSeconds / 60)} minutes)`,
     })
-    .where(
-      and(
-        eq(agentTaskQueue.workspaceId, workspaceId),
-        eq(agentTaskQueue.status, "running"),
-        lt(
-          sql`coalesce(
-            (select max(${taskMessage.createdAt}) from ${taskMessage} where ${taskMessage.taskId} = ${agentTaskQueue.id}),
-            ${agentTaskQueue.startedAt}
-          )`,
-          threshold
-        )
-      )
-    )
+    .where(and(inArray(agentTaskQueue.id, staleTasks.map(t => t.id)), eq(agentTaskQueue.status, "running")))
     .returning({ agentId: agentTaskQueue.agentId, workspaceId: agentTaskQueue.workspaceId, conversationId: agentTaskQueue.conversationId });
   return rows;
 }
@@ -685,8 +721,6 @@ export async function listTraces(
   opts?: { status?: string; limit?: number; before?: string; multiAgent?: boolean; agentId?: string; channel?: string }
 ) {
   const limit = opts?.limit ?? 30;
-  // When filtering by computed status, overfetch roots to compensate
-  const rootFetchLimit = opts?.status ? limit * 10 : limit;
 
   const conditions = [
     eq(agentTaskQueue.workspaceId, workspaceId),
@@ -720,6 +754,48 @@ export async function listTraces(
     );
   }
 
+  // Push status filter to DB via EXISTS subqueries
+  if (opts?.status) {
+    const traceTask = alias(agentTaskQueue, "trace_task");
+    if (opts.status === "active") {
+      conditions.push(
+        exists(
+          db.select()
+            .from(traceTask)
+            .where(
+              and(
+                eq(traceTask.traceId, agentTaskQueue.traceId),
+                ne(traceTask.type, TASK_TYPES.KILL_TASK),
+                inArray(traceTask.status, ["queued", "dispatched", "running"])
+              )
+            )
+        )
+      );
+    } else if (opts.status === "completed") {
+      conditions.push(
+        sql`NOT EXISTS (SELECT 1 FROM ${agentTaskQueue} tt WHERE tt.trace_id = ${agentTaskQueue.traceId} AND tt.type != ${TASK_TYPES.KILL_TASK} AND tt.status IN ('queued', 'dispatched', 'running', 'failed'))`
+      );
+    } else if (opts.status === "failed") {
+      conditions.push(
+        sql`NOT EXISTS (SELECT 1 FROM ${agentTaskQueue} tt WHERE tt.trace_id = ${agentTaskQueue.traceId} AND tt.type != ${TASK_TYPES.KILL_TASK} AND tt.status IN ('queued', 'dispatched', 'running'))`
+      );
+      const failedTask = alias(agentTaskQueue, "failed_task");
+      conditions.push(
+        exists(
+          db.select()
+            .from(failedTask)
+            .where(
+              and(
+                eq(failedTask.traceId, agentTaskQueue.traceId),
+                ne(failedTask.type, TASK_TYPES.KILL_TASK),
+                eq(failedTask.status, "failed")
+              )
+            )
+        )
+      );
+    }
+  }
+
   const rootTasks = await db
     .select({
       id: agentTaskQueue.id,
@@ -733,12 +809,12 @@ export async function listTraces(
     .leftJoin(conversation, eq(agentTaskQueue.conversationId, conversation.id))
     .where(and(...conditions))
     .orderBy(desc(agentTaskQueue.createdAt))
-    .limit(rootFetchLimit + 1);
+    .limit(limit + 1);
 
   if (rootTasks.length === 0) return { traces: [], hasMore: false };
 
-  const moreRootsExist = rootTasks.length > rootFetchLimit;
-  const roots = rootTasks.slice(0, rootFetchLimit);
+  const hasMore = rootTasks.length > limit;
+  const roots = rootTasks.slice(0, limit);
   const traceIds = roots.map(r => r.traceId).filter((id): id is string => !!id);
   if (traceIds.length === 0) return { traces: [], hasMore: false };
 
@@ -788,8 +864,6 @@ export async function listTraces(
     else if (hasFailed) traceStatus = "failed";
     else traceStatus = "completed";
 
-    if (opts?.status && traceStatus !== opts.status) continue;
-
     const allTerminal = tasks.every(t => ["completed", "failed", "cancelled", "superseded"].includes(t.status));
     const completedAt = allTerminal
       ? tasks.reduce((max, t) => (t.completedAt && t.completedAt > (max ?? "")) ? t.completedAt : max, null as string | null)
@@ -808,8 +882,7 @@ export async function listTraces(
     });
   }
 
-  const hasMore = moreRootsExist || traces.length > limit;
-  return { traces: traces.slice(0, limit), hasMore };
+  return { traces, hasMore };
 }
 
 export async function getTraceTree(

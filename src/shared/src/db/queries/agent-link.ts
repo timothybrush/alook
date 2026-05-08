@@ -1,12 +1,20 @@
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, inArray } from "drizzle-orm";
 import { agentLink, agent } from "../schema";
 import type { Database } from "../index";
 
-export async function listByWorkspace(db: Database, workspaceId: string) {
-  return db
+export async function listByWorkspace(
+  db: Database,
+  workspaceId: string,
+  opts?: { limit?: number; offset?: number },
+) {
+  let q = db
     .select()
     .from(agentLink)
-    .where(eq(agentLink.workspaceId, workspaceId));
+    .where(eq(agentLink.workspaceId, workspaceId))
+    .$dynamic();
+  if (opts?.limit) q = q.limit(opts.limit);
+  if (opts?.offset) q = q.offset(opts.offset);
+  return q;
 }
 
 export async function listByAgent(db: Database, agentId: string, workspaceId: string) {
@@ -113,6 +121,56 @@ export async function getColleaguesForAgent(
     .where(
       and(
         eq(agentLink.targetAgentId, agentId),
+        eq(agentLink.workspaceId, workspaceId),
+      ),
+    );
+
+  return [...asSource, ...asTarget];
+}
+
+export async function getColleaguesForAgents(
+  db: Database,
+  agentIds: string[],
+  workspaceId: string,
+) {
+  if (agentIds.length === 0) return [];
+
+  const asSource = await db
+    .select({
+      agentId: agentLink.sourceAgentId,
+      name: agent.name,
+      emailHandle: agent.emailHandle,
+      description: agent.description,
+      instruction: agentLink.instruction,
+    })
+    .from(agentLink)
+    .innerJoin(
+      agent,
+      and(eq(agent.id, agentLink.targetAgentId), eq(agent.workspaceId, agentLink.workspaceId)),
+    )
+    .where(
+      and(
+        inArray(agentLink.sourceAgentId, agentIds),
+        eq(agentLink.workspaceId, workspaceId),
+      ),
+    );
+
+  const asTarget = await db
+    .select({
+      agentId: agentLink.targetAgentId,
+      name: agent.name,
+      emailHandle: agent.emailHandle,
+      description: agent.description,
+      instruction: agentLink.instruction,
+    })
+    .from(agentLink)
+    .innerJoin(
+      agent,
+      and(eq(agent.id, agentLink.sourceAgentId), eq(agent.workspaceId, agentLink.workspaceId)),
+    )
+    .where(
+      and(
+        inArray(agentLink.targetAgentId, agentIds),
         eq(agentLink.workspaceId, workspaceId),
       ),
     );

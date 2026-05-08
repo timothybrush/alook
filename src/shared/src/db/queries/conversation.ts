@@ -1,4 +1,4 @@
-import { eq, and, desc, count, ne, lt, sql } from "drizzle-orm";
+import { eq, and, desc, ne, lt, sql } from "drizzle-orm";
 import { conversation, message } from "../schema";
 import type { Database } from "../index";
 import { TASK_TYPES, type TaskType } from "../../constants";
@@ -81,12 +81,11 @@ export async function listConversationsByAgent(
       title: conversation.title,
       channel: conversation.channel,
       createdAt: conversation.createdAt,
-      messageCount: count(message.id).mapWith(Number),
+      messageCount:
+        sql<number>`(SELECT COUNT(*) FROM message WHERE ${message.conversationId} = ${conversation.id} AND ${message.status} = 'active')`.mapWith(Number),
     })
     .from(conversation)
-    .leftJoin(message, and(eq(message.conversationId, conversation.id), eq(message.status, "active")))
     .where(and(...conditions))
-    .groupBy(conversation.id)
     .orderBy(desc(conversation.createdAt));
 }
 

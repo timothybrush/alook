@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { agentEmailAccount } from "../schema";
 import type { Database } from "../index";
 
@@ -99,4 +99,12 @@ export async function deleteEmailAccount(db: Database, id: string, workspaceId: 
     .where(and(eq(agentEmailAccount.id, id), eq(agentEmailAccount.workspaceId, workspaceId)))
     .returning();
   return rows[0] ?? null;
+}
+
+export async function getEmailAccountsByAgents(db: Database, agentIds: string[], workspaceId: string) {
+  if (agentIds.length === 0) return [];
+  return db
+    .select()
+    .from(agentEmailAccount)
+    .where(and(inArray(agentEmailAccount.agentId, agentIds), eq(agentEmailAccount.workspaceId, workspaceId)));
 }

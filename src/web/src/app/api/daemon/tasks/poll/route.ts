@@ -75,8 +75,31 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     ctx.workspaceId!,
   );
 
+  // Batch-fetch shared data before the task loop to avoid N+1 queries
+  const nonKillTasks = claimed.filter((t) => t.type !== "kill_task");
+  const agentIds = [...new Set(nonKillTasks.map((t) => t.agentId))];
+
+  const [allAgents, allEmailAccounts, allColleagues] = await Promise.all([
+    queries.agent.getAgentsByIds(db, agentIds, ctx.workspaceId!),
+    queries.emailAccount.getEmailAccountsByAgents(db, agentIds, ctx.workspaceId!),
+    queries.agentLink.getColleaguesForAgents(db, agentIds, ctx.workspaceId!).catch(() => [] as Awaited<ReturnType<typeof queries.agentLink.getColleaguesForAgents>>),
+  ]);
+
+  const agentMap = new Map(allAgents.map((a) => [a.id, a]));
+  const emailAccountsByAgent = new Map<string, string[]>();
+  for (const acc of allEmailAccounts) {
+    const list = emailAccountsByAgent.get(acc.agentId) ?? [];
+    list.push(acc.emailAddress);
+    emailAccountsByAgent.set(acc.agentId, list);
+  }
+  const colleaguesByAgent = new Map<string, typeof allColleagues>();
+  for (const c of allColleagues) {
+    const list = colleaguesByAgent.get(c.agentId) ?? [];
+    list.push(c);
+    colleaguesByAgent.set(c.agentId, list);
+  }
+
   const tasks = [];
-  // Per-request caches: avoid duplicate DB reads when multiple tasks share the same owner/user
   const memberCache = new Map<string, { globalInstruction: string } | null>();
   const userCache = new Map<string, { name: string; email: string } | null>();
   const convoCache = new Map<string, Awaited<ReturnType<typeof queries.conversation.getConversation>> | null>();
@@ -86,14 +109,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       continue;
     }
 
-    const agent = await queries.agent.getAgent(db, task.agentId, task.workspaceId);
+    const agent = agentMap.get(task.agentId) ?? null;
     const emailAddresses: string[] = [];
     if (agent) {
       if (agent.emailHandle) emailAddresses.push(`${agent.emailHandle}@alook.ai`);
-      const customAccounts = await queries.emailAccount.getEmailAccountsByAgent(db, agent.id, task.workspaceId);
-      for (const acc of customAccounts) {
-        emailAddresses.push(acc.emailAddress);
-      }
+      const customAccounts = emailAccountsByAgent.get(agent.id) ?? [];
+      emailAddresses.push(...customAccounts);
     }
 
     let instructions = agent?.instructions ?? "";
@@ -112,7 +133,6 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       }
     }
 
-    // Resolve owner name
     let ownerName: string | null = null;
     if (agent?.ownerId) {
       if (!userCache.has(agent.ownerId)) {
@@ -122,7 +142,6 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       ownerName = userCache.get(agent.ownerId)?.name ?? null;
     }
 
-    // Fetch conversation for channel (all task types) and sender (DM only)
     let convo = convoCache.get(task.conversationId) ?? null;
     if (task.conversationId && !convoCache.has(task.conversationId)) {
       convo = await queries.conversation.getConversation(db, task.conversationId, task.workspaceId);
@@ -146,19 +165,13 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       }
     }
 
-    // Resolve colleagues for agent
-    let colleagues: { name: string; email: string; description: string; instruction: string }[] = [];
-    if (agent) {
-      try {
-        const raw = await queries.agentLink.getColleaguesForAgent(db, agent.id, task.workspaceId);
-        colleagues = raw.map((c) => ({
-          name: c.name,
-          email: c.emailHandle ? toAlookAddress(c.emailHandle) : "",
-          description: c.description,
-          instruction: c.instruction,
-        }));
-      } catch {}
-    }
+    const rawColleagues = colleaguesByAgent.get(task.agentId) ?? [];
+    const colleagues = rawColleagues.map((c) => ({
+      name: c.name,
+      email: c.emailHandle ? toAlookAddress(c.emailHandle) : "",
+      description: c.description,
+      instruction: c.instruction,
+    }));
 
     tasks.push({
       ...taskToResponse(task),
@@ -239,25 +252,23 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     );
 
     if (scheduled.length > 0) {
-      const claimed: PollMeetingItem[] = [];
-      for (const meeting of scheduled) {
-        const updated = await queries.meetingSession.claimMeetingSession(
-          db,
-          meeting.id,
-          ctx.workspaceId,
-          now,
-        );
-        if (updated) {
-          claimed.push({
-            id: updated.id,
-            meeting_url: updated.meetingUrl,
-            participants: updated.participants as string[],
-            workspace_id: updated.workspaceId,
-            agent_name: meeting.agentName || "",
-          });
-        }
+      const ids = scheduled.map((m) => m.id);
+      const claimedRows = await queries.meetingSession.claimMeetingSessions(
+        db,
+        ids,
+        ctx.workspaceId,
+        now,
+      );
+      if (claimedRows.length > 0) {
+        const agentNameMap = new Map(scheduled.map((m) => [m.id, m.agentName || ""]));
+        meetings = claimedRows.map((row) => ({
+          id: row.id,
+          meeting_url: row.meetingUrl,
+          participants: row.participants as string[],
+          workspace_id: row.workspaceId,
+          agent_name: agentNameMap.get(row.id) || "",
+        }));
       }
-      if (claimed.length > 0) meetings = claimed;
     }
   } catch (e) {
     log.warn("meeting-claim: failed in poll", { err: String(e) });

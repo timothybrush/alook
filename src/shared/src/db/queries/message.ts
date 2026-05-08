@@ -1,4 +1,4 @@
-import { eq, asc, desc, and, lt, or, count, sql } from "drizzle-orm";
+import { eq, asc, desc, and, lt, gte, or, count } from "drizzle-orm";
 import { message } from "../schema";
 import type { Database } from "../index";
 
@@ -209,31 +209,32 @@ export async function listMessagesAroundTask(
 
   const pivot = target[0]!.createdAt;
 
-  const before = await db
-    .select()
-    .from(message)
-    .where(
-      and(
-        eq(message.conversationId, conversationId),
-        eq(message.status, "active"),
-        lt(message.createdAt, pivot)
+  const [before, atAndAfter] = await Promise.all([
+    db
+      .select()
+      .from(message)
+      .where(
+        and(
+          eq(message.conversationId, conversationId),
+          eq(message.status, "active"),
+          lt(message.createdAt, pivot)
+        )
       )
-    )
-    .orderBy(desc(message.createdAt))
-    .limit(limit);
-
-  const atAndAfter = await db
-    .select()
-    .from(message)
-    .where(
-      and(
-        eq(message.conversationId, conversationId),
-        eq(message.status, "active"),
-        sql`${message.createdAt} >= ${pivot}`
+      .orderBy(desc(message.createdAt))
+      .limit(limit),
+    db
+      .select()
+      .from(message)
+      .where(
+        and(
+          eq(message.conversationId, conversationId),
+          eq(message.status, "active"),
+          gte(message.createdAt, pivot)
+        )
       )
-    )
-    .orderBy(asc(message.createdAt))
-    .limit(limit + 1);
+      .orderBy(asc(message.createdAt))
+      .limit(limit + 1),
+  ]);
 
   return [...before.reverse(), ...atAndAfter];
 }

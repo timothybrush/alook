@@ -25,18 +25,22 @@ export const user = sqliteTable("user", {
   updatedAt: text("updatedAt").notNull().$defaultFn(() => new Date().toISOString()),
 });
 
-export const session = sqliteTable("session", {
-  id: text("id").primaryKey().$defaultFn(() => nanoid()),
-  userId: text("userId")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  token: text("token").unique().notNull(),
-  expiresAt: text("expiresAt").notNull(),
-  ipAddress: text("ipAddress"),
-  userAgent: text("userAgent"),
-  createdAt: text("createdAt").notNull().$defaultFn(() => new Date().toISOString()),
-  updatedAt: text("updatedAt").notNull().$defaultFn(() => new Date().toISOString()),
-});
+export const session = sqliteTable(
+  "session",
+  {
+    id: text("id").primaryKey().$defaultFn(() => nanoid()),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    token: text("token").unique().notNull(),
+    expiresAt: text("expiresAt").notNull(),
+    ipAddress: text("ipAddress"),
+    userAgent: text("userAgent"),
+    createdAt: text("createdAt").notNull().$defaultFn(() => new Date().toISOString()),
+    updatedAt: text("updatedAt").notNull().$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [index("idx_session_token_expires").on(t.token, t.expiresAt)]
+);
 
 export const account = sqliteTable("account", {
   id: text("id").primaryKey().$defaultFn(() => nanoid()),
@@ -451,7 +455,10 @@ export const taskMessage = sqliteTable(
     output: text("output").notNull().default(""),
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
-  (t) => [index("idx_task_message_task_seq").on(t.taskId, t.seq)]
+  (t) => [
+    index("idx_task_message_task_seq").on(t.taskId, t.seq),
+    index("idx_task_message_task_created").on(t.taskId, t.createdAt),
+  ]
 );
 
 export const emails = sqliteTable(
@@ -480,6 +487,11 @@ export const emails = sqliteTable(
       columns: [t.agentId, t.workspaceId],
       foreignColumns: [agent.id, agent.workspaceId],
     }).onDelete("cascade"),
+    index("idx_emails_agent_ws_status").on(t.agentId, t.workspaceId, t.status),
+    index("idx_emails_to_direction").on(t.toEmail, t.direction),
+    index("idx_emails_from_direction").on(t.fromEmail, t.direction),
+    index("idx_emails_message_id").on(t.messageId),
+    index("idx_emails_created_at").on(t.createdAt),
   ]
 );
 
