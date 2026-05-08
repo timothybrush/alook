@@ -134,7 +134,7 @@ describe("DELETE /api/issues/[id]", () => {
     const res = await DELETE(req, { params: { id: "iss_1" } } as any);
     expect(res.status).toBe(204);
     expect(mockDeleteIssue).toHaveBeenCalledWith({}, "iss_1", "w1");
-    expect(mockCancelActiveTask).toHaveBeenCalledWith("c1", "w1", { skipDispatch: true });
+    expect(mockCancelActiveTask).toHaveBeenCalledWith("c1", "w1", { skipDispatch: true, reason: "Task cancelled: issue deleted" });
   });
 
   it("cancels via traceId when latestTask has a traceId", async () => {
@@ -144,7 +144,7 @@ describe("DELETE /api/issues/[id]", () => {
     const req = new NextRequest("http://localhost/api/issues/iss_1", { method: "DELETE" });
     const res = await DELETE(req, { params: { id: "iss_1" } } as any);
     expect(res.status).toBe(204);
-    expect(mockCancelTrace).toHaveBeenCalledWith("trace_1", "w1");
+    expect(mockCancelTrace).toHaveBeenCalledWith("trace_1", "w1", { reason: "Task cancelled: issue deleted" });
     expect(mockCancelActiveTask).not.toHaveBeenCalled();
     expect(mockDeleteIssue).toHaveBeenCalled();
   });
@@ -156,8 +156,20 @@ describe("DELETE /api/issues/[id]", () => {
     const req = new NextRequest("http://localhost/api/issues/iss_1", { method: "DELETE" });
     const res = await DELETE(req, { params: { id: "iss_1" } } as any);
     expect(res.status).toBe(204);
-    expect(mockCancelActiveTask).toHaveBeenCalledWith("c1", "w1", { skipDispatch: true });
+    expect(mockCancelActiveTask).toHaveBeenCalledWith("c1", "w1", { skipDispatch: true, reason: "Task cancelled: issue deleted" });
     expect(mockCancelTrace).not.toHaveBeenCalled();
+  });
+
+  it("falls back to cancelActiveTask when latestTaskId exists but task row is missing", async () => {
+    mockGetIssue.mockResolvedValue({ id: "iss_1", conversationId: "c1", latestTaskId: "t_gone" });
+    mockGetTask.mockResolvedValue(null);
+    mockDeleteIssue.mockResolvedValue({ id: "iss_1" });
+    const req = new NextRequest("http://localhost/api/issues/iss_1", { method: "DELETE" });
+    const res = await DELETE(req, { params: { id: "iss_1" } } as any);
+    expect(res.status).toBe(204);
+    expect(mockCancelActiveTask).toHaveBeenCalledWith("c1", "w1", { skipDispatch: true, reason: "Task cancelled: issue deleted" });
+    expect(mockCancelTrace).not.toHaveBeenCalled();
+    expect(mockDeleteIssue).toHaveBeenCalled();
   });
 
   it("still deletes the issue when cancellation throws", async () => {

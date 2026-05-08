@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
-import { Check, CheckCircle2, CircleDot, ExternalLink, File as FileIcon, GitBranch, Loader2, MessageSquare, Plus, Trash2, X } from "lucide-react";
+import { Check, CheckCircle2, CircleDot, File as FileIcon, GitBranch, Loader2, MessageSquare, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import type { Agent, Artifact, Issue, IssueComment, Message, WsMessage } from "@alook/shared";
 import { isTerminalIssueStatus } from "@alook/shared";
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AvatarRenderer, parseAvatarUrl } from "@/components/avatar";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,6 +33,10 @@ import { Streamdown } from "streamdown";
 // TODO: re-enable when Codex CLI fixes image_url serialization bug
 // const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 // const MAX_ATTACHMENTS = 10;
+
+const SIDECAR_MIN_WIDTH = 320;
+const SIDECAR_MAX_WIDTH_RATIO = 0.8;
+const SIDECAR_DEFAULT_WIDTH = 448;
 
 const ACTIVE_COLUMNS = [
   { id: "todo", label: "Todo" },
@@ -220,7 +224,7 @@ function CommentInput({ issueId, workspaceId, onCommented }: { issueId: string; 
   };
 
   return (
-    <div className="border-t border-border/60 pt-3 space-y-2">
+    <div className="pt-3 space-y-2">
       <Textarea
         placeholder="Leave a comment..."
         value={content}
@@ -274,6 +278,9 @@ export default function IssuesPage() {
   const [activeTask, setActiveTask] = useState<TaskApi | null>(null);
   const [taskLatestText, setTaskLatestText] = useState<string>("");
   const [form, setForm] = useState({ title: "", description: "", agentId: "" });
+  const [sidecarWidth, setSidecarWidth] = useState(SIDECAR_DEFAULT_WIDTH);
+  const sidecarDragging = useRef(false);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
   const completedIssues = useMemo(
     () => issues.filter((issue) => TERMINAL_STATUSES.includes(issue.status)),
@@ -395,6 +402,12 @@ export default function IssuesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailConvId, selectedId, subscribeWs]);
 
+  useEffect(() => {
+    if (timelineRef.current) {
+      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
+    }
+  }, [detail]);
+
   async function handleCreate() {
     if (!form.title.trim() || !form.agentId) return;
     setCreating(true);
@@ -431,6 +444,18 @@ export default function IssuesPage() {
       toast.error(err instanceof Error ? err.message : "Failed to delete issue");
     }
   }, [workspaceId, selectedId]);
+
+  const onSidecarPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    sidecarDragging.current = true;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, []);
+  const onSidecarPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!sidecarDragging.current) return;
+    const maxW = window.innerWidth * SIDECAR_MAX_WIDTH_RATIO;
+    setSidecarWidth(Math.min(maxW, Math.max(SIDECAR_MIN_WIDTH, window.innerWidth - e.clientX)));
+  }, []);
+  const onSidecarPointerUp = useCallback(() => { sidecarDragging.current = false; }, []);
 
   // TODO: attachment functions disabled until Codex CLI fixes image_url serialization bug
   // function handleFileSelect(event: React.ChangeEvent<HTMLInputElement>) { ... }
@@ -669,97 +694,135 @@ export default function IssuesPage() {
       </div>
 
       <Sheet open={!!selectedId} onOpenChange={(open) => { if (!open) { setSelectedId(null); setDetail(null); setActiveTask(null); setTaskLatestText(""); } }}>
-        <SheetContent side="right" showCloseButton>
-          <SheetHeader>
+        <SheetContent
+          side="right"
+          showCloseButton={false}
+          className="data-[side=right]:sm:inset-y-2 data-[side=right]:sm:right-2 data-[side=right]:sm:h-auto data-[side=right]:sm:rounded-xl data-[side=right]:sm:border"
+          style={{ width: `min(${sidecarWidth}px, 100vw)`, maxWidth: "none" }}
+        >
+          <div
+            onPointerDown={onSidecarPointerDown}
+            onPointerMove={onSidecarPointerMove}
+            onPointerUp={onSidecarPointerUp}
+            onLostPointerCapture={onSidecarPointerUp}
+            className="hidden sm:block absolute -left-px top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors rounded-l-xl"
+          />
+          <SheetHeader className="border-b-0 pb-2">
             <SheetTitle>
               {detailLoading || !detail ? (
-                <Skeleton className="h-5 w-56" />
+                <div className="space-y-2">
+                  <Skeleton className="h-5 w-56" />
+                  <Skeleton className="h-4 w-40" />
+                </div>
               ) : (
-                <div className="flex items-center gap-2 mr-6">
-                  <Badge variant={detail.issue.status === "in_progress" ? "default" : "outline"} className="shrink-0 text-[10px] px-1.5 py-0">
-                    {detail.issue.status === "in_progress" && <Loader2 className="mr-1 size-3 animate-spin" />}
-                    {statusLabel(detail.issue.status)}
-                  </Badge>
-                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">{detail.issue.title}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{agentName(detail.issue.agent_id)}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{formatDate(detail.issue.updated_at)}</span>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-base font-semibold">{detail.issue.title}</span>
+                    <Button variant="ghost" size="icon-sm" className="ml-auto shrink-0" onClick={() => { setSelectedId(null); setDetail(null); setActiveTask(null); setTaskLatestText(""); }}>
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-0.5">
+                      <Link
+                        href={`/w/${slug}/agents/${detail.issue.agent_id}?conv=${detail.issue.conversation_id}${detail.issue.latest_task_id ? `&task=${detail.issue.latest_task_id}` : ""}`}
+                        className="group inline-flex items-center rounded-lg text-xs text-muted-foreground h-7 px-2 hover:bg-muted hover:text-foreground transition-all"
+                      >
+                        <MessageSquare className="size-3 shrink-0" />
+                        <span className="max-w-0 opacity-0 group-hover:max-w-16 group-hover:opacity-100 group-hover:ml-1 group-hover:delay-300 overflow-hidden transition-all duration-500 ease-out">Chat</span>
+                      </Link>
+                      {detail.issue.trace_id && (
+                        <Link
+                          href={`/w/${slug}/threads/${detail.issue.trace_id}`}
+                          className="group inline-flex items-center rounded-lg text-xs text-muted-foreground h-7 px-2 hover:bg-muted hover:text-foreground transition-all"
+                        >
+                          <GitBranch className="size-3 shrink-0" />
+                          <span className="max-w-0 opacity-0 group-hover:max-w-20 group-hover:opacity-100 group-hover:ml-1 group-hover:delay-300 overflow-hidden transition-all duration-500 ease-out">Thread</span>
+                        </Link>
+                      )}
+                    </div>
+                    <Badge variant={detail.issue.status === "in_progress" ? "default" : "outline"} className="shrink-0 text-[10px] px-1.5 py-0">
+                      {detail.issue.status === "in_progress" && <Loader2 className="mr-1 size-3 animate-spin" />}
+                      {statusLabel(detail.issue.status)}
+                    </Badge>
+                    {agentsById.get(detail.issue.agent_id) && (
+                      <span className="flex items-center gap-1">
+                        <AgentAvatar agent={agentsById.get(detail.issue.agent_id)} size={14} />
+                        <span className="truncate">{agentName(detail.issue.agent_id)}</span>
+                      </span>
+                    )}
+                    <span className="shrink-0">{formatDate(detail.issue.updated_at)}</span>
+                  </div>
                 </div>
               )}
             </SheetTitle>
           </SheetHeader>
-          <SheetBody>
-            {detailLoading || !detail ? (
-              <div className="space-y-3">
-                <Skeleton className="h-24" />
-                <Skeleton className="h-16" />
-              </div>
-            ) : (
-              <div className="space-y-5">
+          {detailLoading || !detail ? (
+            <div className="flex-1 px-6 py-5 space-y-3">
+              <Skeleton className="h-24" />
+              <Skeleton className="h-16" />
+            </div>
+          ) : (
+            <>
+              <div className="shrink-0 space-y-6 px-6 pt-2 pb-3">
                 {detail.issue.description && (
                   <div className="prose prose-sm dark:prose-invert max-w-none text-sm break-words">
                     <Streamdown>{detail.issue.description}</Streamdown>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  {detail.issue.trace_id && (
-                    <Link
-                      href={`/w/${slug}/threads/${detail.issue.trace_id}`}
-                      className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/55 px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    >
-                      <GitBranch className="size-4" />
-                      <span>Thread</span>
-                      <ExternalLink className="ml-auto size-3.5" />
-                    </Link>
-                  )}
-                  <Link
-                    href={`/w/${slug}/agents/${detail.issue.agent_id}?conv=${detail.issue.conversation_id}${detail.issue.latest_task_id ? `&task=${detail.issue.latest_task_id}` : ""}`}
-                    className="flex items-center gap-2 rounded-lg border border-border/60 bg-background/55 px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <MessageSquare className="size-4" />
-                    <span>Chat</span>
-                    <ExternalLink className="ml-auto size-3.5" />
-                  </Link>
-                </div>
                 <AttachmentList artifacts={detail.artifacts ?? []} workspaceId={workspaceId} />
-                <div className="space-y-2 border-t border-border/60 pt-4">
-                  {(() => {
-                    const events = detail.messages
-                      .filter((m) => m.role === "event")
-                      .map((m) => ({ kind: "event" as const, id: m.id, created_at: m.created_at, data: m }));
-                    const comments = (detail.comments ?? [])
-                      .map((c) => ({ kind: "comment" as const, id: c.id, created_at: c.created_at, data: c }));
-                    const timeline = [...events, ...comments].sort(
-                      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-                    );
-
-                    if (timeline.length === 0 && !isTaskActive) {
-                      return <div className="text-xs text-muted-foreground">No activity yet.</div>;
-                    }
-
-                    return timeline.map((item) =>
-                      item.kind === "event"
-                        ? <MessageRow key={item.id} message={item.data} />
-                        : <CommentRow key={item.id} comment={item.data} agents={agents} />
-                    );
-                  })()}
-                  {isTaskActive && (
-                    <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
-                      <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
-                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Working
-                      </div>
-                      {taskLatestText && (
-                        <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">{taskLatestText}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {!isTaskActive && !isTerminalIssueStatus(detail.issue.status) && (
-                  <CommentInput issueId={detail.issue.id} workspaceId={workspaceId} onCommented={() => openIssue(detail.issue.id)} />
-                )}
               </div>
-            )}
-          </SheetBody>
+
+              <div ref={timelineRef} className="flex-1 min-h-0 overflow-y-auto thin-scrollbar mx-6 mt-2 mb-4 px-4 py-4 space-y-3 border rounded-lg">
+                {(() => {
+                  const events = detail.messages
+                    .filter((m) => m.role === "event")
+                    .map((m) => ({ kind: "event" as const, id: m.id, created_at: m.created_at, data: m }));
+                  const comments = (detail.comments ?? [])
+                    .map((c) => ({ kind: "comment" as const, id: c.id, created_at: c.created_at, data: c }));
+                  const timeline = [...events, ...comments].sort(
+                    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                  );
+
+                  if (timeline.length === 0 && !isTaskActive) {
+                    return <div className="text-xs text-muted-foreground">No activity yet.</div>;
+                  }
+
+                  return (
+                    <div className="relative pl-4">
+                      <div className="absolute left-[5px] top-2 bottom-2 w-px bg-border" />
+                      <div className="space-y-3">
+                        {timeline.map((item) => (
+                          <div key={item.id} className="relative">
+                            <div className="absolute -left-4 top-2.5 size-2.5 rounded-full border-2 border-background bg-muted-foreground/40" />
+                            {item.kind === "event"
+                              ? <MessageRow message={item.data} />
+                              : <CommentRow comment={item.data} agents={agents} />
+                            }
+                          </div>
+                        ))}
+                        {isTaskActive && (
+                          <div className="relative">
+                            <div className="absolute -left-4 top-2.5 size-2.5 rounded-full border-2 border-background bg-emerald-500 animate-pulse" />
+                            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
+                              <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">Working</div>
+                              {taskLatestText && <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">{taskLatestText}</p>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {!isTaskActive && !isTerminalIssueStatus(detail.issue.status) && (
+                <div className="shrink-0 px-6 pb-4">
+                  <CommentInput issueId={detail.issue.id} workspaceId={workspaceId} onCommented={() => openIssue(detail.issue.id)} />
+                </div>
+              )}
+            </>
+          )}
         </SheetContent>
       </Sheet>
     </div>

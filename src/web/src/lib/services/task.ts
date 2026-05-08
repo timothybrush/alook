@@ -245,7 +245,7 @@ export class TaskService {
     return { oldTask: marked, newTask };
   }
 
-  async cancelActiveTask(conversationId: string, workspaceId: string, opts?: { skipDispatch?: boolean }) {
+  async cancelActiveTask(conversationId: string, workspaceId: string, opts?: { skipDispatch?: boolean; reason?: string }) {
     const activeTask = await taskQueries.getActiveTaskByConversation(this.db, conversationId, workspaceId);
     if (!activeTask) return null;
 
@@ -267,7 +267,7 @@ export class TaskService {
     await messageQueries.createMessage(this.db, {
       conversationId,
       role: "assistant",
-      content: "Task cancelled by user",
+      content: opts?.reason ?? "Task cancelled by user",
       taskId: activeTask.id,
     });
 
@@ -343,7 +343,7 @@ export class TaskService {
     }
   }
 
-  async cancelTrace(traceId: string, workspaceId: string) {
+  async cancelTrace(traceId: string, workspaceId: string, opts?: { reason?: string }) {
     const tasks = await taskQueries.getTraceTree(this.db, traceId, workspaceId);
     const activeConvIds = [...new Set(
       tasks
@@ -352,7 +352,7 @@ export class TaskService {
     )];
     for (const convId of activeConvIds) {
       try {
-        await this.cancelActiveTask(convId, workspaceId, { skipDispatch: true });
+        await this.cancelActiveTask(convId, workspaceId, { skipDispatch: true, reason: opts?.reason });
       } catch (err) {
         log.warn("cancelTrace: failed to cancel task", { traceId, convId, err });
       }
