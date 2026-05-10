@@ -492,9 +492,16 @@ describe("TaskService", () => {
       expect(issueQ.updateIssue).toHaveBeenCalledWith({}, "iss_1", "w1", { status: "failed" });
       expect(messageQ.createMessage).toHaveBeenCalledWith({}, {
         conversationId: "c1",
+        role: "assistant",
+        content: "Error: something went wrong",
+        taskId: "t1",
+      });
+      expect(messageQ.createMessage).toHaveBeenCalledWith({}, {
+        conversationId: "c1",
         role: "event",
         content: "Issue status changed: in_progress -> failed",
         taskId: "t1",
+        metadata: JSON.stringify({ issueId: "iss_1" }),
       });
     });
   });
