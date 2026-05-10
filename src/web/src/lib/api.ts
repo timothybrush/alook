@@ -1056,6 +1056,7 @@ export interface InboxItem {
   agent_name: string | null;
   agent_avatar_url: string | null;
   root_task_status: string | null;
+  root_task_type: string | null;
 }
 
 export const listInboxItems = (

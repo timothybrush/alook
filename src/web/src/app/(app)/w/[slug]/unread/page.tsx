@@ -50,6 +50,21 @@ function AgentAvatar({ name, avatarUrl, size = 32 }: { name?: string | null; ava
   );
 }
 
+const TYPE_LABELS: Record<string, string> = {
+  user_dm_message: "DM",
+  calendar_event: "Calendar",
+};
+
+function TypeBadge({ type }: { type: string | null }) {
+  if (!type) return null;
+  const label = TYPE_LABELS[type] ?? type;
+  return (
+    <span className="text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
+      {label}
+    </span>
+  );
+}
+
 function InboxRow({ item, slug, onClick }: { item: InboxItem; slug: string; onClick?: () => void }) {
   const statusLabel = item.root_task_status === "failed" ? "Failed" : "Completed";
 
@@ -79,6 +94,7 @@ function InboxRow({ item, slug, onClick }: { item: InboxItem; slug: string; onCl
             )}
             <StatusDot status={item.root_task_status} />
             <span className="text-xs text-muted-foreground">{statusLabel}</span>
+            <TypeBadge type={item.root_task_type} />
           </div>
           <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-1">
             {item.latest_response}

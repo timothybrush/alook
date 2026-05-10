@@ -24,6 +24,7 @@ export async function listUnreadConversations(
     agent_name: string | null;
     agent_avatar_url: string | null;
     root_task_status: string | null;
+    root_task_type: string | null;
   }>(sql`
     SELECT c.id,
            c.agent_id,
@@ -34,7 +35,8 @@ export async function listUnreadConversations(
            t.prompt AS root_prompt,
            a.name AS agent_name,
            a.avatar_url AS agent_avatar_url,
-           t.status AS root_task_status
+           t.status AS root_task_status,
+           t.type AS root_task_type
     FROM agent_task_queue t
     INNER JOIN conversation c
       ON c.id = t.conversation_id
@@ -58,7 +60,7 @@ export async function listUnreadConversations(
     WHERE t.workspace_id = ${workspaceId}
       AND t.parent_task_id IS NULL
       AND t.trace_id IS NOT NULL
-      AND t.type = 'user_dm_message'
+      AND t.type IN ('user_dm_message', 'calendar_event')
       AND t.status IN ('completed', 'failed')
       AND t.completed_at > COALESCE(crs.last_read_at, '1970-01-01T00:00:00.000Z')
       AND t.id = (
@@ -67,7 +69,7 @@ export async function listUnreadConversations(
           AND conversation_id = c.id
           AND parent_task_id IS NULL
           AND trace_id IS NOT NULL
-          AND type = 'user_dm_message'
+          AND type IN ('user_dm_message', 'calendar_event')
           AND status IN ('completed', 'failed')
         ORDER BY completed_at DESC LIMIT 1
       )
@@ -99,7 +101,7 @@ export async function getUnreadCount(
     WHERE t.workspace_id = ${workspaceId}
       AND t.parent_task_id IS NULL
       AND t.trace_id IS NOT NULL
-      AND t.type = 'user_dm_message'
+      AND t.type IN ('user_dm_message', 'calendar_event')
       AND t.status IN ('completed', 'failed')
       AND t.completed_at > COALESCE(crs.last_read_at, '1970-01-01T00:00:00.000Z')
   `);
