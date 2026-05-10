@@ -3,7 +3,6 @@ import { randomUUID } from "crypto"
 import { seedTestData, cleanupTestData, type TestSeed } from "../helpers/seed"
 import { tokenRequest } from "../helpers/auth"
 import { sqlQuery, sqlBatch } from "../helpers/db"
-import { fetchWithRetry } from "../helpers/fetch"
 
 let seed: TestSeed
 
@@ -131,7 +130,7 @@ describe("daemon lifecycle", () => {
 
   it("POST /api/daemon/tasks/poll rejects without machine token", async () => {
     const APP_URL = process.env.APP_URL ?? "http://localhost:3000"
-    const res = await fetchWithRetry(`${APP_URL}/api/daemon/tasks/poll`, {
+    const res = await fetch(`${APP_URL}/api/daemon/tasks/poll`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ daemon_id: daemonId }),

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { seedTestData, cleanupTestData, type TestSeed } from "../helpers/seed"
-import { sql, sqlBatch, sqlQuery } from "../helpers/db"
+import { sql, sqlQuery } from "../helpers/db"
 import { postEmail } from "../helpers/email"
 import { randomUUID } from "crypto"
 
@@ -20,7 +20,7 @@ afterAll(() => {
   cleanupTestData(seedOther)
 })
 
-describe("whitelist bypass for same-workspace agents", { timeout: 60_000 }, () => {
+describe("whitelist bypass for same-workspace agents", () => {
   async function waitForEmail(
     agentId: string,
     fromEmail: string,
@@ -41,9 +41,7 @@ describe("whitelist bypass for same-workspace agents", { timeout: 60_000 }, () =
     const siblingAgentId = `ag_${nanoid()}`
     const siblingHandle = `e2e-sib-${nanoid()}`
     const now = new Date().toISOString()
-    sqlBatch([
-      `INSERT INTO agent (id, workspace_id, name, runtime_id, email_handle, owner_id, created_at, updated_at) VALUES ('${siblingAgentId}', '${seed.workspaceId}', 'Sibling Agent', '${seed.runtimeId}', '${siblingHandle}', '${seed.userId}', '${now}', '${now}')`,
-    ])
+    sql(`INSERT INTO agent (id, workspace_id, name, runtime_id, email_handle, owner_id, created_at, updated_at) VALUES ('${siblingAgentId}', '${seed.workspaceId}', 'Sibling Agent', '${seed.runtimeId}', '${siblingHandle}', '${seed.userId}', '${now}', '${now}')`)
 
     try {
       const from = `${siblingHandle}@alook.ai`
@@ -56,9 +54,7 @@ describe("whitelist bypass for same-workspace agents", { timeout: 60_000 }, () =
       expect(row).not.toBeNull()
       expect(row!.is_whitelisted).toBe(1)
     } finally {
-      sqlBatch([
-        `DELETE FROM agent WHERE id = '${siblingAgentId}' AND workspace_id = '${seed.workspaceId}'`,
-      ])
+      sql(`DELETE FROM agent WHERE id = '${siblingAgentId}' AND workspace_id = '${seed.workspaceId}'`)
     }
   })
 
@@ -124,10 +120,8 @@ describe("whitelist bypass for same-workspace agents", { timeout: 60_000 }, () =
     const siblingHandle = `e2e-both-${nanoid()}`
     const now = new Date().toISOString()
     const wlId = `wl_${nanoid()}`
-    sqlBatch([
-      `INSERT INTO agent (id, workspace_id, name, runtime_id, email_handle, owner_id, created_at, updated_at) VALUES ('${siblingAgentId}', '${seed.workspaceId}', 'Both Agent', '${seed.runtimeId}', '${siblingHandle}', '${seed.userId}', '${now}', '${now}')`,
-      `INSERT INTO agent_whitelist (id, agent_id, workspace_id, email, created_at) VALUES ('${wlId}', '${seed.agentId}', '${seed.workspaceId}', '${siblingHandle}@alook.ai', '${now}')`,
-    ])
+    sql(`INSERT INTO agent (id, workspace_id, name, runtime_id, email_handle, owner_id, created_at, updated_at) VALUES ('${siblingAgentId}', '${seed.workspaceId}', 'Both Agent', '${seed.runtimeId}', '${siblingHandle}', '${seed.userId}', '${now}', '${now}')`)
+    sql(`INSERT INTO agent_whitelist (id, agent_id, workspace_id, email, created_at) VALUES ('${wlId}', '${seed.agentId}', '${seed.workspaceId}', '${siblingHandle}@alook.ai', '${now}')`)
 
     try {
       const from = `${siblingHandle}@alook.ai`
@@ -140,10 +134,8 @@ describe("whitelist bypass for same-workspace agents", { timeout: 60_000 }, () =
       expect(row).not.toBeNull()
       expect(row!.is_whitelisted).toBe(1)
     } finally {
-      sqlBatch([
-        `DELETE FROM agent_whitelist WHERE id = '${wlId}'`,
-        `DELETE FROM agent WHERE id = '${siblingAgentId}' AND workspace_id = '${seed.workspaceId}'`,
-      ])
+      sql(`DELETE FROM agent_whitelist WHERE id = '${wlId}'`)
+      sql(`DELETE FROM agent WHERE id = '${siblingAgentId}' AND workspace_id = '${seed.workspaceId}'`)
     }
   })
 })

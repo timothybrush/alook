@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { MobileTopBar } from "@/components/mobile-top-bar";
 import { GradientBackground } from "@/components/gradient-background";
 import { WorkspacePetLayer } from "@/components/home-pet/workspace-pet-layer";
+import { RuntimeVersionGate } from "@/components/runtime-version-gate";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -41,6 +42,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
             </SheetContent>
           </Sheet>
           <WorkspacePetLayer boundaryRef={shellRef} slug={slug} />
+          <RuntimeVersionGate />
         </div>
       </SidebarTriggerContext.Provider>
     );
@@ -56,6 +58,7 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <WorkspacePetLayer boundaryRef={shellRef} slug={slug} />
+      <RuntimeVersionGate />
     </div>
   );
 }

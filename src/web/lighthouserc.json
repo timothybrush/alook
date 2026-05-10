@@ -2,7 +2,7 @@
   "ci": {
     "collect": {
       "url": ["http://localhost:3000/"],
-      "startServerCommand": "pnpm exec next dev",
+      "startServerCommand": "pnpm dev",
       "startServerReadyPattern": "Ready in",
       "numberOfRuns": 1,
       "settings": {

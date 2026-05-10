@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { clampPetPosition, type PetBounds, type PetPoint } from "./pet-presets";
 
 export const CLOUD_CODE_MONSTER_ACTIVITY_REFRESH_MS = 3 * 60 * 1000;
 const CLOUD_CODE_MONSTER_STORAGE_KEY = "alook-cloud-code-monster-pet-activity-v1";
@@ -37,6 +36,21 @@ const CLOUD_CODE_MONSTER_AUTO_WALK_SPEED = 2.7;
 const CLOUD_CODE_MONSTER_PEEK_MS = 4_200;
 const CLOUD_CODE_MONSTER_PEEK_INTERVAL_MS = 11_000;
 const CLOUD_CODE_MONSTER_SIZE = { width: 82, height: 82 };
+
+export type PetPoint = {
+  x: number;
+  y: number;
+};
+
+export type PetBounds = {
+  width: number;
+  height: number;
+};
+
+type PetSize = {
+  width: number;
+  height: number;
+};
 
 export type CloudCodeMonsterPeekTarget = PetPoint & {
   agentId?: string;
@@ -170,6 +184,21 @@ type ReflectedMonsterWalk = {
   reflectedX: boolean;
   reflectedY: boolean;
 };
+
+export function clampPetPosition(
+  position: PetPoint,
+  bounds: PetBounds,
+  size: PetSize = CLOUD_CODE_MONSTER_SIZE,
+  padding = 16
+) {
+  const maxX = Math.max(padding, bounds.width - size.width - padding);
+  const maxY = Math.max(padding, bounds.height - size.height - padding);
+
+  return {
+    x: Math.min(maxX, Math.max(padding, position.x)),
+    y: Math.min(maxY, Math.max(padding, position.y)),
+  };
+}
 
 export const CLOUD_CODE_MONSTER_ACTIVITIES: CloudCodeMonsterActivity[] = [
   { id: "coding", label: "写代码", caption: "在敲一段小 patch" },

@@ -1492,16 +1492,6 @@
   100% { transform: translateY(0) rotate(0deg) scale(1); }
 }
 
-/* ── Preview PET: Claude Code pixel monster ── */
-.pet-preview-flow {
-  position: relative;
-  z-index: 10;
-}
-
-.pet-preview-flow .react-flow__node {
-  z-index: 30 !important;
-}
-
 .cloud-code-monster-pet {
   position: absolute;
   top: 0;

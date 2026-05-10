@@ -54,7 +54,6 @@ jobs:
     env:
       BETTER_AUTH_SECRET: ci-e2e-secret
       BETTER_AUTH_URL: http://localhost:3000
-      APP_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -70,7 +69,7 @@ jobs:
       - name: Start dev servers
         run: |
           pnpm --filter @alook/email-worker dev &
-          pnpm --filter @alook/web exec next dev &
+          pnpm --filter @alook/web dev &
           until curl -sf http://localhost:3000/api/health; do sleep 2; done
       - run: pnpm test:e2e
 
