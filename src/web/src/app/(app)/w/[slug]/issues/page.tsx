@@ -541,6 +541,11 @@ export default function IssuesPage() {
 
     if ((targetCol.statuses as readonly string[]).includes(issue.status)) return;
 
+    if (issue.status === "todo" && !issue.agent_id && targetColId !== "todo" && targetColId !== "completed") {
+      toast.error("Assign an agent first to run this issue");
+      return;
+    }
+
     const newStatus = targetColId === "completed" ? "done" : targetColId;
     const oldStatus = issue.status;
 
@@ -584,11 +589,24 @@ export default function IssuesPage() {
       <div className="hidden min-h-0 flex-1 lg:block overflow-y-auto thin-scrollbar p-4">
         {boardLoading ? (
           <div className={cn("grid h-full gap-4", showCompleted ? "grid-cols-4" : "grid-cols-[1fr_1fr_1fr_36px]")}>
-            {Array.from({ length: 9 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
-            {showCompleted ? (
-              Array.from({ length: 3 }).map((_, i) => <Skeleton key={`c${i}`} className="h-24 rounded-lg" />)
-            ) : (
-              <Skeleton className="h-full rounded-lg" />
+            {[3, 2, 2, ...(showCompleted ? [2] : [])].map((cardCount, colIdx) => (
+              <div key={colIdx} className="flex min-h-0 flex-col rounded-lg border border-border/60 bg-card/60">
+                <div className="border-b border-border/60 bg-muted/30 px-3 py-2">
+                  <Skeleton className="h-3 w-16" />
+                </div>
+                <div className="min-h-0 flex-1 space-y-2 p-2">
+                  {Array.from({ length: cardCount }).map((_, i) => (
+                    <div key={i} className="rounded-lg border bg-background/75 p-3">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="mt-1 h-3 w-1/2" />
+                      <Skeleton className="mt-2 h-3 w-1/3" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {!showCompleted && (
+              <div className="h-full rounded-lg border border-dashed border-border/60 bg-muted/20" />
             )}
           </div>
         ) : issues.length === 0 ? (
@@ -599,7 +617,7 @@ export default function IssuesPage() {
           </div>
         ) : (
           <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className={cn("grid h-full gap-4", showCompleted ? "grid-cols-4" : "grid-cols-[1fr_1fr_1fr_36px]")}>
+            <div className={cn("grid h-full gap-4 animate-[fade-up_200ms_ease-out_both]", showCompleted ? "grid-cols-4" : "grid-cols-[1fr_1fr_1fr_36px]")}>
               {COLUMNS.filter(col => col.id !== "completed" || showCompleted).map((col) => {
                 const columnIssues = issues.filter((issue) => (col.statuses as readonly string[]).includes(issue.status));
                 return (
@@ -663,8 +681,26 @@ export default function IssuesPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto thin-scrollbar p-3 lg:hidden">
         {boardLoading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28" />)}
+          <div className="space-y-4">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-lg border border-border/60 bg-card/60">
+                <div className="border-b border-border/50 px-3 py-2">
+                  <Skeleton className="h-4 w-20" />
+                </div>
+                <div className="space-y-2 p-3">
+                  {Array.from({ length: 2 }).map((_, j) => (
+                    <div key={j} className="rounded-lg border bg-background/75 p-3">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="mt-1 h-3 w-1/2" />
+                      <Skeleton className="mt-2 h-3 w-1/3" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="rounded-lg border border-dashed border-border/60 px-3 py-2.5">
+              <Skeleton className="h-4 w-32" />
+            </div>
           </div>
         ) : issues.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full animate-[fade-up_400ms_ease-out_both]">
@@ -673,7 +709,7 @@ export default function IssuesPage() {
             <p className="text-xs text-muted-foreground/60 mt-1">Create one to get started.</p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-[fade-up_200ms_ease-out_both]">
             {COLUMNS.map((col) => {
               if (col.id === "completed" && !showCompleted) return null;
               const columnIssues = issues.filter((issue) => (col.statuses as readonly string[]).includes(issue.status));
@@ -749,6 +785,7 @@ export default function IssuesPage() {
         onUpdate={handleUpdate}
         onStatusChange={handleStatusChange}
         onCommented={() => selectedId && openIssue(selectedId)}
+        onDispatched={(id) => { silentReload(); openIssue(id); }}
       />
     </div>
   );

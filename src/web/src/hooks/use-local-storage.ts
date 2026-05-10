@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useLayoutEffect, useCallback } from "react";
 
 export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((prev: T) => T)) => void] {
   const [stored, setStored] = useState<T>(initialValue);
 
-  // Hydrate from localStorage after mount to avoid SSR mismatch
-  useEffect(() => {
+  // Hydrate from localStorage before browser paint to avoid flicker
+  useLayoutEffect(() => {
     try {
       const item = localStorage.getItem(key);
       if (item) setStored(JSON.parse(item) as T);
