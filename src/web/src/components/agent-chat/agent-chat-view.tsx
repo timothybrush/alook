@@ -146,6 +146,31 @@ type TimelineItem =
   | { kind: "artifact"; data: Artifact }
   | { kind: "nap"; data: NapMarker };
 
+export function reorderArtifactsAfterAssistant(items: TimelineItem[]): TimelineItem[] {
+  const result: TimelineItem[] = [];
+  let pending: TimelineItem[] = [];
+  let collecting = false;
+
+  for (const item of items) {
+    if (item.kind === "message" && item.data.role === "user") {
+      collecting = true;
+      result.push(item);
+    } else if (item.kind === "message" && item.data.role === "assistant") {
+      result.push(item);
+      result.push(...pending);
+      pending = [];
+      collecting = false;
+    } else if (collecting && item.kind === "artifact") {
+      pending.push(item);
+    } else {
+      result.push(item);
+    }
+  }
+
+  result.push(...pending);
+  return result;
+}
+
 export function buildTimeline(
   messages: Message[],
   artifacts: Artifact[],
@@ -158,7 +183,7 @@ export function buildTimeline(
       ...artifacts.map((a): TimelineItem => ({ kind: "artifact", data: a })),
       ...napMarkers.map((n): TimelineItem => ({ kind: "nap", data: n })),
     ];
-    return items.sort((a, b) => {
+    items.sort((a, b) => {
       const cmp = a.data.created_at.localeCompare(b.data.created_at);
       if (cmp !== 0) return cmp;
       if (a.kind === "nap" || b.kind === "nap") {
@@ -168,6 +193,7 @@ export function buildTimeline(
       if (a.kind !== b.kind) return a.kind === "message" ? -1 : 1;
       return a.data.id.localeCompare(b.data.id);
     });
+    return reorderArtifactsAfterAssistant(items);
   }
 
   const napConvIds = new Set(napMarkers.map((n) => n.id.replace(/^nap-/, "")));
@@ -180,12 +206,13 @@ export function buildTimeline(
     const arts: TimelineItem[] = artifacts
       .filter((a) => a.conversation_id === convId)
       .map((a) => ({ kind: "artifact" as const, data: a }));
-    return [...msgs, ...arts].sort((a, b) => {
+    const sorted = [...msgs, ...arts].sort((a, b) => {
       const cmp = a.data.created_at.localeCompare(b.data.created_at);
       if (cmp !== 0) return cmp;
       if (a.kind !== b.kind) return a.kind === "message" ? -1 : 1;
       return a.data.id.localeCompare(b.data.id);
     });
+    return reorderArtifactsAfterAssistant(sorted);
   };
 
   const result: TimelineItem[] = [];
@@ -212,11 +239,12 @@ export function buildTimeline(
       if (a.kind !== b.kind) return a.kind === "message" ? -1 : 1;
       return a.data.id.localeCompare(b.data.id);
     });
+    const reorderedOrphans = reorderArtifactsAfterAssistant(orphanItems);
     const napIdx = result.findIndex((item) => item.kind === "nap");
     if (napIdx >= 0) {
-      result.splice(napIdx, 0, ...orphanItems);
+      result.splice(napIdx, 0, ...reorderedOrphans);
     } else {
-      result.push(...orphanItems);
+      result.push(...reorderedOrphans);
     }
   }
 

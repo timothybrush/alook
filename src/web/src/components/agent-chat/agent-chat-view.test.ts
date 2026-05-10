@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Message, Artifact } from "@alook/shared";
-import { sortMessages, mergeMessages, buildTimeline, addBufferedIfNew, replaceOptimisticBuffered, getEventIconType } from "./agent-chat-view";
+import { sortMessages, mergeMessages, buildTimeline, addBufferedIfNew, replaceOptimisticBuffered, getEventIconType, reorderArtifactsAfterAssistant } from "./agent-chat-view";
 import type { NapMarker } from "./agent-chat-view";
 
 function msg(id: string, created_at: string, role: "user" | "assistant" | "event" = "user", content = ""): Message {
@@ -242,7 +242,8 @@ describe("buildTimeline", () => {
     const naps: NapMarker[] = [];
 
     const result = buildTimeline(msgs, arts, naps);
-    expect(result.map((i) => i.data.id)).toEqual(["m1", "a1", "m3"]);
+    // artifact is collected after user msg (no assistant to flush to), appended at end
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "m3", "a1"]);
   });
 
   it("places nap marker after messages at the same timestamp", () => {
@@ -366,7 +367,8 @@ describe("buildTimeline — conversation grouping", () => {
     const naps = [nap("nap-convA", "2024-01-01T12:00:00Z")];
 
     const result = buildTimeline(msgs, arts, naps, "convB");
-    expect(result.map((i) => i.data.id)).toEqual(["a1", "art1", "a2", "nap-convA", "b1"]);
+    // artifact collected after user msg, no assistant to flush to, appended at end of group
+    expect(result.map((i) => i.data.id)).toEqual(["a1", "a2", "art1", "nap-convA", "b1"]);
   });
 
   it("single conversation (no nap markers) behaves as before", () => {
@@ -434,6 +436,147 @@ describe("buildTimeline — conversation grouping", () => {
     const result = buildTimeline(msgs, [], naps, "convB");
     // orphan x1 is placed before the first nap marker
     expect(result.map((i) => i.data.id)).toEqual(["a1", "x1", "nap-convA", "b1"]);
+  });
+});
+
+describe("reorderArtifactsAfterAssistant", () => {
+  it("basic reorder: user → artifact → assistant becomes user → assistant → artifact", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:00Z") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "m2", "a1"]);
+  });
+
+  it("multiple turns: each turn reorders independently", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:00Z") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+      { kind: "message" as const, data: msg("m3", "2024-01-01T00:03:00Z", "user") },
+      { kind: "artifact" as const, data: artifact("a2", "2024-01-01T00:04:00Z") },
+      { kind: "message" as const, data: msg("m4", "2024-01-01T00:05:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "m2", "a1", "m3", "m4", "a2"]);
+  });
+
+  it("no assistant message (running task): artifact stays in place", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:00Z") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "a1"]);
+  });
+
+  it("no artifacts to reorder: unchanged", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:01:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("artifact between two assistants (no user between): stays in place", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "assistant") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:00Z") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "a1", "m2"]);
+  });
+
+  it("event messages stay in place", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "message" as const, data: msg("e1", "2024-01-01T00:01:00Z", "event", "Email sent to alice@example.com") },
+      { kind: "message" as const, data: msg("e2", "2024-01-01T00:01:30Z", "event", "Issue created: Bug") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "e1", "e2", "m2"]);
+  });
+
+  it("mixed events + artifacts: events stay, artifacts move after assistant", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "message" as const, data: msg("e1", "2024-01-01T00:01:00Z", "event", "Email sent") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:30Z") },
+      { kind: "artifact" as const, data: artifact("a2", "2024-01-01T00:01:45Z") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "e1", "m2", "a1", "a2"]);
+  });
+
+  it("nap markers are never relocated", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "nap" as const, data: nap("nap-1", "2024-01-01T00:01:00Z") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:30Z") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "nap-1", "m2", "a1"]);
+  });
+
+  it("conversation grouping path: reordering works within grouped conversations", () => {
+    const msgs = [
+      { ...msgInConv("m1", "2024-01-01T00:00:00Z", "convA"), role: "user" as const },
+      { ...msgInConv("m2", "2024-01-01T02:00:00Z", "convA"), role: "assistant" as const },
+      { ...msgInConv("m3", "2024-01-02T00:00:00Z", "convB"), role: "user" as const },
+      { ...msgInConv("m4", "2024-01-02T02:00:00Z", "convB"), role: "assistant" as const },
+    ];
+    const arts = [
+      artifactInConv("a1", "2024-01-01T01:00:00Z", "convA"),
+      artifactInConv("a2", "2024-01-02T01:00:00Z", "convB"),
+    ];
+    const naps = [nap("nap-convA", "2024-01-01T12:00:00Z")];
+
+    const result = buildTimeline(msgs, arts, naps, "convB");
+    const ids = result.map((i) => i.data.id);
+    expect(ids).toEqual(["m1", "m2", "a1", "nap-convA", "m3", "m4", "a2"]);
+  });
+
+  it("follow-up buffer pattern: user → user → artifact → assistant reorders correctly", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:00:30Z", "user") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:00Z") },
+      { kind: "message" as const, data: msg("m3", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "m2", "m3", "a1"]);
+  });
+
+  it("empty timeline returns empty array", () => {
+    expect(reorderArtifactsAfterAssistant([])).toEqual([]);
+  });
+
+  it("artifact before any user message stays in place", () => {
+    const items = [
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:00:00Z") },
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:01:00Z", "user") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["a1", "m1", "m2"]);
+  });
+
+  it("relative order preserved: user → artifact1 → artifact2 → assistant keeps artifact order", () => {
+    const items = [
+      { kind: "message" as const, data: msg("m1", "2024-01-01T00:00:00Z", "user") },
+      { kind: "artifact" as const, data: artifact("a1", "2024-01-01T00:01:00Z") },
+      { kind: "artifact" as const, data: artifact("a2", "2024-01-01T00:01:30Z") },
+      { kind: "message" as const, data: msg("m2", "2024-01-01T00:02:00Z", "assistant") },
+    ];
+    const result = reorderArtifactsAfterAssistant(items);
+    expect(result.map((i) => i.data.id)).toEqual(["m1", "m2", "a1", "a2"]);
   });
 });
 
