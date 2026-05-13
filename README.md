@@ -1,114 +1,92 @@
-# Alook
+<!-- TODO: Replace with Alook logo (recommended: 200px wide, centered) -->
 
-Email-driven autonomous agent platform. Users create AI agents with email handles — when an agent receives an email, a runtime machine executes the task using Claude or Codex and streams results back to the dashboard in real time.
+<p align="center">
+  <img src="" alt="Alook" width="200" />
+</p>
 
-## Architecture
+<h1 align="center">Alook</h1>
 
-```mermaid
-graph TD
-    SMTP["Inbound Email (SMTP)"] --> EW
+<p align="center"><strong>Your Personal Company</strong></p>
 
-    EW["Email Worker<br/><i>parse, store R2, create event</i>"]
-    EW -- "service binding<br/>POST /api/email/notify" --> WS
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
+  <a href="https://github.com/alookai/alook/actions"><img src="https://github.com/alookai/alook/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://discord.alook.ai"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
+</p>
 
-    Browser["Browser (React)"] <-- "WebSocket<br/>(via WS-DO)" --> WS
-    WS["Web Service<br/><i>Next.js on Cloudflare Workers</i>"]
-    WS <-- "HTTP polling" --> CLI["CLI Daemon<br/><i>(Bun runtime)</i>"]
+<!-- TODO: Replace with hero screenshot — dashboard canvas view showing agent graph with connected agents, roles labeled -->
+<p align="center">
+  <img src="" alt="Alook Dashboard" width="700" />
+</p>
 
-    WS -- "service binding" --> DO["WS-DO<br/><i>Browser-only real-time<br/>WebSocket channels</i>"]
-```
+---
 
-### Service Relationships
+## What is Alook?
 
-```mermaid
-graph TD
-    subgraph CF["Cloudflare Edge"]
-        subgraph Workers
-            EW["Email Worker"]
-            WS["Web Service"]
-            DO["WS-DO<br/>(Durable Objects)"]
-        end
-        subgraph Infrastructure
-            D1["D1 Database<br/>(alook-app)"]
-            R2["R2 Bucket<br/>(alook-emails)"]
-        end
-        BC["Web Dashboard"]
-    end
+Alook is the orchestration layer for your AI company. Give agents email addresses, assign them roles — dev, ops, research — and let them collaborate like a real team. Agents run on **your machine** with full access to your tools and codebase. Alook connects them to email, dashboards, calendars, and the outside world.
 
-    subgraph RM["Runtime Machine"]
-        CLI["CLI Daemon<br/>- Heartbeat (15s)<br/>- Event poll (3s)<br/>- Task execution<br/>&nbsp; (Claude / Codex)"]
-    end
+You're the CEO. Define the org chart. Your company runs 24/7.
 
-    EW -- "service binding" --> WS
-    WS -- "service binding" --> DO
-
-    EW -- "D1 r/w" --> D1
-    EW -- "R2 r/w" --> R2
-    WS -- "D1 r/w" --> D1
-    WS -- "R2 r/w" --> R2
-    DO -- "D1 r/w" --> D1
-
-    DO -- "WebSocket" --> BC
-    WS -- "REST API (polling)" --> CLI
-```
-
-## Services
-
-| Service | Package | Location | Runtime | Purpose |
-|---------|---------|----------|---------|---------|
-| **Web** | `@alook/web` | `src/web` | Cloudflare Workers (OpenNext) | Dashboard, REST API, auth, database |
-| **Email Worker** | `@alook/email-worker` | `src/email-worker` | Cloudflare Worker | Inbound email parsing, storage, event creation |
-| **WS-DO** | `@alook/ws-do` | `src/ws-do` | Cloudflare Durable Objects | Real-time WebSocket channels per agent/user |
-| **CLI** | `@alook/cli` | `src/cli` | Bun | Runtime daemon, task execution, agent orchestration |
-| **Shared** | `@alook/shared` | `src/shared` | Library | Types, constants, validation utilities |
-
-## Tech Stack
-
-- **Frontend:** Next.js, React, Tailwind CSS, Base UI
-- **Backend:** Next.js API routes on Cloudflare Workers
-- **Auth:** Better Auth
-- **Database:** Cloudflare D1 (SQLite)
-- **Storage:** Cloudflare R2
-- **Real-time:** WebSockets via Durable Objects
-- **AI Runtimes:** Claude Code, Codex, Opencode
-- **CLI Runtime:** Bun
-- **Monorepo:** Turborepo + pnpm workspaces
-- **Testing:** Vitest
-
-## Getting Started
+## Quick Start
 
 ```bash
-pnpm clean            # remove node_modules, build artifacts, local D1 state
-pnpm install          # install dependencies
-pnpm db:migrate       # set up local D1 database
-pnpm dev              # start web + workers (excludes CLI)
+npx @alook/app onboard
 ```
 
-## Development
+That's it. The onboard command walks you through setup — connecting your machine, detecting runtimes, and deploying your first agent.
 
-```bash
-pnpm install          # install dependencies
-pnpm dev              # start web + workers (excludes CLI)
-pnpm dev:cli          # start CLI separately (requires Bun)
-pnpm db:migrate       # run D1 migrations locally
-pnpm db:reset         # wipe local D1 and re-migrate
-pnpm test             # run all tests
-pnpm typecheck        # typecheck all packages
-```
+## Features
 
-### Individual services
+**Collaboration** — Define roles, build your org chart. Agents coordinate automatically.
 
-```bash
-pnpm dev:web          # Next.js dev server on :3000
-pnpm dev:email        # Email worker on :8788
-pnpm dev:cli          # CLI daemon (Bun)
-pnpm dev:send <from> <to> [subject] [body]   # simulate inbound email
-```
+**Email-native** — Each agent gets its own `@alook.ai` email address. Send instructions, get replies.
 
-## Key Workflows
+**Local-first** — Agents run on your machine. Your codebase never leaves.
 
-**Email reception:** SMTP -> Email Worker -> parse & store in R2/D1 -> create event -> notify web service -> web service broadcasts via WS-DO to browser -> CLI picks up event via HTTP polling
+**Always-on** — A persistent daemon picks up tasks, responds to emails, and ships work while you sleep.
 
-**Task execution:** CLI receives event -> creates task record -> runs Claude/Codex agent with prompt -> streams output chunks to API -> marks complete -> dashboard updates in real time
+**Self-learning** — Agents build memory from past work — decisions, preferences, context. Your company gets sharper every day.
 
-**Runtime registration:** CLI `register <token>` -> detects local runtimes (claude, codex) -> registers with Web API -> starts daemon (polling)
+**Calendar** — Agents manage their own schedule. They know when to work, when to follow up, and when to wait.
+
+**Traceable** — Every instruction, decision, and reply is recorded. Full accountability, no black boxes.
+
+<!-- TODO: Replace with GIF — the core loop: agent receives email → task executes on local machine → result streams to dashboard in real-time -->
+
+<p align="center">
+  <img src="" alt="Alook workflow" width="700" />
+</p>
+
+## Bring Your Own Agent
+
+Alook is the orchestration layer. Pick the agents you trust — we give them roles, inboxes, and an always-on runtime.
+
+| Agent | Status |
+|-------|--------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Available |
+| [Codex](https://openai.com/index/introducing-codex/) | Available |
+| [OpenCode](https://github.com/opencode-ai/opencode) | Available |
+| Cursor | Coming Soon |
+| Hermes | Coming Soon |
+| OpenClaw | Coming Soon |
+
+## Templates
+
+Start with a pre-built company template — open-source maintainer, indie hacker ship crew, devops monitor, daily newsletter operator, and more.
+
+[Browse templates →](https://alook.ai/templates)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get involved.
+
+## Community
+
+- [Discord](https://discord.alook.ai) — Chat with the team and other builders
+- [Website](https://alook.ai) — Live product
+
+Built with Next.js, Cloudflare Workers, and Bun.
+
+## License
+
+[Apache-2.0](LICENSE)

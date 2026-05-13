@@ -105,11 +105,13 @@ export function AgentStatusBadge({ isOnline, taskCount, agentId }: AgentStatusBa
         }
       >
         <StatusDot online />
-        {taskCount > 0 && (
+        {taskCount > 0 ? (
           <>
             <span className="hidden sm:inline">Working</span>
             <span className="tabular-nums">{taskCount}</span>
           </>
+        ) : (
+          <span className="hidden sm:inline text-muted-foreground/40">Online</span>
         )}
       </PopoverTrigger>
       <PopoverContent className="w-72 p-1">

@@ -16,12 +16,12 @@ const ISSUE_NOTICE =
   " Use `alook issue show --agent_id <your_agent_id> --issue_id <issue_id>` to read full context." +
   " Use `alook issue update --agent_id <your_agent_id> --issue_id <issue_id> --status <status>` to change status." +
   " Use `alook issue comment --agent_id <your_agent_id> --issue_id <issue_id> --body <text>` to leave a comment." +
-  " CRITICAL — You MUST update the issue status before you finish. This is NOT optional:" +
+  " CRITICAL — You MUST manage the issue status correctly. This is NOT optional:" +
   " 1. Set status to 'in_progress' when you start working." +
-  " 2. Set status to 'review' as your LAST action before exiting — this means your work is done and ready for the owner to review. You cannot improve the issue further without user feedback." +
-  " If you delegated work to colleagues, wait for their responses, then set 'review' once everything is complete." +
-  " NEVER exit without updating the status. A task left in 'in_progress' is a failed task." +
-  " Always leave a comment summarizing what you did before changing status to 'review'.";
+  " 2. If you complete the work yourself: leave a summary comment, then set status to 'review' as your last action. 'review' means there is actual completed work (code, artifact, result) ready for the owner to look at." +
+  " 3. If you delegated work to colleagues and are waiting for their response: KEEP status as 'in_progress' and exit. This is expected — you will be woken up when they reply. Set 'review' only after all delegated work is confirmed complete." +
+  " 4. NEVER set 'review' unless there is concrete completed work for the owner to review. Sending a plan to a colleague is NOT completed work." +
+  " NEVER exit without doing at least one of: updating the status, or leaving a comment explaining what you did and what you're waiting for.";
 
 function buildDmNotice(name: string, email: string): string {
   return (
