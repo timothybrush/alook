@@ -1,17 +1,18 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import Link from "next/link";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { listInboxItems, type InboxItem } from "@/lib/api";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useInboxCount } from "@/contexts/inbox-count-context";
+import { useAgentChatSheet } from "@/contexts/agent-chat-sheet-context";
 import { AgentAvatar } from "@/components/avatar";
 import { relativeTime } from "@/lib/time";
 import { getInboxFilterTypes } from "@/lib/inbox-filter";
 import { Inbox, ArrowUpRight } from "lucide-react";
+import Link from "next/link";
 
 function InboxPopoverRow({
   item,
@@ -20,10 +21,10 @@ function InboxPopoverRow({
 }: {
   item: InboxItem;
   slug: string;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
 }) {
   return (
-    <Link
+    <a
       href={`/w/${slug}/agents/${item.agent_id}?conv=${item.id}`}
       onClick={onClick}
       className="block w-full py-1.5 px-2 hover:bg-muted rounded-md transition-colors cursor-pointer"
@@ -40,7 +41,7 @@ function InboxPopoverRow({
       <p className="text-xs text-muted-foreground truncate mt-0.5 pl-8">
         {item.root_prompt ?? item.title}
       </p>
-    </Link>
+    </a>
   );
 }
 
@@ -55,6 +56,7 @@ export function InboxPopover({
 }) {
   const { slug, workspaceId } = useWorkspace();
   const { count: inboxCount, decrement } = useInboxCount();
+  const { openAgentChat } = useAgentChatSheet();
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -75,11 +77,14 @@ export function InboxPopover({
     }
   }, [workspaceId]);
 
-  const handleRowClick = () => {
+  const handleRowClick = useCallback((item: InboxItem, e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
     decrement();
     setOpen(false);
     onNavigate?.();
-  };
+    openAgentChat(item.agent_id, { conversationId: item.id });
+  }, [decrement, onNavigate, openAgentChat]);
 
   return (
     <Popover
@@ -149,7 +154,7 @@ export function InboxPopover({
                   key={item.id}
                   item={item}
                   slug={slug}
-                  onClick={handleRowClick}
+                  onClick={(e) => handleRowClick(item, e)}
                 />
               ))}
             </div>

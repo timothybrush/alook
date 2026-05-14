@@ -393,6 +393,21 @@ export default function IssuesPage() {
           }
         }
       }
+      if (msg.type === "conversation.message"
+          && msg.message.role === "event"
+          && msg.message.content.startsWith("Issue status changed:")
+          && !pendingStatusUpdate.current
+          && msg.conversationId !== detailConvIdRef.current) {
+        const match = msg.message.content.match(/-> (\w+)/);
+        if (match) {
+          const newStatus = match[1] as Issue["status"];
+          setIssues((prev) => prev.map((i) =>
+            i.conversation_id === msg.conversationId
+              ? { ...i, status: newStatus, updated_at: msg.message.created_at }
+              : i
+          ));
+        }
+      }
       if (msg.type === "issue.comment" && selectedIdRef.current === msg.issueId) {
         setDetail((prev) => {
           if (!prev) return prev;

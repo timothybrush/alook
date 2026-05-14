@@ -107,6 +107,8 @@ export function AgentEditForm({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savingInstructionsRef = useRef(false);
 
+  const scheduleInstructionSaveRef = useRef<() => void>(() => {});
+
   const flushInstructions = useCallback(async () => {
     if (savingInstructionsRef.current) return;
     const current = instructionsRef.current;
@@ -119,6 +121,9 @@ export function AgentEditForm({
       toast.error(err instanceof Error ? err.message : "Failed to save instructions");
     } finally {
       savingInstructionsRef.current = false;
+      if (instructionsRef.current !== savedInstructionsRef.current) {
+        scheduleInstructionSaveRef.current();
+      }
     }
   }, [agent.id, workspaceId]);
 
@@ -126,6 +131,10 @@ export function AgentEditForm({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(flushInstructions, DEBOUNCE_MS);
   }, [flushInstructions]);
+
+  useEffect(() => {
+    scheduleInstructionSaveRef.current = scheduleInstructionSave;
+  }, [scheduleInstructionSave]);
 
   const handleInstructionChange = useCallback(
     (next: string) => {
@@ -156,10 +165,16 @@ export function AgentEditForm({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (instructionsRef.current !== savedInstructionsRef.current) {
-        void flushInstructions();
+        const params = new URLSearchParams({ workspace_id: workspaceId });
+        fetch(`/api/agents/${agent.id}?${params}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instructions: instructionsRef.current }),
+          keepalive: true,
+        });
       }
     };
-  }, [flushInstructions]);
+  }, [agent.id, workspaceId]);
 
   const selectedRuntime = runtimes.find((r) => r.id === runtimeId);
   const providerModels =

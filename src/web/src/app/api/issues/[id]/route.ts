@@ -143,12 +143,17 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
   if (!updated) return writeError("issue not found", 404);
 
   if (body.status && body.status !== existing.status && existing.conversationId) {
-    await queries.message.createMessage(db, {
+    const eventMsg = await queries.message.createMessage(db, {
       conversationId: existing.conversationId,
       role: "event",
       content: `Issue status changed: ${existing.status} -> ${body.status}`,
       metadata: JSON.stringify({ issueId: existing.id }),
     });
+    broadcastToUser(ctx.userId, {
+      type: "conversation.message",
+      conversationId: existing.conversationId,
+      message: messageToResponse(eventMsg),
+    }).catch(() => {});
   }
 
   return writeJSON(issueToResponse(updated));

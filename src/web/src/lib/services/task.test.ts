@@ -486,6 +486,9 @@ describe("TaskService", () => {
       agentQ.updateAgentStatus.mockResolvedValue(undefined);
       issueQ.getIssueByConversation.mockResolvedValue({ id: "iss_1", status: "in_progress", conversationId: "c1" });
       issueQ.updateIssue.mockResolvedValue({ id: "iss_1", status: "failed", conversationId: "c1" });
+      const eventMsg = { id: "m1", conversationId: "c1", role: "event", content: "Issue status changed: in_progress -> failed" };
+      messageQ.createMessage.mockResolvedValueOnce(undefined).mockResolvedValueOnce(eventMsg);
+      conversationQ.getConversation.mockResolvedValue({ id: "c1", userId: "u1", workspaceId: "w1" });
 
       await service.failTask("t1", "w1", "something went wrong");
 
@@ -503,6 +506,11 @@ describe("TaskService", () => {
         taskId: "t1",
         metadata: JSON.stringify({ issueId: "iss_1" }),
       });
+      expect(broadcastToUser).toHaveBeenCalledWith("u1", expect.objectContaining({
+        type: "conversation.message",
+        conversationId: "c1",
+        message: eventMsg,
+      }));
     });
   });
 

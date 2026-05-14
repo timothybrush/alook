@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Sheet,
   SheetContent,
@@ -10,21 +11,27 @@ import {
 import type { Agent } from "@alook/shared";
 import { AnimatedAvatar, parseAvatarUrl } from "@/components/avatar";
 import { useAgentContext } from "@/contexts/agent-context";
+import { useWorkspace } from "@/contexts/workspace-context";
 import { ChannelBar } from "@/components/channel-bar";
 import { AgentChatView } from "@/components/agent-chat/agent-chat-view";
+import { ArrowUpRight } from "lucide-react";
 
 interface AgentChatSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   agent: Agent | null;
+  targetConvId?: string | null;
+  scrollToTaskId?: string | null;
 }
 
 const MIN_WIDTH = 320;
 const MAX_WIDTH_RATIO = 0.8;
 const DEFAULT_WIDTH = 480;
 
-export function AgentChatSheet({ open, onOpenChange, agent }: AgentChatSheetProps) {
+export function AgentChatSheet({ open, onOpenChange, agent, targetConvId, scrollToTaskId }: AgentChatSheetProps) {
   const { runtimes, activeTaskCounts } = useAgentContext();
+  const { slug } = useWorkspace();
+  const router = useRouter();
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const dragging = useRef(false);
 
@@ -79,16 +86,45 @@ export function AgentChatSheet({ open, onOpenChange, agent }: AgentChatSheetProp
                 <span className="text-xs text-muted-foreground truncate">{agent.email_handle}@alook.ai</span>
               )}
             </div>
+            {agent && (() => {
+              const params = new URLSearchParams();
+              if (scrollToTaskId) params.set("task", scrollToTaskId);
+              if (targetConvId) params.set("conv", targetConvId);
+              const qs = params.toString();
+              const fullPageUrl = `/w/${slug}/agents/${agent.id}${qs ? `?${qs}` : ""}`;
+              return (
+                <a
+                  href={fullPageUrl}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+                    e.preventDefault();
+                    onOpenChange(false);
+                    router.push(fullPageUrl);
+                  }}
+                  className="shrink-0 flex items-center justify-center size-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  title="Open full page"
+                >
+                  <ArrowUpRight className="size-4" />
+                </a>
+              );
+            })()}
           </div>
         </SheetHeader>
 
-        <div className="px-4 pb-2">
-          <ChannelBar />
-        </div>
+        {!targetConvId && (
+          <div className="px-4 pb-2">
+            <ChannelBar />
+          </div>
+        )}
 
         {agent && (
           <div className="flex-1 overflow-hidden flex flex-col">
-            <AgentChatView agentId={agent.id} />
+            <AgentChatView
+              key={`${agent.id}-${targetConvId ?? ""}`}
+              agentId={agent.id}
+              targetConvId={targetConvId}
+              scrollToTaskId={scrollToTaskId}
+            />
           </div>
         )}
       </SheetContent>

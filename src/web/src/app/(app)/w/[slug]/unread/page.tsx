@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import Link from "next/link";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useAgentContext } from "@/contexts/agent-context";
 import { listInboxItems, markAllInboxRead, type InboxItem } from "@/lib/api";
 import { useInboxCount } from "@/contexts/inbox-count-context";
+import { useAgentChatSheet } from "@/contexts/agent-chat-sheet-context";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -50,11 +50,11 @@ function TypeBadge({ type }: { type: string | null }) {
   );
 }
 
-function InboxRow({ item, slug, onClick }: { item: InboxItem; slug: string; onClick?: () => void }) {
+function InboxRow({ item, slug, onClick }: { item: InboxItem; slug: string; onClick?: (e: React.MouseEvent) => void }) {
   const statusLabel = item.root_task_status === "failed" ? "Failed" : "Completed";
 
   return (
-    <Link
+    <a
       href={`/w/${slug}/agents/${item.agent_id}?conv=${item.id}`}
       onClick={onClick}
       className="block px-4 py-3 border-b border-border/30 hover:bg-accent/30 transition-colors duration-150 cursor-pointer"
@@ -86,7 +86,7 @@ function InboxRow({ item, slug, onClick }: { item: InboxItem; slug: string; onCl
           </p>
         </div>
       </div>
-    </Link>
+    </a>
   );
 }
 
@@ -112,6 +112,7 @@ export default function InboxPage() {
   const { slug, workspaceId } = useWorkspace();
   const { subscribeWs } = useAgentContext();
   const { count, refresh: refreshInboxCount, decrement: decrementInboxCount } = useInboxCount();
+  const { openAgentChat } = useAgentChatSheet();
 
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -302,7 +303,17 @@ export default function InboxPage() {
         ) : (
           <>
             {items.map((item) => (
-              <InboxRow key={item.id} item={item} slug={slug} onClick={decrementInboxCount} />
+              <InboxRow
+                key={item.id}
+                item={item}
+                slug={slug}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                  e.preventDefault();
+                  decrementInboxCount();
+                  openAgentChat(item.agent_id, { conversationId: item.id });
+                }}
+              />
             ))}
             {loadingMore && <SkeletonRow promptWidth="50%" />}
           </>

@@ -196,13 +196,26 @@ export class TaskService {
     const updated = await issueQueries.updateIssue(this.db, issue.id, task.workspaceId, { status });
     if (!updated) return;
 
-    await messageQueries.createMessage(this.db, {
+    const eventMsg = await messageQueries.createMessage(this.db, {
       conversationId: task.conversationId,
       role: "event",
       content: `Issue status changed: ${issue.status} -> ${status}`,
       taskId: task.id,
       metadata: JSON.stringify({ issueId: issue.id }),
     });
+
+    try {
+      const conversation = await conversationQueries.getConversation(this.db, task.conversationId, task.workspaceId);
+      if (conversation) {
+        broadcastToUser(conversation.userId, {
+          type: "conversation.message",
+          conversationId: task.conversationId,
+          message: messageToResponse(eventMsg),
+        }).catch(() => {});
+      }
+    } catch {
+      // non-critical: don't let broadcast failure block task lifecycle
+    }
   }
 
   async supersedeTask(taskId: string, workspaceId: string) {

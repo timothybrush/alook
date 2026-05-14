@@ -30,6 +30,7 @@ import type { Agent, AgentLink } from "@alook/shared";
 import { useAgentContext } from "@/contexts/agent-context";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useAgentChatSheet } from "@/contexts/agent-chat-sheet-context";
 import { Button } from "@/components/ui/button";
 import { AgentPreviewCard } from "@/components/agent-preview-card";
 import {
@@ -46,7 +47,6 @@ import { LinkSidecar } from "@/components/canvas/link-sidecar";
 import { ActiveTasksFloat } from "@/components/canvas/active-tasks-float";
 import { UpcomingEventsFloat } from "@/components/canvas/upcoming-events-float";
 import { getAutoLayout } from "@/components/canvas/auto-layout";
-import { AgentChatSheet } from "@/components/canvas/agent-chat-sheet";
 
 const nodeTypes = { agent: AgentNode };
 const edgeTypes = { link: LinkEdge };
@@ -510,13 +510,11 @@ export default function HomePage() {
   const { agents, loading } = useAgentContext();
   const { workspaceId } = useWorkspace();
   const isMobile = useIsMobile();
-  const [chatSheetAgent, setChatSheetAgent] = useState<Agent | null>(null);
-  const [chatSheetOpen, setChatSheetOpen] = useState(false);
+  const { openAgentChat } = useAgentChatSheet();
 
   const handleAgentClick = useCallback((agent: Agent) => {
-    setChatSheetAgent(agent);
-    setChatSheetOpen(true);
-  }, []);
+    openAgentChat(agent.id);
+  }, [openAgentChat]);
 
   if (loading) {
     return (
@@ -544,18 +542,12 @@ export default function HomePage() {
   }
 
   if (isMobile) {
-    return (
-      <>
-        <MobileAgentList onAgentClick={handleAgentClick} />
-        <AgentChatSheet open={chatSheetOpen} onOpenChange={setChatSheetOpen} agent={chatSheetAgent} />
-      </>
-    );
+    return <MobileAgentList onAgentClick={handleAgentClick} />;
   }
 
   return (
     <ReactFlowProvider>
       <AgentCanvas onAgentClick={handleAgentClick} />
-      <AgentChatSheet open={chatSheetOpen} onOpenChange={setChatSheetOpen} agent={chatSheetAgent} />
     </ReactFlowProvider>
   );
 }

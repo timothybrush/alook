@@ -263,6 +263,28 @@ export function IssueSheet({
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onUpdateRef = useRef(onUpdate);
   useEffect(() => { onUpdateRef.current = onUpdate; }, [onUpdate]);
+  const titleRef2 = useRef(title);
+  useEffect(() => { titleRef2.current = title; }, [title]);
+  const descriptionRef2 = useRef(description);
+  useEffect(() => { descriptionRef2.current = description; }, [description]);
+  const issueRef = useRef(issue);
+  useEffect(() => { issueRef.current = issue; }, [issue]);
+
+  const flushAutoSave = useCallback(() => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = null;
+    const iss = issueRef.current;
+    if (!iss) return;
+    const titleChanged = titleRef2.current !== iss.title;
+    const descChanged = descriptionRef2.current !== (iss.description ?? "");
+    if (!titleChanged && !descChanged) return;
+    if (!titleRef2.current.trim()) return;
+    const patch: { title?: string; description?: string } = {};
+    if (titleChanged) patch.title = titleRef2.current.trim();
+    if (descChanged) patch.description = descriptionRef2.current.trim();
+    onUpdateRef.current?.(iss.id, patch);
+  }, []);
+
   useEffect(() => {
     if (mode !== "detail" || !issue || !open) return;
     const titleChanged = title !== issue.title;
@@ -271,15 +293,19 @@ export function IssueSheet({
     if (!title.trim()) return;
 
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => {
-      const patch: { title?: string; description?: string } = {};
-      if (titleChanged) patch.title = title.trim();
-      if (descChanged) patch.description = description.trim();
-      onUpdateRef.current?.(issue.id, patch);
-    }, 500);
+    autoSaveTimer.current = setTimeout(flushAutoSave, 500);
 
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
-  }, [title, description, mode, issue, open]);
+  }, [title, description, mode, issue, open, flushAutoSave]);
+
+  // Flush pending auto-save when sheet closes
+  const prevOpenRef = useRef(open);
+  useEffect(() => {
+    if (prevOpenRef.current && !open && mode === "detail") {
+      flushAutoSave();
+    }
+    prevOpenRef.current = open;
+  }, [open, mode, flushAutoSave]);
 
   // --- Title auto-resize ---
   const resizeTitle = useCallback((el?: HTMLTextAreaElement | null) => {
