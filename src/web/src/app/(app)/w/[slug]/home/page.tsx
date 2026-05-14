@@ -26,7 +26,7 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
-import type { AgentLink } from "@alook/shared";
+import type { Agent, AgentLink } from "@alook/shared";
 import { useAgentContext } from "@/contexts/agent-context";
 import { useWorkspace } from "@/contexts/workspace-context";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -46,6 +46,7 @@ import { LinkSidecar } from "@/components/canvas/link-sidecar";
 import { ActiveTasksFloat } from "@/components/canvas/active-tasks-float";
 import { UpcomingEventsFloat } from "@/components/canvas/upcoming-events-float";
 import { getAutoLayout } from "@/components/canvas/auto-layout";
+import { AgentChatSheet } from "@/components/canvas/agent-chat-sheet";
 
 const nodeTypes = { agent: AgentNode };
 const edgeTypes = { link: LinkEdge };
@@ -73,7 +74,7 @@ function savePositions(workspaceId: string, nodes: Node[]) {
   } catch { }
 }
 
-function AgentCanvas() {
+function AgentCanvas({ onAgentClick }: { onAgentClick?: (agent: Agent) => void }) {
   const router = useRouter();
   const { agents, runtimes, loading, activeTaskCounts } = useAgentContext();
   const { slug, workspaceId } = useWorkspace();
@@ -326,9 +327,14 @@ function AgentCanvas() {
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
       const nodeData = node.data as unknown as AgentNodeData;
-      router.push(`/w/${slug}/agents/${nodeData.agent.id}`);
+      setSidecarOpen(false);
+      if (onAgentClick) {
+        onAgentClick(nodeData.agent);
+      } else {
+        router.push(`/w/${slug}/agents/${nodeData.agent.id}`);
+      }
     },
-    [router, slug],
+    [router, slug, onAgentClick],
   );
 
   const connectionLineStyle = useMemo(
@@ -435,7 +441,7 @@ function AgentCanvas() {
   );
 }
 
-function MobileAgentList() {
+function MobileAgentList({ onAgentClick }: { onAgentClick?: (agent: Agent) => void }) {
   const router = useRouter();
   const { agents, runtimes, loading, activeTaskCounts } = useAgentContext();
   const { slug } = useWorkspace();
@@ -450,6 +456,14 @@ function MobileAgentList() {
     );
   }
 
+  const handleClick = (agent: Agent) => {
+    if (onAgentClick) {
+      onAgentClick(agent);
+    } else {
+      router.push(`/w/${slug}/agents/${agent.id}`);
+    }
+  };
+
   return (
     <div className="relative flex-1 flex flex-col">
       <div className="flex flex-col gap-1 p-4 overflow-y-auto thin-scrollbar">
@@ -462,11 +476,11 @@ function MobileAgentList() {
               role="button"
               tabIndex={0}
               className="flex items-center w-full rounded-xl px-3 py-2.5 hover:bg-accent/50 active:bg-accent/70 transition-colors cursor-pointer text-left"
-              onClick={() => router.push(`/w/${slug}/agents/${agent.id}`)}
+              onClick={() => handleClick(agent)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  router.push(`/w/${slug}/agents/${agent.id}`);
+                  handleClick(agent);
                 }
               }}
             >
@@ -496,6 +510,13 @@ export default function HomePage() {
   const { agents, loading } = useAgentContext();
   const { workspaceId } = useWorkspace();
   const isMobile = useIsMobile();
+  const [chatSheetAgent, setChatSheetAgent] = useState<Agent | null>(null);
+  const [chatSheetOpen, setChatSheetOpen] = useState(false);
+
+  const handleAgentClick = useCallback((agent: Agent) => {
+    setChatSheetAgent(agent);
+    setChatSheetOpen(true);
+  }, []);
 
   if (loading) {
     return (
@@ -523,12 +544,18 @@ export default function HomePage() {
   }
 
   if (isMobile) {
-    return <MobileAgentList />;
+    return (
+      <>
+        <MobileAgentList onAgentClick={handleAgentClick} />
+        <AgentChatSheet open={chatSheetOpen} onOpenChange={setChatSheetOpen} agent={chatSheetAgent} />
+      </>
+    );
   }
 
   return (
     <ReactFlowProvider>
-      <AgentCanvas />
+      <AgentCanvas onAgentClick={handleAgentClick} />
+      <AgentChatSheet open={chatSheetOpen} onOpenChange={setChatSheetOpen} agent={chatSheetAgent} />
     </ReactFlowProvider>
   );
 }

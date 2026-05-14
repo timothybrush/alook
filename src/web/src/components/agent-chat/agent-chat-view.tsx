@@ -295,16 +295,24 @@ function ArtifactCard({ artifact, version, hasDuplicates, onClick }: { artifact:
   );
 }
 
-export function AgentChatView() {
+export function AgentChatView({
+  agentId: propAgentId,
+  targetConvId: propTargetConvId,
+  scrollToTaskId: propScrollToTaskId,
+}: {
+  agentId?: string;
+  targetConvId?: string | null;
+  scrollToTaskId?: string | null;
+}) {
   const params = useParams();
   const searchParams = useSearchParams();
   const { workspaceId, slug } = useWorkspace();
   const { agents, agentLinks, activeTaskCounts, subscribeWs } = useAgentContext();
   const { refresh: refreshInboxCount } = useInboxCount();
-  const { activeChannel, loading: channelLoading } = useChannel();
-  const agentId = params.id as string;
-  const scrollToTaskId = searchParams.get("task");
-  const targetConvId = searchParams.get("conv");
+  const { activeChannel, loading: channelLoading, setAgentId: setChannelAgentId } = useChannel();
+  const agentId = propAgentId ?? (params.id as string);
+  const scrollToTaskId = propScrollToTaskId ?? searchParams.get("task");
+  const targetConvId = propTargetConvId ?? searchParams.get("conv");
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -349,6 +357,11 @@ export function AgentChatView() {
   const [pendingFilesByMessage, setPendingFilesByMessage] = useState<Map<string, File[]>>(() => new Map());
   const [quotedText, setQuotedText] = useState<string | null>(null);
   const [selectionPopup, setSelectionPopup] = useState<{ text: string; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    setChannelAgentId(agentId);
+    return () => setChannelAgentId(null);
+  }, [agentId, setChannelAgentId]);
 
   const handleSpeechResult = useCallback((text: string) => {
     setInput((prev) => (prev ? prev + " " + text : text));

@@ -10,7 +10,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Inbox, ListFilter, CheckCheck } from "lucide-react";
-import { AvatarRenderer, parseAvatarUrl } from "@/components/avatar";
+import { AgentAvatar } from "@/components/avatar";
+import { relativeTime } from "@/lib/time";
 import {
   INBOX_FILTER_TYPES,
   INBOX_FILTER_LABELS,
@@ -23,20 +24,6 @@ import type { WsMessage } from "@alook/shared";
 
 const INBOX_LIMIT = 30;
 
-function relativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHrs = Math.floor(diffMin / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-  const diffDays = Math.floor(diffHrs / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 function StatusDot({ status }: { status: string | null }) {
   const colorClass =
     status === "completed"
@@ -45,19 +32,6 @@ function StatusDot({ status }: { status: string | null }) {
         ? "bg-destructive"
         : "bg-muted-foreground/40";
   return <span className={`size-1.5 rounded-full shrink-0 ${colorClass}`} />;
-}
-
-function AgentAvatar({ name, avatarUrl, size = 32 }: { name?: string | null; avatarUrl?: string | null; size?: number }) {
-  const config = parseAvatarUrl(avatarUrl);
-  if (config) return <AvatarRenderer config={config} size={size} className="rounded-full shrink-0" />;
-  return (
-    <span
-      className="flex items-center justify-center rounded-full bg-secondary text-xs font-medium shrink-0"
-      style={{ width: size, height: size }}
-    >
-      {(name ?? "?").charAt(0).toUpperCase()}
-    </span>
-  );
 }
 
 const TYPE_LABELS: Record<string, string> = {

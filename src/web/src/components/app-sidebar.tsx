@@ -5,10 +5,10 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useAgentContext } from "@/contexts/agent-context";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { Agent } from "@alook/shared";
-import { useInboxCount } from "@/contexts/inbox-count-context";
+import { InboxPopover } from "@/components/inbox-popover";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
-import { Monitor, SunMoon, Plus, CalendarDays, Settings, ArrowLeftRight, Home, CircleDot, Inbox, Folder, Ungroup, ArrowRightToLine } from "lucide-react";
+import { Monitor, SunMoon, Plus, CalendarDays, Settings, ArrowLeftRight, Home, CircleDot, Folder, Ungroup, ArrowRightToLine } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTheme } from "next-themes";
@@ -56,7 +56,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
 
   const { resolvedTheme, setTheme } = useTheme();
   const { activeTaskCounts: taskCounts } = useAgentContext();
-  const { count: inboxCount } = useInboxCount();
 
   // --- Folder state (applies to unpinned section only) ---
   const {
@@ -409,27 +408,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           <TooltipContent side="right">Home</TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger render={
-            <button
-              type="button"
-              onClick={() => { router.push(`${prefix}/unread`); onNavigate?.(); }}
-              className={cn(
-                "relative flex items-center justify-center size-10 rounded-xl transition-colors duration-200 cursor-pointer",
-                "text-muted-foreground hover:text-foreground hover:bg-accent",
-                isInbox && "bg-accent text-foreground"
-              )}
-            />
-          }>
-            <Inbox className="size-4" />
-            {inboxCount > 0 && (
-              <span className="absolute top-1 right-1 flex items-center justify-center min-w-3.5 h-3.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold px-0.5">
-                {inboxCount > 99 ? "99+" : inboxCount}
-              </span>
-            )}
-          </TooltipTrigger>
-          <TooltipContent side="right">Unread</TooltipContent>
-        </Tooltip>
+        <InboxPopover isActive={isInbox} onNavigate={onNavigate} />
 
         <Tooltip>
           <TooltipTrigger render={
