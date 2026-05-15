@@ -22,7 +22,7 @@ export const clientOps: TemplatePreset = {
     { title: "Consultants", description: "Manage multiple client relationships without dropping any balls." },
     { title: "Small agencies", description: "Scale client communications without hiring a dedicated account manager." },
   ],
-  baseScenario: "productivity",
+  baseScenario: "personal-assistant",
   members: [
     {
       role: "leader",

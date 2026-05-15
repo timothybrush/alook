@@ -60,24 +60,20 @@ const SCENARIO_LINK_INSTRUCTIONS: Record<string, Record<string, LinkInstruction>
       toLeader: "Report with: Status, what was done (formatted, published, submitted), next step (awaiting review, scheduled for X), and any blockers (platform issues, access problems).",
     },
   },
-  productivity: {
+  "sales-outreach": {
+    researcher: {
+      fromLeader: "Delegate prospect research: target criteria, market/industry focus, what intelligence is needed, and how it will be used (outreach, pitch, proposal).",
+      toLeader: "Report with: Status, prospect list with context and suggested angles, market signals, source reliability, and confidence levels.",
+    },
     assistant: {
-      fromLeader: "Delegate operational tasks: what action, who's the target, what's the deadline, and tone guidance for external communications.",
-      toLeader: "Report with: Status, action taken, next step (waiting for reply, follow-up on X date), and escalation flags (no response, bounced email, conflicting info).",
+      fromLeader: "Delegate outreach tasks: who to contact, messaging angle, follow-up cadence, and desired outcome.",
+      toLeader: "Report with: Status, emails sent/scheduled, responses received, pipeline updates, and deals needing attention.",
     },
   },
-  "full-team": {
-    researcher: {
-      fromLeader: "Delegate research tasks with: clear question, decision context, scope boundary, and expected output format.",
-      toLeader: "Report with: Status, summary, evidence with sources, recommendation, and confidence level. Flag low-confidence conclusions.",
-    },
-    engineer: {
-      fromLeader: "Delegate coding tasks with: clear requirement, relevant context (file paths, patterns), and expected behavior.",
-      toLeader: "Report with: Status, files changed, tests run + results, self-review findings, and concerns about correctness.",
-    },
+  "customer-support": {
     assistant: {
-      fromLeader: "Delegate operational tasks: action needed, target person/system, deadline, and tone guidance.",
-      toLeader: "Report with: Status, action taken, next step, and escalation flags.",
+      fromLeader: "Delegate support tasks: customer issue summary, urgency level, prior interaction context, and resolution approach.",
+      toLeader: "Report with: Status, response drafted/sent, issue resolution status, follow-up schedule, and recurring patterns flagged.",
     },
   },
 };

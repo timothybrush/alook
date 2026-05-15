@@ -22,7 +22,7 @@ export const executiveAssistant: TemplatePreset = {
     { title: "Executives", description: "Never miss a follow-up or walk into a meeting unprepared." },
     { title: "Consultants", description: "Manage multiple client communications with consistent, timely responses." },
   ],
-  baseScenario: "productivity",
+  baseScenario: "personal-assistant",
   members: [
     {
       role: "leader",
