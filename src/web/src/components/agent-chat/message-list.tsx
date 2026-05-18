@@ -262,13 +262,13 @@ export const MessageItem = memo(function MessageItem({
               onClick={eventEmailId ? () => onEmailClick(eventEmailId) : eventIssueId ? () => onIssueClick(eventIssueId) : undefined}
             >
               <EventMessageIcon content={msg.content} conversationType={conversationType} />
-              <span>{msg.content}</span>
+              <span className="min-w-0 wrap-anywhere">{msg.content}</span>
             </div>
           </div>
         );
       })() : !hasTaskStream ? (
         <div className={cn(
-          "group/msg flex flex-col justify-start",
+          "group/msg flex flex-col justify-start min-w-0 overflow-hidden",
           isFlagged && "bg-muted/30 rounded-lg px-2 -mx-2"
         )} data-message-id={msg.id} data-quote-source {...(msg.task_id ? { "data-task-id": msg.task_id } : {})}>
           <div className="markdown max-w-full min-w-0 px-1 py-1 text-base text-foreground">

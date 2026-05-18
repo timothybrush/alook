@@ -336,7 +336,7 @@ export function TaskStream({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 min-w-0 max-w-full">
       {/* Status badge */}
       <div className="flex items-center gap-2">
         {task.status === "running" ? (
@@ -399,7 +399,7 @@ export function TaskStream({
                   return (
                     <p
                       key={item.id}
-                      className="text-xs text-muted-foreground px-1"
+                      className="text-xs text-muted-foreground px-1 wrap-anywhere"
                     >
                       {item.type === "error" && (
                         <AlertCircle className="inline size-3 mr-1 -mt-0.5 text-destructive" />
@@ -447,10 +447,10 @@ export function TaskStream({
 
       {/* Error display */}
       {task.status === "failed" && task.error && (
-        <div className="flex items-center gap-2 mt-2">
-          <p className="text-sm text-destructive flex items-center gap-1.5">
-            <AlertCircle className="size-3.5 shrink-0" />
-            {task.error}
+        <div className="flex items-start gap-2 mt-2 max-w-full overflow-hidden">
+          <p className="text-sm text-destructive flex items-start gap-1.5 min-w-0">
+            <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+            <span className="wrap-anywhere">{task.error}</span>
           </p>
           {onRetry && (
             <button

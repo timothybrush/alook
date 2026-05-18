@@ -834,6 +834,8 @@
 /* Markdown content styles */
 .markdown {
   line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .markdown > *:first-child {
   margin-top: 0;
@@ -858,6 +860,7 @@
   margin-top: 0.5em;
   margin-bottom: 0.5em;
   max-width: 65ch;
+  overflow-wrap: anywhere;
 }
 .markdown ul,
 .markdown ol {
