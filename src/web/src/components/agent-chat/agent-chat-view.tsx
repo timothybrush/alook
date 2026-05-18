@@ -502,6 +502,8 @@ export function AgentChatView({
       setInput(localStorage.getItem(`chat-draft:${agentId}:${targetConvId ?? 'default'}`) ?? "");
       if (hasCacheHit) {
         setMessages(cached!);
+      } else {
+        setMessages([]);
       }
     });
     async function load() {
