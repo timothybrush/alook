@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cached, cachedBatch, invalidate, invalidateMany, bindCacheKV, cacheKeys, getKV } from "./cache";
+import { cached, cachedBatch, invalidate, invalidateMany, bindCacheKV, cacheKeys, getKV, throttled } from "./cache";
 
 function createMockKV() {
   const store = new Map<string, { value: string; expiration?: number }>();
@@ -77,6 +77,18 @@ describe("cache", () => {
         expect.any(Error),
       );
       warnSpy.mockRestore();
+    });
+
+    it("clamps TTL to minimum 60s for KV write", async () => {
+      const fn = vi.fn(async () => "val");
+
+      await cached("ttl-key", 5, fn);
+
+      expect(mockKV.put).toHaveBeenCalledWith(
+        "ttl-key",
+        JSON.stringify("val"),
+        { expirationTtl: 60 },
+      );
     });
 
     it("does not store null values to KV", async () => {
@@ -221,6 +233,52 @@ describe("cache", () => {
       expect(cacheKeys.machineToken("al_1234567890abcdefghij_rest")).toBe("mt:al_1234567890abcdefg");
       expect(cacheKeys.machineTokenLastUsed("al_1234567890abcdefghij_rest")).toBe("mt_lu:al_1234567890abcdefg");
       expect(cacheKeys.runtimeIds("ws1", "d1")).toBe("rt:ws1:d1");
+    });
+  });
+
+  describe("throttled()", () => {
+    it("runs fn on first call (no prior timestamp)", async () => {
+      const fn = vi.fn(async () => {});
+      const ran = await throttled("thr-key", 5, fn);
+      expect(ran).toBe(true);
+      expect(fn).toHaveBeenCalledOnce();
+      expect(mockKV.put).toHaveBeenCalledWith(
+        "thr-key",
+        expect.stringMatching(/^\d+$/),
+        { expirationTtl: 60 },
+      );
+    });
+
+    it("skips fn when within throttle interval", async () => {
+      mockKV._store.set("thr-key", { value: String(Date.now()) });
+      const fn = vi.fn(async () => {});
+      const ran = await throttled("thr-key", 5, fn);
+      expect(ran).toBe(false);
+      expect(fn).not.toHaveBeenCalled();
+    });
+
+    it("runs fn when throttle interval has elapsed", async () => {
+      mockKV._store.set("thr-key", { value: String(Date.now() - 6000) });
+      const fn = vi.fn(async () => {});
+      const ran = await throttled("thr-key", 5, fn);
+      expect(ran).toBe(true);
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it("runs fn when KV is not bound", async () => {
+      bindCacheKV(null);
+      const fn = vi.fn(async () => {});
+      const ran = await throttled("thr-key", 5, fn);
+      expect(ran).toBe(true);
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it("runs fn when KV read fails", async () => {
+      (mockKV.get as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("KV down"));
+      const fn = vi.fn(async () => {});
+      const ran = await throttled("thr-key", 5, fn);
+      expect(ran).toBe(true);
+      expect(fn).toHaveBeenCalledOnce();
     });
   });
 

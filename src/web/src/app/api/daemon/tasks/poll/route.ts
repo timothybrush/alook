@@ -14,7 +14,7 @@ import { log } from "@/lib/logger";
 export const POST = withAuth(async (req: NextRequest, ctx) => {
   const { env } = getCloudflareContext();
   const db = getDb((env as Env).DB);
-  const { cached, cachedBatch, cacheKeys } = await import("@/lib/cache");
+  const { cached, cachedBatch, cacheKeys, throttled } = await import("@/lib/cache");
 
   const [body, err] = await parseBody(req, PollRequestSchema);
   if (err) return err;
@@ -34,21 +34,20 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeJSON({ tasks: [], evicted: true });
   }
 
-  // 2. Liveness: write heartbeat to KV (fast) + D1 upsert throttled to stay under OFFLINE_THRESHOLD
-  // KV is eventually consistent across colos, so D1 must stay fresh enough as fallback.
-  // Derived from timing constants so it auto-adapts if threshold or poll interval changes.
+  // 2. Liveness: write heartbeat to KV (fast) + D1 upsert throttled via timestamp.
+  // KV heartbeat is the primary source; D1 is the cross-colo fallback.
+  // Uses timestamp-based throttle (not KV TTL) so the interval can be < 60s.
   const D1_HEARTBEAT_THROTTLE_S = Math.floor((OFFLINE_THRESHOLD_MS - POLL_INTERVAL_MS) / 1000) - 1;
-  // Non-critical — D1 transient failures should not block task polling
   const kv = (env as Env).CACHE_KV ?? null;
   if (kv) {
     kv.put(
       cacheKeys.heartbeat(ctx.workspaceId, body.daemon_id),
       new Date().toISOString(),
-      { expirationTtl: 15 },
+      { expirationTtl: 60 },
     ).catch(() => {});
   }
   try {
-    await cached(
+    await throttled(
       `hb_d1:${ctx.workspaceId}:${body.daemon_id}`,
       D1_HEARTBEAT_THROTTLE_S,
       async () => {
@@ -57,7 +56,6 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
           workspaceId: ctx.workspaceId!,
           deviceInfo: body.daemon_id,
         });
-        return "1";
       },
     );
   } catch (e) {
@@ -80,20 +78,15 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
 
   // 3b. Promote due calendar events — throttled to once per 30s per workspace
   try {
-    let calRun = false;
-    await cached(`cal:${ctx.workspaceId}`, 30, async () => {
-      calRun = true;
-      return "1";
-    }).catch(() => { calRun = true; });
-    if (calRun) {
+    await throttled(`cal:${ctx.workspaceId}`, 30, async () => {
       const enqueued = await promoteDueCalendarEventsForWorkspace(
         db,
-        ctx.workspaceId,
+        ctx.workspaceId!,
       );
       if (enqueued > 0) {
         log.info("calendar: enqueued", { workspaceId: ctx.workspaceId, enqueued });
       }
-    }
+    });
   } catch (err) {
     log.warn("calendar: promote failed", {
       workspaceId: ctx.workspaceId,
@@ -268,7 +261,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   const miscKey = `misc:${ctx.workspaceId}:${body.daemon_id}`;
   let runMisc = false;
   try {
-    await cached(miscKey, 30, async () => { runMisc = true; return "1"; });
+    runMisc = await throttled(miscKey, 30, async () => {});
   } catch { runMisc = true; }
 
   if (runMisc) {
@@ -344,11 +337,9 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   // File browse requests — expireStale throttled to 5s, but check pending every poll
   let fileRequests: FileRequestItem[] | undefined;
   try {
-    let expireRun = false;
-    await cached(`expire_fr:${ctx.workspaceId}`, 5, async () => { expireRun = true; return "1"; }).catch(() => { expireRun = true; });
-    if (expireRun) {
-      await queries.workspaceFileRequest.expireStale(db, ctx.workspaceId);
-    }
+    await throttled(`expire_fr:${ctx.workspaceId}`, 5, async () => {
+      await queries.workspaceFileRequest.expireStale(db, ctx.workspaceId!);
+    });
     const pending = await queries.workspaceFileRequest.getPendingByWorkspace(db, ctx.workspaceId);
     if (pending.length > 0) {
       fileRequests = pending.map((r) => ({

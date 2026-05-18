@@ -8,6 +8,8 @@ export function getKV(): KVNamespace | null {
   return _kv ?? null;
 }
 
+const MIN_KV_TTL = 60;
+
 export async function cached<T>(
   key: string,
   ttlSeconds: number,
@@ -26,7 +28,7 @@ export async function cached<T>(
   const value = await fn();
 
   if (value != null && kv) {
-    kv.put(key, JSON.stringify(value), { expirationTtl: ttlSeconds }).catch((err) => {
+    kv.put(key, JSON.stringify(value), { expirationTtl: Math.max(ttlSeconds, MIN_KV_TTL) }).catch((err) => {
       console.warn(`[cache] KV write failed for ${key}:`, err);
     });
   }
@@ -73,7 +75,7 @@ export async function cachedBatch<T>(
     for (const [key, value] of fetched) {
       result.set(key, value);
       if (value != null && kv) {
-        kv.put(key, JSON.stringify(value), { expirationTtl: ttlSeconds }).catch((err) => {
+        kv.put(key, JSON.stringify(value), { expirationTtl: Math.max(ttlSeconds, MIN_KV_TTL) }).catch((err) => {
           console.warn(`[cache] KV batch write failed for ${key}:`, err);
         });
       }
@@ -81,6 +83,38 @@ export async function cachedBatch<T>(
   }
 
   return result;
+}
+
+/**
+ * Timestamp-based throttle — not limited by KV's 60s minimum TTL.
+ * Stores last-run timestamp in KV; skips `fn` if within `intervalSeconds`.
+ * Returns true if `fn` ran, false if throttled.
+ */
+export async function throttled(
+  key: string,
+  intervalSeconds: number,
+  fn: () => Promise<void>,
+): Promise<boolean> {
+  const kv = getKV();
+  if (kv) {
+    try {
+      const raw = await kv.get(key);
+      if (raw) {
+        const elapsed = Date.now() - parseInt(raw, 10);
+        if (elapsed < intervalSeconds * 1000) return false;
+      }
+    } catch {}
+  }
+
+  await fn();
+
+  if (kv) {
+    kv.put(key, String(Date.now()), {
+      expirationTtl: Math.max(intervalSeconds * 10, MIN_KV_TTL),
+    }).catch(() => {});
+  }
+
+  return true;
 }
 
 export async function invalidate(key: string): Promise<void> {
