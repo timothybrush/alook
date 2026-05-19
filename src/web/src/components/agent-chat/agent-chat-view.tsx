@@ -8,15 +8,15 @@ import { Button } from "@/components/ui/button";
 import { TaskStream } from "@/components/task-stream";
 import {
   chatInit,
+  checkFreshness,
+  conversationInit,
   createConversation,
-  getConversation,
   listMessages,
   listMessagesAroundTask,
   listPreviousConversations,
   sendMessage,
   getTask,
   getTaskMessages,
-  getTaskStepCounts,
   listArtifacts,
   listBufferedMessages,
   createBufferedMessage,
@@ -32,7 +32,7 @@ import {
   flagMessage as apiFlagMessage,
   unflagMessage as apiUnflagMessage,
 } from "@/lib/api";
-import { appendCachedMessage, getCachedMessages, getCachedMessagesBefore, mergeCachedMessages } from "@/lib/chat-cache";
+import { appendCachedMessage, getCachedMessages, getCachedMessagesBefore, getCacheMeta, mergeCachedMessages } from "@/lib/chat-cache";
 import type { PreviousConversation, TraceTask } from "@/lib/api";
 import type { Artifact, Conversation, Issue, IssueComment, Message, TaskApi as Task, TaskMessage, WsMessage } from "@alook/shared";
 import { useAgentContext } from "@/contexts/agent-context";
@@ -333,7 +333,7 @@ export function AgentChatView({
   const [cancelling, setCancelling] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [taskMessages, setTaskMessages] = useState<TaskMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(true);
   const [connectionLost, setConnectionLost] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -482,7 +482,7 @@ export function AgentChatView({
     pollRef.current = null;
     pollTaskIdRef.current = null;
     let ignore = false;
-    setLoading(true);
+    setMessagesLoading(true);
     initialScrollDone.current = false;
     setActiveTask(null);
     setTaskMessages([]);
@@ -496,66 +496,91 @@ export function AgentChatView({
     setInput(localStorage.getItem(`chat-draft:${agentId}:${targetConvId ?? 'default'}`) ?? "");
     setMessages([]);
     async function load() {
+      let hasCachedMessages = false;
       try {
+        let convId: string | null = null;
+        let cacheMeta: Awaited<ReturnType<typeof getCacheMeta>> = null;
+
         if (targetConvId) {
-          const cached = await getCachedMessages(targetConvId, workspaceId);
-          if (ignore) return;
-          if (cached && cached.length > 0) {
-            setMessages(cached);
-            setLoading(false);
-          }
-          try {
-            const [conv, msgsResult, arts, buffered] = await Promise.all([
-              getConversation(targetConvId, workspaceId),
-              listMessages(targetConvId, workspaceId),
-              listArtifacts(targetConvId, workspaceId).catch(() => [] as Artifact[]),
-              listBufferedMessages(targetConvId, workspaceId).catch(() => [] as Message[]),
-            ]);
+          // Fast path: we already know the conv ID — render from cache immediately, no network needed
+          convId = targetConvId;
+          cacheMeta = await getCacheMeta(convId, workspaceId);
+          if (cacheMeta?.newestMessageId) {
+            const cached = await getCachedMessages(convId, workspaceId);
             if (ignore) return;
-            setConversation(conv);
-            setMessages((prev) => mergeMessages(prev, msgsResult.messages));
-            setHasMore(msgsResult.has_more);
-            setArtifacts(arts);
-            setBufferedMessages(buffered);
-            writeToCacheRef.current(msgsResult.messages, msgsResult.has_more).catch(() => {});
-            const taskIds = [...new Set(msgsResult.messages.filter((m) => m.role === "assistant" && m.task_id).map((m) => m.task_id!))];
-            if (taskIds.length > 0) {
-              getTaskStepCounts(taskIds, workspaceId)
-                .then((counts) => { if (!ignore) setStepCounts(counts); })
-                .catch(() => {});
+            if (cached && cached.length > 0) {
+              hasCachedMessages = true;
+              setMessages(cached);
+              setHasMore(cacheMeta.hasMore);
+              setMessagesLoading(false);
             }
-            listFlaggedMessageIds(workspaceId, targetConvId)
-              .then((r) => { if (!ignore) setFlaggedIds(new Set(r.message_ids)); })
-              .catch(() => {});
-            if (scrollToTaskId) {
-              const task = await getTask(scrollToTaskId, workspaceId).catch(() => null);
+          }
+        } else {
+          // Slow path: need server to resolve conv ID first
+          try {
+            const fresh = await checkFreshness({ agentId, channel: activeChannel }, workspaceId);
+            if (ignore) return;
+            convId = fresh.conversation_id;
+            cacheMeta = await getCacheMeta(convId, workspaceId);
+            const cacheValid = !!(cacheMeta?.newestMessageId && cacheMeta.newestMessageId === fresh.newest_message_id);
+            if (cacheValid) {
+              const cached = await getCachedMessages(convId, workspaceId);
               if (ignore) return;
-              if (task && !["completed", "failed", "cancelled", "superseded"].includes(task.status)) {
-                setActiveTask(task);
-                const tmsgs = await getTaskMessages(scrollToTaskId, workspaceId).catch(() => [] as TaskMessage[]);
-                if (ignore) return;
-                setTaskMessages(tmsgs);
-                if (tmsgs.length > 0) {
-                  lastSeqRef.current = Math.max(...tmsgs.map((m) => m.seq));
-                }
-                startPollingRef.current?.(task.id, targetConvId, lastSeqRef.current);
+              if (cached && cached.length > 0) {
+                hasCachedMessages = true;
+                setMessages(cached);
+                setHasMore(cacheMeta!.hasMore);
+                setMessagesLoading(false);
               }
             }
           } catch {
-            const data = await chatInit(agentId, workspaceId, activeChannel);
-            if (ignore) return;
-            setConversation(data.conversation);
-            setMessages((prev) => prev.length > 0 ? mergeMessages(prev, data.messages) : data.messages);
-            setHasMore(data.has_more_messages);
-            setArtifacts(data.artifacts);
-            setBufferedMessages(data.buffered_messages);
-            setHasMoreConversations(data.has_more_conversations);
+            // checkFreshness failed — fall back to chatInit below
+          }
+        }
+
+        // Phase B: full data fetch (background hydration or stale-cache refresh)
+        if (convId) {
+          const data = await conversationInit(convId, workspaceId, {
+            newestMessageId: cacheMeta?.newestMessageId ?? undefined,
+          });
+          if (ignore) return;
+          setConversation(data.conversation);
+          setHasMoreConversations(data.has_more_conversations);
+          if (!data.cache_valid && data.messages) {
+            setMessages((prev) => mergeMessages(prev, data.messages!));
             writeToCacheRef.current(data.messages, data.has_more_messages).catch(() => {});
-            listFlaggedMessageIds(workspaceId, data.conversation.id)
-              .then((r) => { if (!ignore) setFlaggedIds(new Set(r.message_ids)); })
-              .catch(() => {});
+            setHasMore(data.has_more_messages);
+          } else if (cacheMeta) {
+            setHasMore(cacheMeta.hasMore);
+          }
+          setStepCounts(data.step_counts);
+          setArtifacts(data.artifacts);
+          setBufferedMessages(data.buffered_messages);
+          setFlaggedIds(new Set(data.flagged_message_ids));
+          if (data.active_task) {
+            setActiveTask(data.active_task);
+            setTaskMessages(data.task_messages);
+            if (data.task_messages.length > 0) {
+              lastSeqRef.current = Math.max(...data.task_messages.map((m) => m.seq));
+            }
+            startPollingRef.current?.(data.active_task.id, convId, lastSeqRef.current);
+          }
+          if (scrollToTaskId) {
+            const task = await getTask(scrollToTaskId, workspaceId).catch(() => null);
+            if (ignore) return;
+            if (task && !["completed", "failed", "cancelled", "superseded"].includes(task.status)) {
+              setActiveTask(task);
+              const tmsgs = await getTaskMessages(scrollToTaskId, workspaceId).catch(() => [] as TaskMessage[]);
+              if (ignore) return;
+              setTaskMessages(tmsgs);
+              if (tmsgs.length > 0) {
+                lastSeqRef.current = Math.max(...tmsgs.map((m) => m.seq));
+              }
+              startPollingRef.current?.(task.id, convId, lastSeqRef.current);
+            }
           }
         } else {
+          // checkFreshness failed entirely — fall back to chatInit
           const data = await chatInit(agentId, workspaceId, activeChannel);
           if (ignore) return;
           setConversation(data.conversation);
@@ -568,7 +593,6 @@ export function AgentChatView({
           listFlaggedMessageIds(workspaceId, data.conversation.id)
             .then((r) => { if (!ignore) setFlaggedIds(new Set(r.message_ids)); })
             .catch(() => {});
-
           if (data.active_task) {
             setActiveTask(data.active_task);
             if (data.task_messages.length > 0) {
@@ -581,9 +605,13 @@ export function AgentChatView({
           }
         }
       } catch {
-        toast.error("Failed to load conversation");
+        if (!hasCachedMessages) {
+          toast.error("Failed to load conversation");
+        } else {
+          toast.error("Couldn't refresh conversation");
+        }
       } finally {
-        if (!ignore) setLoading(false);
+        if (!ignore) setMessagesLoading(false);
       }
     }
     load();
@@ -611,7 +639,7 @@ export function AgentChatView({
 
   // Scroll to bottom on initial load (skip if scroll-to-task/message is active)
   useEffect(() => {
-    if (!loading && messages.length > 0 && !initialScrollDone.current) {
+    if (!messagesLoading && messages.length > 0 && !initialScrollDone.current) {
       initialScrollDone.current = true;
       if (scrollToTaskId || scrollToMessageId) {
         isNearBottom.current = false;
@@ -631,11 +659,11 @@ export function AgentChatView({
         }, 50);
       }
     }
-  }, [loading, messages.length, scrollToTaskId, scrollToMessageId, propTargetConvId]);
+  }, [messagesLoading, messages.length, scrollToTaskId, scrollToMessageId, propTargetConvId]);
 
   // Scroll to task when ?task= param is present
   useEffect(() => {
-    if (!scrollToTaskId || loading || !conversation) return;
+    if (!scrollToTaskId || messagesLoading || !conversation) return;
     isNearBottom.current = false;
     scrollTargetActiveRef.current = true;
     let cancelled = false;
@@ -679,11 +707,11 @@ export function AgentChatView({
       clearTimeout(timerId);
       if (highlightTimerId) clearTimeout(highlightTimerId);
     };
-  }, [scrollToTaskId, loading, conversation, workspaceId]);
+  }, [scrollToTaskId, messagesLoading, conversation, workspaceId]);
 
   // Scroll to message when ?msg= param is present (skip if task scroll is active)
   useEffect(() => {
-    if (!scrollToMessageId || scrollToTaskId || loading || !conversation) return;
+    if (!scrollToMessageId || scrollToTaskId || messagesLoading || !conversation) return;
     isNearBottom.current = false;
     scrollTargetActiveRef.current = true;
     let cancelled = false;
@@ -712,7 +740,7 @@ export function AgentChatView({
       clearTimeout(timerId);
       if (highlightTimerId) clearTimeout(highlightTimerId);
     };
-  }, [scrollToMessageId, scrollToTaskId, loading, conversation]);
+  }, [scrollToMessageId, scrollToTaskId, messagesLoading, conversation]);
 
   // Auto-scroll when task badge appears or new task steps arrive
   const taskStatus = activeTask?.status;
@@ -930,13 +958,13 @@ export function AgentChatView({
 
   const MIN_MESSAGES = 10;
   useEffect(() => {
-    if (loading || !conversation) return;
+    if (messagesLoading || !conversation) return;
     if (messages.length >= MIN_MESSAGES || !canLoadMore) return;
     if (loadingMore) return;
     if (backfillAttemptsRef.current >= 3) return;
     backfillAttemptsRef.current += 1;
     loadOlderMessages(true);
-  }, [loading, messages.length, canLoadMore, loadingMore, conversation, loadOlderMessages]);
+  }, [messagesLoading, messages.length, canLoadMore, loadingMore, conversation, loadOlderMessages]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -1601,7 +1629,7 @@ export function AgentChatView({
 
   const isTaskActive = !!activeTask && !["completed", "failed", "cancelled", "superseded"].includes(activeTask.status);
 
-  if (loading) {
+  if (messagesLoading) {
     return (
       <>
         <div className="flex-1 overflow-y-auto px-3 md:px-5">
@@ -1640,7 +1668,7 @@ export function AgentChatView({
     );
   }
 
-  if (!conversation) {
+  if (!messagesLoading && !conversation && messages.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
         Failed to load conversation
@@ -1677,7 +1705,7 @@ export function AgentChatView({
           }}
         >
           <div className="mx-auto max-w-2xl py-6 space-y-4 min-w-0">
-            {canLoadMore && !loadingMore && (
+            {conversation && canLoadMore && !loadingMore && (
               <div className="flex justify-center py-2">
                 <button
                   onClick={() => loadOlderMessages()}

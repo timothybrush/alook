@@ -275,6 +275,51 @@ export const chatInit = (agentId: string, workspaceId: string, channel?: string)
     body: JSON.stringify({ ...(channel ? { channel } : {}) }),
   });
 
+export interface ConversationInitResponse {
+  conversation: Conversation;
+  messages: Message[] | null;
+  has_more_messages: boolean;
+  has_more_conversations: boolean;
+  has_more_artifacts: boolean;
+  artifacts: Artifact[];
+  buffered_messages: Message[];
+  flagged_message_ids: string[];
+  step_counts: Record<string, number>;
+  active_task: TaskApi | null;
+  task_messages: TaskMessage[];
+  cache_valid: boolean;
+}
+
+export const conversationInit = (
+  conversationId: string,
+  workspaceId: string,
+  opts?: { newestMessageId?: string },
+) => {
+  const extra: Record<string, string> = {};
+  if (opts?.newestMessageId) extra.newest_message_id = opts.newestMessageId;
+  return apiFetch<ConversationInitResponse>(
+    `/api/conversations/${conversationId}/init${wsQuery(workspaceId, extra)}`,
+  );
+};
+
+export interface FreshnessCheckResponse {
+  conversation_id: string;
+  newest_message_id: string | null;
+}
+
+export const checkFreshness = (
+  opts: { conversationId?: string; agentId?: string; channel?: string },
+  workspaceId: string,
+) => {
+  const extra: Record<string, string> = {};
+  if (opts.conversationId) extra.conversation_id = opts.conversationId;
+  if (opts.agentId) extra.agent_id = opts.agentId;
+  if (opts.channel) extra.channel = opts.channel;
+  return apiFetch<FreshnessCheckResponse>(
+    `/api/conversations/check-fresh${wsQuery(workspaceId, extra)}`,
+  );
+};
+
 export const deleteConversation = (id: string, workspaceId: string) =>
   apiFetch<void>(`/api/conversations/${id}${wsQuery(workspaceId)}`, { method: "DELETE" });
 
