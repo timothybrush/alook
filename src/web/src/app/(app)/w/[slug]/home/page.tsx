@@ -34,6 +34,7 @@ import { useAgentChatSheet } from "@/contexts/agent-chat-sheet-context";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { AgentPreviewCard } from "@/components/agent-preview-card";
+import { AnimatedAvatar, parseAvatarUrl } from "@/components/avatar";
 import {
   createAgentLink,
   updateAgentLink,
@@ -477,7 +478,7 @@ function MobileAgentList({ onAgentClick }: { onAgentClick?: (agent: Agent) => vo
               key={agent.id}
               role="button"
               tabIndex={0}
-              className="flex items-center w-full rounded-xl px-3 py-2.5 hover:bg-accent/50 active:bg-accent/70 transition-colors cursor-pointer text-left"
+              className="flex items-center gap-3 w-full rounded-xl px-3 py-2.5 hover:bg-accent/50 active:bg-accent/70 transition-colors cursor-pointer text-left"
               onClick={() => handleClick(agent)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -486,11 +487,24 @@ function MobileAgentList({ onAgentClick }: { onAgentClick?: (agent: Agent) => vo
                 }
               }}
             >
-              <AgentPreviewCard
-                agent={agent}
-                isOnline={isOnline}
-                activeTaskCount={activeTaskCounts[agent.id] ?? 0}
-              />
+              {(() => {
+                const avatarConfig = parseAvatarUrl(agent.avatar_url);
+                if (avatarConfig) {
+                  return <AnimatedAvatar config={avatarConfig} size={36} className="shrink-0 rounded-xl" isHovered={false} isWorking={isOnline && (activeTaskCounts[agent.id] ?? 0) > 0} />;
+                }
+                return (
+                  <div className="flex items-center justify-center size-9 rounded-xl bg-secondary text-secondary-foreground text-sm font-medium shrink-0">
+                    {agent.name.charAt(0).toUpperCase()}
+                  </div>
+                );
+              })()}
+              <div className="min-w-0 flex-1">
+                <AgentPreviewCard
+                  agent={agent}
+                  isOnline={isOnline}
+                  activeTaskCount={activeTaskCounts[agent.id] ?? 0}
+                />
+              </div>
             </div>
           );
         })}
