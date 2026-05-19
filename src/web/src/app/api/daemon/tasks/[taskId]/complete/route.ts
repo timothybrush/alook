@@ -7,7 +7,7 @@ import { taskToResponse } from "@/lib/api/responses";
 import { TaskService } from "@/lib/services/task";
 import { CompleteTaskRequestSchema } from "@alook/shared";
 import { broadcastToUser } from "@/lib/broadcast";
-import { invalidate, cacheKeys } from "@/lib/cache";
+import { invalidate, invalidateByPrefix, cacheKeys } from "@/lib/cache";
 
 export const POST = withAuth(async (req: NextRequest, ctx) => {
   if (!ctx.workspaceId) {
@@ -38,7 +38,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     );
     const dateStr = new Date().toISOString().slice(0, 10);
     invalidate(cacheKeys.overviewTaskStats(ctx.workspaceId, dateStr)).catch(() => {});
-    invalidate(cacheKeys.inboxCount(ctx.userId, ctx.workspaceId)).catch(() => {});
+    invalidateByPrefix(cacheKeys.inboxCountPrefix(ctx.userId, ctx.workspaceId)).catch(() => {});
     broadcastToUser(ctx.userId, { type: "task.updated", taskId, agentId: task.agentId, status: "completed" }).catch(() => {});
     return writeJSON(taskToResponse(task));
   } catch (e: unknown) {

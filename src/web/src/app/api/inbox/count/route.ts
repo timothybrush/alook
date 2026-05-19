@@ -21,7 +21,7 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
     : [];
   const validTypes = types.length > 0 ? types : ["user_dm_message"];
 
-  const count = await cached(cacheKeys.inboxCount(ctx.userId, ws.workspaceId), 60, () =>
+  const count = await cached(cacheKeys.inboxCount(ctx.userId, ws.workspaceId, validTypes), 60, () =>
     queries.inbox.getUnreadCount(db, ctx.userId, ws.workspaceId, validTypes)
   );
 

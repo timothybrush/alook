@@ -138,6 +138,14 @@ export async function invalidateMany(keys: string[]): Promise<void> {
   })));
 }
 
+export async function invalidateByPrefix(prefix: string): Promise<void> {
+  const kv = getKV();
+  if (!kv) return;
+  const listed = await kv.list({ prefix }).catch(() => null);
+  if (!listed || listed.keys.length === 0) return;
+  await Promise.all(listed.keys.map((k) => kv.delete(k.name).catch(() => {})));
+}
+
 export const cacheKeys = {
   machineToken: (token: string) => `mt:${token.slice(0, 20)}`,
   machineTokenLastUsed: (token: string) => `mt_lu:${token.slice(0, 20)}`,
@@ -157,5 +165,7 @@ export const cacheKeys = {
   allRuntimes: (workspaceId: string) => `runtimes:${workspaceId}`,
   allMembers: (workspaceId: string) => `members:${workspaceId}`,
   activeTaskCounts: (workspaceId: string) => `atc:${workspaceId}`,
-  inboxCount: (userId: string, workspaceId: string) => `inbox:${userId}:${workspaceId}`,
+  inboxCount: (userId: string, workspaceId: string, types?: string[]) =>
+    `inbox:${userId}:${workspaceId}:${types ? [...types].sort().join(",") : "*"}`,
+  inboxCountPrefix: (userId: string, workspaceId: string) => `inbox:${userId}:${workspaceId}:`,
 };
