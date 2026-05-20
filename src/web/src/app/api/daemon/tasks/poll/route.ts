@@ -76,6 +76,13 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
           }).catch(() => {});
         } else {
           pendingUpdate = { version: machineRow.pendingUpdateVersion };
+          await queries.machine.clearPendingUpdateVersion(db, body.daemon_id, ctx.workspaceId);
+          broadcastToUser(ctx.userId, {
+            type: "runtime.status",
+            daemonId: body.daemon_id,
+            workspaceId: ctx.workspaceId,
+            status: "online",
+          }).catch(() => {});
         }
       }
 
