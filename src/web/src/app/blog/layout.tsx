@@ -21,7 +21,7 @@ export default function BlogLayout({
       <nav className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-sm">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-1.5">
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/" className="flex items-center gap-1">
               <Image src="/alook.svg" alt="Alook" width={22} height={22} />
               <span
                 className="text-lg tracking-tight font-bold"
@@ -47,7 +47,7 @@ export default function BlogLayout({
       <footer className="border-t border-border px-6 py-12">
         <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-6 md:flex-row">
           <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/" className="flex items-center gap-1">
               <Image src="/alook.svg" alt="Alook" width={20} height={20} />
               <span
                 className="text-lg tracking-tight font-bold"

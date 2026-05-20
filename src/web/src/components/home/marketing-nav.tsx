@@ -14,7 +14,7 @@ export function MarketingNav({ isLoggedIn }: { isLoggedIn: boolean }) {
       }}
     >
       <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-2.5">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-1">
           <Image src="/alook.svg" alt="Alook" width={22} height={22} />
           <span
             className="text-lg tracking-tight"

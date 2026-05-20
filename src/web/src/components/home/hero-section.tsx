@@ -76,7 +76,7 @@ export function HeroSection({ isLoggedIn }: { isLoggedIn: boolean }) {
       <div className="hero-content relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center px-4 sm:px-6">
         {/* Brand */}
         <div className="hero-brand mb-6 flex flex-col sm:flex-row items-center gap-1.5">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <Image src="/alook.svg" alt="Alook" width={28} height={28} />
             <span
               className="text-xl tracking-tight"

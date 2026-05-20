@@ -6,21 +6,21 @@ const description =
   "Thoughts on building AI companies, agent collaboration, and the future of personal software.";
 
 export const metadata: Metadata = {
-  title: "Blog — Alook",
+  title: "Blog",
   description,
   alternates: {
     canonical: "https://alook.ai/blog",
     types: { "application/rss+xml": "/blog/feed.xml" },
   },
   openGraph: {
-    title: "Blog — Alook",
+    title: "Blog",
     description,
     url: "https://alook.ai/blog",
     images: [{ url: "/og?title=Blog", width: 1200, height: 630 }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Blog — Alook",
+    title: "Blog",
     description,
     images: ["/og?title=Blog"],
   },

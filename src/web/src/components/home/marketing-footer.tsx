@@ -57,7 +57,7 @@ export function MarketingFooter() {
     >
       <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-6 md:flex-row">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Image src="/alook.svg" alt="Alook" width={20} height={20} />
             <span
               className="text-lg tracking-tight"
