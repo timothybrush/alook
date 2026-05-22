@@ -1904,6 +1904,7 @@ export function AgentChatView({
               <textarea
                 ref={textareaRef}
                 value={input}
+                enterKeyHint="send"
                 onChange={(e) => {
                   setInput(e.target.value);
                   setCaretIndex(e.target.selectionStart);
