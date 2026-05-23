@@ -54,6 +54,18 @@ export function buildPrompt(task: Task, attachments?: Attachment[]): string {
   if (task.type === "calendar_event") {
     obj.notice = CALENDAR_NOTICE;
     const ctx = task.context as Record<string, unknown> | undefined;
+    if (ctx?.event_id != null) {
+      obj.event_id = ctx.event_id;
+    }
+    if (ctx?.datetime != null) {
+      obj.datetime = ctx.datetime;
+    }
+    if (ctx?.is_recurring !== undefined) {
+      obj.is_recurring = ctx.is_recurring;
+    }
+    if (ctx?.repeat_interval !== undefined) {
+      obj.repeat_interval = ctx.repeat_interval;
+    }
     if (ctx?.description) {
       obj.description = ctx.description;
     }

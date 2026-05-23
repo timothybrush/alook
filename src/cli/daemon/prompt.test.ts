@@ -107,12 +107,20 @@ describe("buildPrompt", () => {
     const task: Task = {
       ...makeTask("Do the standup", "calendar_event"),
       context: {
+        event_id: "ce_1",
+        datetime: "2026-04-17T09:00:00.000Z",
+        is_recurring: true,
+        repeat_interval: "1day",
         description: "Check PRs merged this week",
         scheduled_by: { name: "Gus", email: "gus@memodb.io" },
       },
     };
     const parsed = JSON.parse(buildPrompt(task));
     expect(parsed.notice).toContain("scheduled calendar event");
+    expect(parsed.event_id).toBe("ce_1");
+    expect(parsed.datetime).toBe("2026-04-17T09:00:00.000Z");
+    expect(parsed.is_recurring).toBe(true);
+    expect(parsed.repeat_interval).toBe("1day");
     expect(parsed.description).toBe("Check PRs merged this week");
     expect(parsed.scheduled_by).toEqual({ name: "Gus", email: "gus@memodb.io" });
   });
@@ -120,7 +128,13 @@ describe("buildPrompt", () => {
   it("includes only description for calendar_event when scheduled_by is absent", () => {
     const task: Task = {
       ...makeTask("Do the standup", "calendar_event"),
-      context: { description: "Check PRs merged this week" },
+      context: {
+        event_id: "ce_1",
+        datetime: "2026-04-17T09:00:00.000Z",
+        is_recurring: false,
+        repeat_interval: null,
+        description: "Check PRs merged this week",
+      },
     };
     const parsed = JSON.parse(buildPrompt(task));
     expect(parsed.notice).toContain("scheduled calendar event");
@@ -131,7 +145,13 @@ describe("buildPrompt", () => {
   it("includes only scheduled_by for calendar_event when description is absent", () => {
     const task: Task = {
       ...makeTask("Do the standup", "calendar_event"),
-      context: { scheduled_by: { name: "Gus", email: "gus@memodb.io" } },
+      context: {
+        event_id: "ce_2",
+        datetime: "2026-04-17T09:00:00.000Z",
+        is_recurring: false,
+        repeat_interval: null,
+        scheduled_by: { name: "Gus", email: "gus@memodb.io" },
+      },
     };
     const parsed = JSON.parse(buildPrompt(task));
     expect(parsed.notice).toContain("scheduled calendar event");
@@ -142,12 +162,53 @@ describe("buildPrompt", () => {
   it("omits description for calendar_event when description is empty string", () => {
     const task: Task = {
       ...makeTask("Do the standup", "calendar_event"),
-      context: { description: "", scheduled_by: { name: "Gus", email: "gus@memodb.io" } },
+      context: {
+        event_id: "ce_3",
+        datetime: "2026-04-17T09:00:00.000Z",
+        is_recurring: false,
+        repeat_interval: null,
+        description: "",
+        scheduled_by: { name: "Gus", email: "gus@memodb.io" },
+      },
     };
     const parsed = JSON.parse(buildPrompt(task));
     expect(parsed.notice).toContain("scheduled calendar event");
     expect(parsed.description).toBeUndefined();
     expect(parsed.scheduled_by).toEqual({ name: "Gus", email: "gus@memodb.io" });
+  });
+
+  it("forwards is_recurring=false and repeat_interval=null for one-off calendar events", () => {
+    const task: Task = {
+      ...makeTask("One-off reminder", "calendar_event"),
+      context: {
+        event_id: "ce_4",
+        datetime: "2026-05-01T14:00:00.000Z",
+        is_recurring: false,
+        repeat_interval: null,
+      },
+    };
+    const parsed = JSON.parse(buildPrompt(task));
+    expect(parsed.event_id).toBe("ce_4");
+    expect(parsed.datetime).toBe("2026-05-01T14:00:00.000Z");
+    expect(parsed.is_recurring).toBe(false);
+    expect(parsed.repeat_interval).toBeNull();
+  });
+
+  it("forwards is_recurring=true and repeat_interval for recurring calendar events", () => {
+    const task: Task = {
+      ...makeTask("Weekly sync", "calendar_event"),
+      context: {
+        event_id: "ce_5",
+        datetime: "2026-05-05T10:00:00.000Z",
+        is_recurring: true,
+        repeat_interval: "1week",
+      },
+    };
+    const parsed = JSON.parse(buildPrompt(task));
+    expect(parsed.event_id).toBe("ce_5");
+    expect(parsed.datetime).toBe("2026-05-05T10:00:00.000Z");
+    expect(parsed.is_recurring).toBe(true);
+    expect(parsed.repeat_interval).toBe("1week");
   });
 
   it("does not add notice for unknown task types", () => {

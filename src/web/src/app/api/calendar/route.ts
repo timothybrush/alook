@@ -178,7 +178,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   if (body.conversation_id && agent.ownerId) {
     const conv = await queries.conversation.getConversation(db, body.conversation_id, ws.workspaceId);
     if (conv) {
-      const eventContent = `Calendar set: ${body.title} — ${scheduledAtIso}`;
+      const eventContent = `${body.title}`;
       const metadata = JSON.stringify({ calendarEventId: created.id });
       const eventMsg = await queries.message.createMessage(db, {
         conversationId: body.conversation_id,
@@ -199,7 +199,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
           metadata: { calendarEventId: created.id },
           created_at: eventMsg.createdAt,
         },
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }
 

@@ -90,7 +90,12 @@ export async function promoteDueCalendarEventsForWorkspace(
       }
       const ownerInfo = ownerCache.get(agent.ownerId)!;
 
-      const taskContext: Record<string, unknown> = {};
+      const taskContext: Record<string, unknown> = {
+        event_id: ev.id,
+        datetime: ev.scheduledAt,
+        is_recurring: !!ev.repeatInterval,
+        repeat_interval: ev.repeatInterval ?? null,
+      };
       if (ev.description) {
         taskContext.description = ev.description;
       }
@@ -103,12 +108,13 @@ export async function promoteDueCalendarEventsForWorkspace(
         runtimeId: agent.runtimeId,
         workspaceId: ev.workspaceId,
         conversationId: conv.id,
+        contextKey: conv.id,
         prompt: ev.title,
         type: TASK_TYPES.CALENDAR_EVENT,
         priority: 0,
         traceId: "tr_" + nanoid(),
         parentTaskId: null,
-        context: Object.keys(taskContext).length > 0 ? taskContext : undefined,
+        context: taskContext,
       });
 
       if (ev.repeatInterval) {
