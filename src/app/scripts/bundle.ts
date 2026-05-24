@@ -63,11 +63,13 @@ const blogAppDir = join(webSrc, "src", "app", "blog");
 const blogLibDir = join(webSrc, "src", "lib", "blog");
 
 const blogPublicDir = join(webSrc, "public", "blog");
+const blogContentDir = join(webSrc, "src", "content");
 
 console.log("[bundle] Stripping blog content for app-only build...");
 rmSync(blogAppDir, { recursive: true });
 rmSync(blogLibDir, { recursive: true });
 rmSync(blogPublicDir, { recursive: true, force: true });
+rmSync(blogContentDir, { recursive: true, force: true });
 mkdirSync(blogLibDir, { recursive: true });
 writeFileSync(join(blogLibDir, "posts.ts"), blogStub);
 
@@ -76,7 +78,7 @@ try {
 } finally {
   console.log("[bundle] Restoring blog source files...");
   try {
-    execSync("git checkout -- src/web/src/app/blog/ src/web/src/lib/blog/ src/web/public/blog/", {
+    execSync("git checkout -- src/web/src/app/blog/ src/web/src/lib/blog/ src/web/public/blog/ src/web/src/content/", {
       cwd: monoRoot,
       stdio: "inherit",
     });
