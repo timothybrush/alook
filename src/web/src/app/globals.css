@@ -161,11 +161,19 @@
 }
 
 /* ─── Feature flip cards ─── */
-.flip-card:hover .flip-card-inner {
-  transform: rotateY(180deg);
+@media (hover: hover) {
+  .flip-card:hover .flip-card-inner {
+    transform: rotateY(180deg);
+  }
+  .flip-card:hover .flip-card-front {
+    pointer-events: none;
+  }
 }
-.flip-card:hover .flip-card-front {
-  pointer-events: none;
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-card-inner {
+    transition-duration: 0s !important;
+  }
 }
 
 /* ─── Front-Facing Typewriter Illustration ───
