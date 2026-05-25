@@ -31,7 +31,10 @@ async function notifyWeb(env: EmailEnv, payload: Record<string, unknown>, traceI
 
   try {
     const res = await env.WEB_SERVICE.fetch("http://internal/api/email/notify", init)
-    if (!res.ok) throw new Error(`WEB_SERVICE responded ${res.status}`)
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "")
+      throw new Error(`WEB_SERVICE responded ${res.status}: ${errBody}`)
+    }
   } catch (serviceErr) {
     try {
       const fallback = await fetch(`${DEV_WEB_URL}/api/email/notify`, init)
