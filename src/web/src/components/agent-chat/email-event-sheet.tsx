@@ -9,7 +9,7 @@ import {
   SheetBody,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { X, Mail, Loader2 } from "lucide-react";
+import { X, Mail, Loader2, Paperclip, File as FileIcon } from "lucide-react";
 import { toast } from "sonner";
 import { getEmail, getEmailBody } from "@/lib/api";
 import { EmailBodyFrame } from "@/components/email-body-frame";
@@ -138,14 +138,26 @@ export function EmailEventSheet({ open, onOpenChange, emailId, workspaceId }: Em
 
               {email.attachments && email.attachments.length > 0 && (
                 <div className="border-t pt-3">
-                  <p className="text-xs text-muted-foreground mb-2">
+                  <div className="flex items-center gap-1.5 mb-2 text-xs text-muted-foreground">
+                    <Paperclip className="size-3" />
                     {email.attachments.length} attachment{email.attachments.length > 1 ? "s" : ""}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {email.attachments.map((att) => (
-                      <span key={att.key} className="inline-flex items-center gap-1 text-xs bg-muted rounded px-2 py-1">
-                        {att.filename}
-                      </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {email.attachments.map((att, i) => (
+                      <a
+                        key={att.key}
+                        href={`/api/email/${email.id}/attachment/${i}?workspace_id=${workspaceId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download={att.filename}
+                        className="flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/50 px-2.5 py-1.5 text-xs hover:bg-muted transition-colors cursor-pointer"
+                      >
+                        <FileIcon className="size-3 text-muted-foreground shrink-0" />
+                        <span className="truncate max-w-45">{att.filename}</span>
+                        <span className="text-muted-foreground shrink-0">
+                          {att.size < 1024 ? `${att.size} B` : att.size < 1024 * 1024 ? `${(att.size / 1024).toFixed(1)} KB` : `${(att.size / (1024 * 1024)).toFixed(1)} MB`}
+                        </span>
+                      </a>
                     ))}
                   </div>
                 </div>
