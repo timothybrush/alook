@@ -12,7 +12,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSheetResize, SheetResizeHandle } from "@/components/ui/sheet-resize-handle";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import {
   ArrowUp,
   Check,
@@ -47,10 +55,6 @@ const MAX_WIDTH_RATIO = 0.8;
 const GHOST_CONTROL =
   "h-7 border-0 bg-transparent px-1.5 text-xs text-foreground hover:bg-accent transition-colors -ml-1.5";
 
-const GHOST_SELECT = cn(
-  GHOST_CONTROL,
-  "rounded-md outline-none focus-visible:bg-accent focus-visible:ring-0 appearance-none pr-6"
-);
 
 const SELECTOR_STATUSES = ["todo", "in_progress", "review", "done"] as const;
 
@@ -197,8 +201,6 @@ export interface IssueSheetProps {
   defaultAgentId?: string;
   slug: string;
   workspaceId: string;
-  width?: number;
-  onWidthChange?: (width: number) => void;
   draft?: { title: string; description: string; agentId: string };
   onDraftChange?: (draft: { title: string; description: string; agentId: string }) => void;
   onCreate?: (values: { agent_id?: string; title: string; description: string }) => Promise<void>;
@@ -222,8 +224,6 @@ export function IssueSheet({
   defaultAgentId,
   slug,
   workspaceId,
-  width = 448,
-  onWidthChange,
   draft,
   onDraftChange,
   onCreate,
@@ -247,7 +247,6 @@ export function IssueSheet({
 
   const descriptionRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
 
   const isTaskActive = activeTask && !["completed", "failed", "cancelled", "superseded"].includes(activeTask.status);
   const hasActiveTraceTasks = traceTasks?.some(t => ["queued", "dispatched", "running"].includes(t.status)) ?? false;
@@ -327,22 +326,11 @@ export function IssueSheet({
   }, [open, mode, flushAutoSave]);
 
   // --- Drag handle ---
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, []);
-
-  const onPointerMove = useCallback((e: React.PointerEvent) => {
-    if (!dragging.current) return;
-    const maxW = window.innerWidth * MAX_WIDTH_RATIO;
-    const newWidth = Math.min(maxW, Math.max(MIN_WIDTH, window.innerWidth - e.clientX));
-    onWidthChange?.(newWidth);
-  }, [onWidthChange]);
-
-  const onPointerUp = useCallback(() => {
-    dragging.current = false;
-  }, []);
+  const { width, onPointerDown, onPointerMove, onPointerUp } = useSheetResize({
+    defaultWidth: 448,
+    minWidth: MIN_WIDTH,
+    maxWidthRatio: MAX_WIDTH_RATIO,
+  });
 
   // --- Handlers ---
   const handleCreate = async () => {
@@ -585,18 +573,23 @@ export function IssueSheet({
         {/* Status row (detail mode only) */}
         {mode === "detail" && issue && (
           <PropertyRow icon={<CircleDot className="size-3.5" />}>
-            <select
+            <Select
               value={issue.status}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              className={GHOST_SELECT}
+              onValueChange={(val) => { if (val) handleStatusChange(val); }}
+              items={(isTodoDraft ? (["todo", "done"] as const) : SELECTOR_STATUSES).map((s) => ({ value: s, label: statusLabel(s) }))}
             >
-              {(isTodoDraft
-                ? (["todo", "done"] as const)
-                : SELECTOR_STATUSES
-              ).map((s) => (
-                <option key={s} value={s}>{statusLabel(s)}</option>
-              ))}
-            </select>
+              <SelectTrigger className="h-7 w-auto border-none bg-transparent px-1.5 shadow-none text-xs text-foreground hover:bg-accent transition-colors rounded-md">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(isTodoDraft
+                  ? (["todo", "done"] as const)
+                  : SELECTOR_STATUSES
+                ).map((s) => (
+                  <SelectItem key={s} value={s}>{statusLabel(s)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </PropertyRow>
         )}
 
@@ -662,13 +655,7 @@ export function IssueSheet({
         style={{ width: `min(${width}px, 100vw)`, maxWidth: "none" }}
       >
         {/* Resize drag handle */}
-        <div
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onLostPointerCapture={onPointerUp}
-          className="hidden sm:block absolute -left-px top-0 bottom-0 w-1.5 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors rounded-l-xl"
-        />
+        <SheetResizeHandle onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} />
 
         {/* Mobile close button */}
         <SheetClose
