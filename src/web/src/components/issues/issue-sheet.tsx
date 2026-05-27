@@ -36,6 +36,7 @@ import type { TraceTask } from "@/lib/api";
 import { updateIssue } from "@/lib/api";
 import { AvatarRenderer, parseAvatarUrl } from "@/components/avatar";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { AutoResizeTextarea } from "@/components/ui/auto-resize-textarea";
 
 // --- Constants ---
 
@@ -243,7 +244,6 @@ export function IssueSheet({
   const [confirmAgent, setConfirmAgent] = useState<Agent | null>(null);
   const [dispatching, setDispatching] = useState(false);
 
-  const titleRef = useRef<HTMLTextAreaElement>(null);
   const descriptionRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -324,18 +324,6 @@ export function IssueSheet({
     }
     prevOpenRef.current = open;
   }, [open, mode, flushAutoSave]);
-
-  // --- Title auto-resize ---
-  const resizeTitle = useCallback((el?: HTMLTextAreaElement | null) => {
-    const target = el ?? titleRef.current;
-    if (!target) return;
-    target.style.height = "auto";
-    target.style.height = `${target.scrollHeight}px`;
-  }, []);
-
-  useEffect(() => {
-    requestAnimationFrame(() => resizeTitle());
-  }, [title, resizeTitle]);
 
   // --- Drag handle ---
   const onPointerDown = useCallback((e: React.PointerEvent) => {
@@ -523,21 +511,14 @@ export function IssueSheet({
     <>
       {/* Title */}
       <div className="shrink-0 px-2 sm:px-3 pt-5 pb-1">
-        <textarea
-          ref={(el) => {
-            titleRef.current = el;
-            resizeTitle(el);
-          }}
+        <AutoResizeTextarea
           value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            resizeTitle(e.target);
-          }}
+          onChange={(e) => setTitle(e.target.value)}
           onKeyDown={onTitleKeyDown}
           placeholder={mode === "create" ? "New issue" : "Untitled"}
           autoFocus={mode === "create"}
           rows={1}
-          className="w-full resize-none overflow-hidden rounded-none border-0 bg-transparent px-0 py-1 font-news text-2xl md:text-3xl font-medium leading-[1.2] tracking-tight shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/40 placeholder:font-normal"
+          className="w-full rounded-none border-0 bg-transparent px-0 py-1 font-news text-2xl md:text-3xl font-medium leading-[1.2] tracking-tight shadow-none outline-none focus-visible:border-0 focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/40 placeholder:font-normal"
         />
       </div>
 
