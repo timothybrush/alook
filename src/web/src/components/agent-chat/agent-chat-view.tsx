@@ -86,6 +86,7 @@ import {
   Loader2,
   Mail,
   MessageSquareQuote,
+  MoreHorizontal,
   Paperclip,
   Square,
   X,
@@ -110,7 +111,6 @@ import {
   computeArtifactVersions,
 } from "@/components/artifact-content-renderer";
 import { FollowUpBuffer } from "@/components/agent-chat/follow-up-buffer";
-import { MenuToggleIcon } from "@/components/agent-chat/menu-toggle-icon";
 import { ScrollToBottomButton } from "@/components/ui/scroll-to-bottom-button";
 import { MessageItem } from "@/components/agent-chat/message-list";
 import { AgentPreviewCard } from "@/components/agent-preview-card";
@@ -2738,7 +2738,7 @@ export function AgentChatView({
                     />
                   }
                 >
-                  <MenuToggleIcon open={menuOpen} />
+                  <MoreHorizontal className="size-4" />
                 </PopoverTrigger>
                 <PopoverContent
                   side="top"
@@ -3004,6 +3004,11 @@ export function AgentChatView({
                 )}
               </div>
             </div>
+            {/* Symmetric spacer: balances the leading overflow button so the
+                pill stays horizontally centered under the messages column. */}
+            {!targetConvId && (
+              <div className="shrink-0 self-end mb-2.5 size-8" aria-hidden="true" />
+            )}
           </div>
         </div>
       </div>
