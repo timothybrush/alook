@@ -575,8 +575,8 @@ function MobileAgentList({ onAgentClick }: { onAgentClick?: (agent: Agent) => vo
   };
 
   return (
-    <div className="relative flex-1 flex flex-col">
-      <div className="flex flex-col gap-1 p-4 overflow-y-auto thin-scrollbar">
+    <div className="relative flex-1 flex flex-col min-h-0">
+      <div className="flex flex-col gap-1 p-4 overflow-y-auto thin-scrollbar flex-1 min-h-0">
         {agents.map((agent) => {
           const rt = runtimes.find((r) => r.id === agent.runtime_id);
           const isOnline = rt?.status === "online";
