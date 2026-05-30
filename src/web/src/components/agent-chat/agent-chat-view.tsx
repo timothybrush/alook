@@ -2755,7 +2755,10 @@ export function AgentChatView({
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={handleNap}
+                            onClick={() => {
+                              setMenuOpen(false);
+                              handleNap();
+                            }}
                             disabled={
                               napping ||
                               !conversation ||
@@ -2786,6 +2789,7 @@ export function AgentChatView({
                     variant="ghost"
                     size="sm"
                     onClick={() => {
+                      setMenuOpen(false);
                       setArtifactSheetSource("agent");
                       setArtifactSheetOpen(true);
                     }}

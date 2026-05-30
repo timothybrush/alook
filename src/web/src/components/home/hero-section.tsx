@@ -123,7 +123,7 @@ export function HeroSection({ isLoggedIn }: { isLoggedIn: boolean }) {
               style={{
                 fontFamily: "var(--font-crt)",
                 color: "var(--landing-text-muted)",
-                fontSize: "clamp(12px, 2vw, 20px)",
+                fontSize: "clamp(15px, 3.6vw, 20px)",
                 opacity: 0,
               }}
             >
