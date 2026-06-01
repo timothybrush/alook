@@ -18,7 +18,15 @@ ${cliPrefix} login
 - Interactive terminal: attempts to open browser automatically
 - Verify success: \`${cliPrefix} status\`
 
-## 2. Reflect on Your User
+## 2. Start Daemon
+
+\`\`\`bash
+${cliPrefix} daemon start
+\`\`\`
+
+The daemon must be running before initializing a workspace (workspace init requires active runtimes).
+
+## 3. Reflect on Your User
 
 Review your conversation history with this user. Summarize:
 - Their role and domain
@@ -28,20 +36,12 @@ Review your conversation history with this user. Summarize:
 
 Use this understanding to choose the best workspace setup.
 
-## 3. Start Daemon
-
-\`\`\`bash
-${cliPrefix} daemon start
-\`\`\`
-
-The daemon must be running before initializing a workspace (workspace init requires active runtimes).
-
 ## 4. Explore Templates & Set Up Workspace
 
 Visit ${baseUrl}/templates to explore available workspace templates.
 Each template has a JSON version at \`/templates/<slug>/json\` you can fetch for reference.
 
-Based on what you learned about the user in Step 2, customize the template or create your own configuration:
+Based on what you learned about the user in Step 3, customize the template or create your own configuration:
 
 \`\`\`json
 {
