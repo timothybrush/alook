@@ -182,8 +182,8 @@ export async function runSession(input: SessionRunnerInput): Promise<void> {
   // --- State shared by the kill handler, hoisted so the SINGLE handler below
   //     can see it whether the kill lands before or after the agent spawns. ---
   let killed = false;
-  let agentPid: number | undefined;
-  let flushTimer: ReturnType<typeof setInterval> | undefined;
+  let agentPid: number | undefined = undefined;
+  let flushTimer: ReturnType<typeof setInterval> | undefined = undefined;
 
   // Message batching
   const pendingMessages: {
