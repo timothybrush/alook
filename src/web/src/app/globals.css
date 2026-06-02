@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/*.js";
+@source "../node_modules/@streamdown/cjk/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -1388,6 +1390,90 @@ html.dark .blog-content [data-rehype-pretty-code-figure] span {
   opacity: 1;
   pointer-events: auto;
 }
+
+/* ── Streamdown mermaid block: match code-block visual style ── */
+
+/* Outer container: clean border + radius (overflow visible for dropdown menus) */
+[data-streamdown="mermaid-block"] {
+  position: relative !important;
+  padding: 0 !important;
+  margin-top: 0.5em !important;
+  margin-bottom: 0.5em !important;
+  gap: 0 !important;
+  border: 1px solid oklch(1 0 0 / 8%) !important;
+  border-radius: var(--radius-md) !important;
+  overflow: visible !important;
+  background: var(--background) !important;
+}
+
+/* Header ("mermaid" label): absolute top-left, show on hover */
+[data-streamdown="mermaid-block"] > div:first-child {
+  position: absolute !important;
+  top: 0.375rem;
+  left: 0.625rem;
+  z-index: 5;
+  height: auto !important;
+  padding: 0 !important;
+  background: transparent !important;
+  font-size: 0.7rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+[data-streamdown="mermaid-block"]:hover > div:first-child {
+  opacity: 0.5;
+}
+
+/* Actions wrapper: absolute top-right, invisible and non-interactive by default */
+[data-streamdown="mermaid-block"] > div:has([data-streamdown="mermaid-block-actions"]) {
+  position: absolute !important;
+  top: 0.375rem;
+  right: 0.375rem;
+  z-index: 10;
+  margin-top: 0 !important;
+  height: auto !important;
+  pointer-events: none;
+}
+
+/* On hover of the ENTIRE mermaid block: make actions interactive */
+[data-streamdown="mermaid-block"]:hover > div:has([data-streamdown="mermaid-block-actions"]) {
+  pointer-events: auto;
+}
+
+/* Actions buttons: fade in on hover */
+[data-streamdown="mermaid-block-actions"] {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+[data-streamdown="mermaid-block"]:hover [data-streamdown="mermaid-block-actions"] {
+  opacity: 1;
+}
+
+/* Mermaid download dropdown menu */
+[data-streamdown="mermaid-block-actions"] .absolute {
+  z-index: 50 !important;
+  min-width: 10rem;
+  color: var(--foreground) !important;
+  background: var(--background) !important;
+  border-color: var(--border) !important;
+}
+
+/* Diagram content area */
+[data-streamdown="mermaid-block"] > div:last-child {
+  margin: 0 !important;
+  border: none !important;
+  border-radius: var(--radius-md) !important;
+  padding: 1rem !important;
+  overflow: hidden;
+}
+
+/* Mermaid node shapes: add rounded corners to rectangles */
+[data-streamdown="mermaid-block"] .node rect,
+[data-streamdown="mermaid-block"] .node .basic {
+  rx: 8 !important;
+  ry: 8 !important;
+}
+
 
 /* ── Streamdown table: strip wrapper chrome, clean rows ── */
 
