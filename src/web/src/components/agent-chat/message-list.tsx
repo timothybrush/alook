@@ -4,6 +4,7 @@ import type { Agent, Artifact, Message, TaskApi as Task, TaskMessageResponse } f
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Streamdown } from "streamdown";
 import { mermaid, cjk } from "@/lib/streamdown-plugins";
 import { highlightMentions } from "@/lib/highlight-mentions";
@@ -15,6 +16,8 @@ import { FileText, Calendar, CircleDot, Mail, Flag, Copy, Check, ChevronRight } 
 import { eventTypeFromMessage, type GroupPosition } from "@/components/agent-chat/chat-message-utils";
 import { toast } from "sonner";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useHoverCapable } from "@/hooks/use-hover-capable";
+import { useLongPress } from "@/hooks/use-long-press";
 
 const MENTION_ALLOWED_TAGS = { mention: ["data-agent-id"] };
 const MENTION_LITERAL_TAGS = ["mention"];
@@ -317,6 +320,124 @@ export function AgentRow({
   );
 }
 
+// One per-message action (Copy / Flag / …). Rendered as a toolbar icon button
+// (desktop hover) or a sheet row (touch long-press) — same descriptor, two
+// presentations.
+interface MessageAction {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  /** Persistent on-state (e.g. flagged) — shown full-contrast in both surfaces. */
+  active?: boolean;
+}
+
+// Desktop: a small horizontal toolbar pinned to the bubble's OPEN-side top
+// corner, overlapping it (sits above the bubble top so it never covers text),
+// fading in on hover. `side` keys off message role so the chip grows AWAY from
+// the hazard: agent (left-aligned) anchors its LEFT edge to the bubble and
+// grows right (away from the avatar gutter); user (right-aligned) anchors its
+// RIGHT edge and grows left (away from the screen edge). For a short bubble the
+// overhang lands in empty cluster space, never the gutter or off-screen — no
+// width threshold, no JS measuring (the bubble anchor is already `w-fit`).
+function MessageActionsToolbar({
+  actions,
+  side,
+}: {
+  actions: MessageAction[];
+  side: "left" | "right";
+}) {
+  if (actions.length === 0) return null;
+  return (
+    <div
+      className={cn(
+        "absolute -top-3 z-10 flex items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-sm",
+        // Fade-only reveal (reduced-motion safe — no transform/lift).
+        "opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 focus-within:opacity-100",
+        side === "left" ? "left-0" : "right-0",
+      )}
+    >
+      {actions.map((a) => (
+        <Tooltip key={a.key}>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={a.label}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  a.onClick();
+                }}
+                className={cn(
+                  a.active ? "text-foreground" : "text-muted-foreground",
+                )}
+              />
+            }
+          >
+            {a.icon}
+          </TooltipTrigger>
+          <TooltipContent>{a.label}</TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
+  );
+}
+
+// Touch: the same actions as a bottom action sheet, opened by long-pressing the
+// bubble. No persistently-visible on-bubble controls (the clutter we removed).
+function MessageActionsSheet({
+  open,
+  onOpenChange,
+  actions,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  actions: MessageAction[];
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="bottom" showCloseButton={false} className="rounded-t-2xl p-2">
+        <div className="flex flex-col">
+          {actions.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              onClick={() => {
+                a.onClick();
+                onOpenChange(false);
+              }}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-3 py-3 text-left text-[0.95rem] active:bg-muted",
+                a.active ? "text-foreground" : "text-foreground",
+              )}
+            >
+              <span className="text-muted-foreground">{a.icon}</span>
+              {a.label}
+            </button>
+          ))}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// Persistent, glanceable flagged marker that lives on the BUBBLE itself (not in
+// the action UI), so a flagged message reads as flagged whether or not the
+// toolbar/sheet is open. Monochrome corner dot; paired with an inset left rail
+// on the bubble. Bubble-only — non-bubble cases (runtime error / failed stream)
+// use the existing row-tint instead.
+function FlagDot() {
+  return (
+    <span
+      aria-hidden
+      className="absolute -left-1.5 -top-1.5 z-10 flex size-3.5 items-center justify-center rounded-full border-2 border-background bg-foreground text-background"
+    >
+      <Flag className="size-2 fill-current" />
+    </span>
+  );
+}
+
 export const MessageItem = memo(function MessageItem({
   msg,
   agents,
@@ -380,58 +501,63 @@ export const MessageItem = memo(function MessageItem({
       msg.content === "Task cancelled by you" ||
       msg.content === "Task cancelled by user");
 
-  const actionButtons = msg.role === "assistant" ? (
-    // Vertical on mobile so the right-of-bubble actions don't get clipped at
-    // the screen edge; horizontal from md up where there's room.
-    <div className="flex flex-col sm:flex-row items-center gap-1">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label={copied ? "Copied" : "Copy message"}
-              onClick={async (e) => {
-                e.stopPropagation();
-                const ok = await copy(msg.content);
-                if (ok) toast.success("Copied to clipboard");
-                else toast.error("Failed to copy");
-              }}
-              className={cn(
-                copied
-                  ? "text-green-500 opacity-100"
-                  : "text-muted-foreground sm:opacity-0 sm:group-hover/msg:opacity-100"
-              )}
-            />
-          }
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </TooltipTrigger>
-        <TooltipContent>{copied ? "Copied" : "Copy"}</TooltipContent>
-      </Tooltip>
-      {onToggleFlag && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => onToggleFlag(msg.id)}
-                className={cn(
-                  isFlagged
-                    ? "text-primary opacity-100"
-                    : "text-muted-foreground sm:opacity-0 sm:group-hover/msg:opacity-100"
-                )}
-              />
-            }
-          >
-            <Flag className={cn("size-3.5", isFlagged && "fill-current")} />
-          </TooltipTrigger>
-          <TooltipContent>{isFlagged ? "Unflag" : "Flag"}</TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  ) : null;
+  // Per-message actions: one descriptor list, two presentations (hover toolbar
+  // on hover-capable devices, long-press action sheet on touch). Copy is
+  // available on both user and assistant messages; Flag is assistant-only
+  // (flagging your own message is meaningless). Capability is detected, not
+  // viewport-sized, so a touch laptop gets the sheet and a desktop stays hover.
+  const hoverCapable = useHoverCapable();
+  const [actionSheetOpen, setActionSheetOpen] = React.useState(false);
+
+  const doCopy = React.useCallback(async () => {
+    const ok = await copy(msg.content);
+    if (ok) toast.success("Copied to clipboard");
+    else toast.error("Failed to copy");
+  }, [copy, msg.content]);
+
+  const canCopy = msg.role === "assistant" || msg.role === "user";
+  const messageActions: MessageAction[] = [];
+  if (canCopy) {
+    messageActions.push({
+      key: "copy",
+      label: copied ? "Copied" : "Copy",
+      icon: copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />,
+      onClick: doCopy,
+    });
+  }
+  if (msg.role === "assistant" && onToggleFlag) {
+    messageActions.push({
+      key: "flag",
+      label: isFlagged ? "Unflag" : "Flag",
+      icon: <Flag className={cn("size-3.5", isFlagged && "fill-current")} />,
+      onClick: () => onToggleFlag(msg.id),
+      active: isFlagged,
+    });
+  }
+
+  // Long-press (touch only) opens the action sheet. Cancels on movement so it
+  // never hijacks text selection. Spread onto the bubble's interactive surface.
+  const longPress = useLongPress(() => {
+    if (messageActions.length > 0) setActionSheetOpen(true);
+  });
+  // On hover-capable devices, no long-press handlers (mouse keeps select/click).
+  const bubblePressHandlers = !hoverCapable && messageActions.length > 0 ? longPress : {};
+
+  // The shared touch sheet — rendered once per message, opened by long-press.
+  const actionSheet =
+    !hoverCapable && messageActions.length > 0 ? (
+      <MessageActionsSheet
+        open={actionSheetOpen}
+        onOpenChange={setActionSheetOpen}
+        actions={messageActions}
+      />
+    ) : null;
+
+  // The desktop hover toolbar for a given side. Only on hover-capable devices.
+  const toolbarFor = (side: "left" | "right") =>
+    hoverCapable && messageActions.length > 0 ? (
+      <MessageActionsToolbar actions={messageActions} side={side} />
+    ) : null;
 
   return (
     <React.Fragment>
@@ -441,7 +567,10 @@ export const MessageItem = memo(function MessageItem({
           {...(isTaskDone ? { "data-quote-source": true } : {})}
         >
           <AgentRow groupPosition={groupPosition} agentName={agentName} config={agentAvatarConfig}>
-            <div className="relative min-w-0 w-fit max-w-full">
+            <div
+              className="relative min-w-0 w-fit max-w-full"
+              {...(isTaskDone ? bubblePressHandlers : {})}
+            >
               <TaskStream
                 task={activeTask}
                 messages={taskMessages}
@@ -449,9 +578,8 @@ export const MessageItem = memo(function MessageItem({
                 onRetry={onRetry}
                 provider={provider}
               />
-              {isTaskDone && actionButtons && (
-                <div className="absolute left-full top-0 ml-1 z-10">{actionButtons}</div>
-              )}
+              {isTaskDone && toolbarFor("left")}
+              {isTaskDone && actionSheet}
             </div>
           </AgentRow>
         </div>
@@ -461,12 +589,15 @@ export const MessageItem = memo(function MessageItem({
         const skillName = slashMatch?.[1] ?? null;
         const messageBody = slashMatch ? (slashMatch[2] || "") : msg.content;
         return (
-          <div className="flex flex-col items-end" data-message-id={msg.id} {...(msg.task_id ? { "data-task-id": msg.task_id } : {})}>
-            <div className={cn(
-              "max-w-[80%] px-4 py-2 bg-primary text-primary-foreground text-base relative",
-              USER_BUBBLE_RADIUS[groupPosition],
-              isSendFailed && "opacity-60",
-            )}>
+          <div className="group/msg flex flex-col items-end" data-message-id={msg.id} {...(msg.task_id ? { "data-task-id": msg.task_id } : {})}>
+            <div
+              className={cn(
+                "max-w-[80%] px-3 py-1.5 bg-primary text-primary-foreground text-base relative",
+                USER_BUBBLE_RADIUS[groupPosition],
+                isSendFailed && "opacity-60",
+              )}
+              {...bubblePressHandlers}
+            >
               {skillName && (
                 <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-primary-foreground/15 text-primary-foreground mb-1">
                   /{skillName}
@@ -483,7 +614,9 @@ export const MessageItem = memo(function MessageItem({
               {!msg.attachment_ids && (
                 <PendingFileChips pendingFiles={pendingFilesByMessage} messageId={msg.id} />
               )}
+              {toolbarFor("right")}
             </div>
+            {actionSheet}
             {isSendFailed && (
               <button
                 type="button"
@@ -531,32 +664,52 @@ export const MessageItem = memo(function MessageItem({
         // swallowed (QA AC4). A runtime-error message is the exception: it IS the
         // error, surfaced by the TaskStream above while live, so it still only
         // renders its own RuntimeErrorBlock when no stream owns it (!hasTaskStream).
-        <div className="group/msg overflow-x-clip" data-message-id={msg.id} data-quote-source {...(msg.task_id ? { "data-task-id": msg.task_id } : {})}>
+        <div
+          className={cn(
+            "group/msg overflow-x-clip",
+            // Non-bubble flagged case (runtime error) → row-tint, since the
+            // rail/dot is bubble-only. The normal text bubble uses the rail+dot
+            // instead, so it must NOT get the tint.
+            isFlagged && msg.metadata?.error_source === "runtime" && "bg-muted/30 rounded-lg px-2 -mx-2",
+          )}
+          data-message-id={msg.id}
+          data-quote-source
+          {...(msg.task_id ? { "data-task-id": msg.task_id } : {})}
+        >
           <AgentRow groupPosition={groupPosition} agentName={agentName} config={agentAvatarConfig}>
             {msg.metadata?.error_source === "runtime" ? (
               // A failure is a real message, not a bubble — surface it plainly
-              // with Retry. actionButtons render as an out-of-flow top-right
-              // overlay so the hidden hover row never reserves height.
-              <div className="relative min-w-0 w-fit max-w-full">
+              // with Retry. The action toolbar pins to the OPEN-side (left) top
+              // corner; no on-block flag rail/dot (that's bubble-only) — a
+              // flagged error uses the row-tint instead (see wrapper below).
+              <div
+                className="relative min-w-0 w-fit max-w-full"
+                {...bubblePressHandlers}
+              >
                 <RuntimeErrorBlock
                   provider={(msg.metadata.provider as string | null | undefined) ?? provider}
                   message={msg.content}
                 />
-                {actionButtons && (
-                  <div className="absolute left-full top-0 ml-1 z-10">{actionButtons}</div>
-                )}
+                {toolbarFor("left")}
+                {actionSheet}
               </div>
             ) : (
-              <div className="relative min-w-0 w-fit max-w-full">
+              <div
+                className="relative min-w-0 w-fit max-w-full"
+                {...bubblePressHandlers}
+              >
                 <div className={cn(
-                  "markdown min-w-0 max-w-full px-4 py-2 bg-muted text-foreground text-base",
+                  "markdown min-w-0 max-w-full px-3 py-1.5 bg-muted text-foreground text-base",
                   AGENT_BUBBLE_RADIUS[groupPosition],
+                  // Persistent flagged rail on the bubble itself — glanceable
+                  // whether or not the toolbar/sheet is open (bubble-only).
+                  isFlagged && "shadow-[inset_2px_0_0_var(--foreground)]",
                 )}>
                   <Streamdown plugins={{ mermaid, cjk }} controls={{ code: { copy: true, download: false }, table: { copy: true, download: false, fullscreen: true } }} linkSafety={{ enabled: false }} allowedTags={MENTION_ALLOWED_TAGS} literalTagContent={MENTION_LITERAL_TAGS} components={mentionComponents}>{highlightMentions(msg.content, agents)}</Streamdown>
                 </div>
-                {actionButtons && (
-                  <div className="absolute left-full top-0 ml-1 z-10">{actionButtons}</div>
-                )}
+                {isFlagged && <FlagDot />}
+                {toolbarFor("left")}
+                {actionSheet}
               </div>
             )}
           </AgentRow>
