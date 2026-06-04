@@ -57,9 +57,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
         if: steps.check.outputs.skip == 'false'
 
-      - name: Build all packages
+      - name: Build all packages (exclude desktop — needs native deps)
         if: steps.check.outputs.skip == 'false'
-        run: pnpm build
+        run: pnpm turbo run build --filter='!@alook/desktop'
 
       - name: Bundle app (pre-build workers)
         if: steps.check.outputs.skip == 'false'
