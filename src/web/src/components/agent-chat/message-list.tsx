@@ -332,29 +332,21 @@ interface MessageAction {
   active?: boolean;
 }
 
-// Desktop: a small horizontal toolbar pinned to the bubble's OPEN-side top
-// corner, overlapping it (sits above the bubble top so it never covers text),
-// fading in on hover. `side` keys off message role so the chip grows AWAY from
-// the hazard: agent (left-aligned) anchors its LEFT edge to the bubble and
-// grows right (away from the avatar gutter); user (right-aligned) anchors its
-// RIGHT edge and grows left (away from the screen edge). For a short bubble the
-// overhang lands in empty cluster space, never the gutter or off-screen — no
-// width threshold, no JS measuring (the bubble anchor is already `w-fit`).
+// Desktop: a small horizontal toolbar pinned to the bubble's TOP-RIGHT corner,
+// overlapping it (sits above the bubble top so it never covers text), fading in
+// on hover. Always right-anchored regardless of message role.
 function MessageActionsToolbar({
   actions,
-  side,
 }: {
   actions: MessageAction[];
-  side: "left" | "right";
 }) {
   if (actions.length === 0) return null;
   return (
     <div
       className={cn(
-        "absolute -top-3 z-10 flex items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-sm",
+        "absolute -top-3 right-0 z-10 flex items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-sm",
         // Fade-only reveal (reduced-motion safe — no transform/lift).
         "opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 focus-within:opacity-100",
-        side === "left" ? "left-0" : "right-0",
       )}
     >
       {actions.map((a) => (
@@ -554,9 +546,9 @@ export const MessageItem = memo(function MessageItem({
     ) : null;
 
   // The desktop hover toolbar for a given side. Only on hover-capable devices.
-  const toolbarFor = (side: "left" | "right") =>
+  const toolbar =
     hoverCapable && messageActions.length > 0 ? (
-      <MessageActionsToolbar actions={messageActions} side={side} />
+      <MessageActionsToolbar actions={messageActions} />
     ) : null;
 
   return (
@@ -578,7 +570,7 @@ export const MessageItem = memo(function MessageItem({
                 onRetry={onRetry}
                 provider={provider}
               />
-              {isTaskDone && toolbarFor("left")}
+              {isTaskDone && toolbar}
               {isTaskDone && actionSheet}
             </div>
           </AgentRow>
@@ -608,13 +600,14 @@ export const MessageItem = memo(function MessageItem({
                   <Streamdown plugins={{ mermaid, cjk }} controls={{ code: { copy: true, download: false }, table: { copy: false, download: false, fullscreen: false } }} linkSafety={{ enabled: false }} allowedTags={MENTION_ALLOWED_TAGS} literalTagContent={MENTION_LITERAL_TAGS} components={mentionComponents}>{highlightMentions(messageBody, agents)}</Streamdown>
                 </div>
               )}
-              {msg.attachment_ids && msg.attachment_ids.length > 0 && (
-                <AttachmentChips attachmentIds={msg.attachment_ids} artifacts={artifacts} onArtifactClick={onArtifactClick} />
-              )}
-              {!msg.attachment_ids && (
-                <PendingFileChips pendingFiles={pendingFilesByMessage} messageId={msg.id} />
-              )}
-              {toolbarFor("right")}
+              {(() => {
+                if (msg.attachment_ids && msg.attachment_ids.length > 0) {
+                  const hasMatch = msg.attachment_ids.some((id: string) => artifacts.some((a) => a.id === id));
+                  if (hasMatch) return <AttachmentChips attachmentIds={msg.attachment_ids} artifacts={artifacts} onArtifactClick={onArtifactClick} />;
+                }
+                return <PendingFileChips pendingFiles={pendingFilesByMessage} messageId={msg.id} />;
+              })()}
+              {toolbar}
             </div>
             {actionSheet}
             {isSendFailed && (
@@ -690,7 +683,7 @@ export const MessageItem = memo(function MessageItem({
                   provider={(msg.metadata.provider as string | null | undefined) ?? provider}
                   message={msg.content}
                 />
-                {toolbarFor("left")}
+                {toolbar}
                 {actionSheet}
               </div>
             ) : (
@@ -708,7 +701,7 @@ export const MessageItem = memo(function MessageItem({
                   <Streamdown plugins={{ mermaid, cjk }} controls={{ code: { copy: true, download: false }, table: { copy: true, download: false, fullscreen: true } }} linkSafety={{ enabled: false }} allowedTags={MENTION_ALLOWED_TAGS} literalTagContent={MENTION_LITERAL_TAGS} components={mentionComponents}>{highlightMentions(msg.content, agents)}</Streamdown>
                 </div>
                 {isFlagged && <FlagDot />}
-                {toolbarFor("left")}
+                {toolbar}
                 {actionSheet}
               </div>
             )}

@@ -793,6 +793,10 @@ export function useAgentChat(
       initialScrollDone.current = true;
       if (scrollToTaskId || scrollToMessageId) {
         isNearBottom.current = false;
+        // Start at the bottom so the scroll-to-target effect scrolls UP (short
+        // distance to a recent task) instead of DOWN from the top (long distance
+        // through the entire conversation history).
+        scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
       } else if (propTargetConvId) {
         setTimeout(() => {
           const assistantMsgs = scrollRef.current?.querySelectorAll(
@@ -837,7 +841,7 @@ export function useAgentChat(
         `[data-task-id="${CSS.escape(scrollToTaskId)}"]`,
       );
       if (!el) return false;
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.classList.add("task-highlight");
       highlightTimerId = setTimeout(() => {
         el.classList.remove("task-highlight");
@@ -897,7 +901,7 @@ export function useAgentChat(
         `[data-message-id="${CSS.escape(scrollToMessageId)}"]`,
       );
       if (!el) return false;
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
       el.classList.add("task-highlight");
       highlightTimerId = setTimeout(() => {
         el.classList.remove("task-highlight");
@@ -1493,6 +1497,13 @@ export function useAgentChat(
                 2000,
             );
             if (optimisticIdx !== -1) {
+              const optimisticId = prev[optimisticIdx].id;
+              setPendingFilesByMessage((p) => {
+                if (!p.has(optimisticId)) return p;
+                const next = new Map(p);
+                next.delete(optimisticId);
+                return next;
+              });
               const updated = [...prev];
               updated[optimisticIdx] = msg.message;
               return updated;

@@ -446,7 +446,7 @@ describe("daemon session runner dispatch", () => {
       expect(mockClientInstance.failTask).toHaveBeenCalledWith(
         "al_test_token",
         "t1",
-        expect.stringContaining("session-runner crashed"),
+        expect.stringContaining("exit"),
       );
     });
   });

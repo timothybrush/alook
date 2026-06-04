@@ -530,7 +530,7 @@ export function AgentChatView({
     return (
       <>
         <div className="flex-1 overflow-y-auto px-3 md:px-5">
-          <div className="mx-auto max-w-3xl py-6 space-y-4 motion-safe:animate-[fade-up_200ms_ease-out_both]">
+          <div className="mx-auto max-w-3xl py-6 space-y-6 motion-safe:animate-[fade-up_200ms_ease-out_both]">
             {/* Agent cluster — top [avatar][name] header, bubbles stacked below
                 in the gutter (mirrors AgentRow's Slack/Discord layout). */}
             <div className="flex justify-start items-start gap-2">
@@ -675,9 +675,8 @@ export function AgentChatView({
               const pos = groupPositions[idx];
               const isGroupStart =
                 pos === "first" || pos === "solo" || pos === null;
-              // mt-4 between clusters, a roomier mt-1.5 between grouped bubbles
-              // within a cluster (mt-0.5 read too cramped).
-              const spacing = idx === 0 ? "" : isGroupStart ? "mt-4" : "mt-1.5";
+              // mt-6 between clusters, mt-1.5 between grouped bubbles within a cluster.
+              const spacing = idx === 0 ? "" : isGroupStart ? "mt-6" : "mt-1.5";
 
               if (item.kind === "nap") {
                 return (

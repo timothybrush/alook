@@ -1002,10 +1002,40 @@ async function handleTask(
     const timelineDir = join(agentBaseDir, ".context_timeline");
     const ctxKey = task.contextKey;
 
-    const lockAcquired = acquireSteeringLock(agentBaseDir, ctxKey);
+    let lockAcquired = acquireSteeringLock(agentBaseDir, ctxKey);
     if (!lockAcquired) {
-      log.warn(`Steering lock contention for context_key=${ctxKey}, proceeding without steering`);
-    } else {
+      // Lock held by another task's steering cycle. Wait for the owner to
+      // create a pendingSteer entry so we can merge into it, rather than
+      // bypassing steering and spawning a concurrent runner.
+      const MERGE_WAIT_MS = 5_000;
+      const MERGE_POLL_MS = 50;
+      const mergeStart = Date.now();
+      while (Date.now() - mergeStart < MERGE_WAIT_MS) {
+        const existing = pendingSteer.get(ctxKey);
+        if (existing) {
+          const attachmentIds = (task.context?.attachment_ids as string[]) ?? [];
+          let myAttachments: Attachment[] = [];
+          if (attachmentIds.length > 0) {
+            try { myAttachments = await downloadAttachments(client, token, task.workspaceId, task.id, attachmentIds); } catch { /* best effort */ }
+          }
+          existing.tasks.push(task);
+          existing.attachments.set(task.id, myAttachments);
+          log.info(`Steering: ${task.id} merged into pending entry (lock contention) for context_key=${ctxKey} (${existing.tasks.length} tasks)`);
+          existing.wake();
+          try { await client.supersedeTask(token, task.id); } catch { /* best effort */ }
+          activeTasks.delete(task.id);
+          return;
+        }
+        // Owner hasn't set the entry yet — also try acquiring the lock ourselves
+        lockAcquired = acquireSteeringLock(agentBaseDir, ctxKey);
+        if (lockAcquired) break;
+        await new Promise((r) => setTimeout(r, MERGE_POLL_MS));
+      }
+      if (!lockAcquired) {
+        log.warn(`Steering lock contention for context_key=${ctxKey}, proceeding without steering`);
+      }
+    }
+    if (lockAcquired) {
       try {
         const result = findSupersedablePredecessor(timelineDir, ctxKey, provider, steerWarmupGraceMs(), Date.now());
 
@@ -1076,7 +1106,7 @@ async function handleTask(
               }
               try {
                 await client.supersedeTask(token, predecessor.task_id);
-              } catch (e) { log.warn(`Steering: failed to mark predecessor superseded`, e); }
+              } catch { /* best effort — predecessor may already be in terminal state from its close handler */ }
             }
 
             // Build merged prompt if multiple tasks accumulated.
@@ -1112,6 +1142,7 @@ async function handleTask(
             existing.attachments.set(task.id, myAttachments);
             log.info(`Steering: ${task.id} merged into pending entry for context_key=${ctxKey} (${existing.tasks.length} tasks)`);
             existing.wake();
+            try { await client.supersedeTask(token, task.id); } catch { /* best effort */ }
             activeTasks.delete(task.id);
             return; // Non-owner exits — owner spawns on my behalf. Lock released by finally.
           }
@@ -1156,39 +1187,42 @@ async function handleTask(
     activeTasks.delete(task.id);
     if (code !== 0) {
       const agentBaseDir = join(config.workspacesRoot, task.workspaceId, task.agentId, "workdir");
+
+      // Check kill intent first — if present, the exit was expected.
       const killIntent = readKillIntent(agentBaseDir, task.id);
       if (killIntent) {
-        log.info(`Task ${task.id} exited due to kill intent — skipping failTask`);
+        log.info(`Task ${task.id} exited (${killIntent.reason}) — expected, skipping failTask`);
         clearKillIntent(agentBaseDir, task.id);
         return;
       }
 
-      const msg = code === null
-        ? `session-runner killed by signal (task ${task.id})`
-        : `session-runner crashed (exit code ${code}, task ${task.id})`;
-      log.warn(msg);
-
-      // Update timeline JSONL as fallback
-      const timelineDir = join(agentBaseDir, ".context_timeline");
-      updateEntry(timelineDir, task.id, (entry) => {
-        entry.pid = null;
-        entry.status = "failed";
-        entry.errmsg = msg;
-      });
-
+      // No intent file — the session-runner's onKill handler may have already
+      // cleared it and marked the task terminal (superseded/cancelled/failed).
+      // Try to mark it failed server-side; if it's already terminal, that's fine.
+      const errorMsg = code === null ? "killed by signal" : `session-runner exited with code ${code}`;
       try {
-        await client.failTask(token, task.id, msg);
+        await client.failTask(token, task.id, errorMsg);
+        // failTask succeeded → this was a genuine unexpected crash.
+        log.warn(`session-runner crashed (${errorMsg}, task ${task.id})`);
+        const timelineDir = join(agentBaseDir, ".context_timeline");
+        updateEntry(timelineDir, task.id, (entry) => {
+          entry.pid = null;
+          entry.status = "failed";
+          entry.errmsg = errorMsg;
+        });
       } catch (e) {
         if (isClientError(e)) {
-          log.info(`Backstop: task ${task.id} already in terminal state`);
+          // Task already in terminal state (session-runner's onKill handled it).
+          // This is the normal path for superseded/cancelled tasks — not a crash.
+          log.info(`Task ${task.id} exited (already terminal) — session-runner handled cleanup`);
           return;
         }
-        log.error(`Backstop: failed to report crash for task ${task.id}`, e);
+        log.error(`Failed to report crash for task ${task.id}`, e);
         try {
           await writeMarkerFile(config.workspacesRoot, {
             taskId: task.id,
             type: "fail",
-            payload: { error: msg },
+            payload: { error: errorMsg },
             token,
             serverURL: config.serverURL,
             createdAt: new Date().toISOString(),
