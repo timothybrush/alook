@@ -253,9 +253,7 @@ export async function startDaemon(
 
   const workspaces = cliConfig.watched_workspaces || [];
   if (workspaces.length === 0) {
-    log.error("No watched workspaces configured.");
-    process.exit(1);
-    return;
+    log.info("No workspaces configured — daemon starting in standby mode. Register a workspace to begin.");
   }
 
   // Validate: each workspace must have its own token
@@ -298,6 +296,7 @@ export async function startDaemon(
 
   const workspaceStates: WorkspaceState[] = [];
   const runtimeIndex = new Map<string, RuntimeData>();
+  let hadWorkspaces = workspaces.length > 0;
 
   for (const ws of workspaces) {
     const runtimes = providers.map((p) => ({
@@ -338,7 +337,7 @@ export async function startDaemon(
     }
   }
 
-  if (workspaceStates.length === 0) {
+  if (workspaceStates.length === 0 && workspaces.length > 0) {
     log.error("No workspaces registered successfully.");
     process.exit(1);
     return;
@@ -498,7 +497,7 @@ export async function startDaemon(
       evictWorkspace(id);
     }
 
-    if (workspaceStates.length === 0) {
+    if (workspaceStates.length === 0 && hadWorkspaces) {
       log.info("All workspaces evicted — shutting down");
       shutdown();
     }
@@ -624,7 +623,7 @@ export async function startDaemon(
     }
   }
 
-  const wsClient = firstToken
+  let wsClient = firstToken
     ? new DaemonWsClient({
         serverURL: config.serverURL,
         daemonId: config.daemonId,
@@ -771,9 +770,29 @@ export async function startDaemon(
       }
 
       if (newWorkspaces.length > 0) {
+        hadWorkspaces = true;
         health.setRuntimeCount(
           workspaceStates.reduce((sum, w) => sum + w.runtimeIds.length, 0),
         );
+        if (!wsClient && workspaceStates.length > 0) {
+          const token = workspaceStates[0].token;
+          wsClient = new DaemonWsClient({
+            serverURL: config.serverURL,
+            daemonId: config.daemonId,
+            machineToken: token,
+            onMessage: handleWsPush,
+            onConnected: () => {
+              log.info("WS connected — switching to low-frequency poll");
+              updatePollInterval(config.wsPollInterval);
+            },
+            onDisconnected: () => {
+              log.info("WS disconnected — reverting to high-frequency poll");
+              updatePollInterval(config.pollInterval);
+            },
+          });
+          wsClient.connect();
+          log.info("WS push client initialized after SIGHUP reload");
+        }
         log.info(`Reload complete — now polling ${workspaceStates.length} workspace(s)`);
       } else {
         log.info("Reload complete — no new workspaces found");
