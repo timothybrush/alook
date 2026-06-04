@@ -581,7 +581,7 @@ export function AgentChatView({
         {/* Presence line + input — mirror the real layout exactly so nothing
             shifts on load: presence row (h-5 + mb-2) above, then the composer
             row of [overflow button][pill][symmetric spacer]. */}
-        <div className="relative z-10 px-3 md:px-5 pt-3 pb-5 md:pb-6">
+        <div data-keyboard-offset className="relative z-10 px-3 md:px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-6">
           <div className="mx-auto max-w-3xl">
             <div className="h-5 px-1 mb-2 flex items-center">
               <Skeleton className="h-3.5 w-28 rounded" />
@@ -800,7 +800,7 @@ export function AgentChatView({
       </div>
 
       {/* Input */}
-      <div className="relative z-10 px-3 md:px-5 pt-3 pb-5 md:pb-6">
+      <div data-keyboard-offset className="relative z-10 px-3 md:px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-6">
         <div className="mx-auto max-w-3xl relative">
           {/* Social presence line — "{Name} is typing…" while this conversation
               has a live task (dispatched / queued / running), else nothing. */}
