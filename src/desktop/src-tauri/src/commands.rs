@@ -315,6 +315,9 @@ pub static DAEMON_ONLINE: AtomicBool = AtomicBool::new(false);
 static DAEMON_STARTED_BY_US: AtomicBool = AtomicBool::new(false);
 
 #[cfg(desktop)]
+static UPDATE_AVAILABLE_VERSION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[cfg(desktop)]
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::{
         image::Image,
@@ -324,12 +327,14 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let show = MenuItemBuilder::with_id("show", "Show").build(app)?;
     let version = MenuItemBuilder::with_id("version", format!("Version {}", app.package_info().version)).enabled(false).build(app)?;
+    let update_item = MenuItemBuilder::with_id("update", "Check for Updates").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
 
     let menu = MenuBuilder::new(app)
         .item(&show)
         .separator()
         .item(&version)
+        .item(&update_item)
         .separator()
         .item(&quit)
         .build()?;
@@ -348,6 +353,12 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
+            }
+            "update" => {
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    do_install_update(&handle).await;
+                });
             }
             "quit" => {
                 let handle = app.clone();
@@ -391,6 +402,94 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     Ok(())
+}
+
+#[cfg(desktop)]
+async fn do_install_update(handle: &AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = match handle.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            let _ = handle.notification()
+                .builder()
+                .title("Alook")
+                .body(&format!("Update check failed: {}", e))
+                .show();
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let version = update.version.clone();
+            let _ = handle.notification()
+                .builder()
+                .title("Alook")
+                .body(&format!("Installing update v{}...", version))
+                .show();
+            match update.download_and_install(|_, _| {}, || {}).await {
+                Ok(_) => handle.restart(),
+                Err(e) => {
+                    let _ = handle.notification()
+                        .builder()
+                        .title("Alook")
+                        .body(&format!("Update failed: {}", e))
+                        .show();
+                }
+            }
+        }
+        Ok(None) => {
+            let _ = handle.notification()
+                .builder()
+                .title("Alook")
+                .body("You're on the latest version.")
+                .show();
+        }
+        Err(e) => {
+            let _ = handle.notification()
+                .builder()
+                .title("Alook")
+                .body(&format!("Update check failed: {}", e))
+                .show();
+        }
+    }
+}
+
+#[cfg(desktop)]
+pub fn auto_check_updates(handle: AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+
+    std::thread::spawn(move || {
+        // Initial delay — let app finish launching
+        std::thread::sleep(std::time::Duration::from_secs(30));
+
+        let interval = std::time::Duration::from_secs(30 * 60); // 30 minutes
+        loop {
+            let h = handle.clone();
+            let found = tauri::async_runtime::block_on(async {
+                let updater = h.updater().ok()?;
+                let update = updater.check().await.ok()??;
+                Some(update.version.clone())
+            });
+
+            if let Some(version) = found {
+                let mut guard = UPDATE_AVAILABLE_VERSION.lock().unwrap();
+                let already_notified = guard.as_deref() == Some(&*version);
+                if !already_notified {
+                    *guard = Some(version.clone());
+                    drop(guard);
+                    let _ = handle.notification()
+                        .builder()
+                        .title("Alook Update Available")
+                        .body(&format!("Version {} is ready to install. Use the tray menu to update.", version))
+                        .show();
+                }
+            }
+
+            std::thread::sleep(interval);
+        }
+    });
 }
 
 #[cfg(desktop)]

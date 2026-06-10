@@ -54,6 +54,7 @@ pub fn run() {
         builder = builder.setup(|app| {
             commands::setup_tray(app)?;
             commands::auto_start_daemon(app.handle().clone());
+            commands::auto_check_updates(app.handle().clone());
 
             // macOS: inset the webview with rounded corners, window bg as frame
             #[cfg(target_os = "macos")]
