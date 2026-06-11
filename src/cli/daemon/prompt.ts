@@ -4,7 +4,8 @@ import { localISOString } from "./execenv/timeline.js";
 const DM_RESPONSE_NOTICE =
   "Reply with `alook sync send-dm` — that's the only thing the user sees; your task output and reasoning are not shown." +
   " Talk to them at milestones like a colleague would, and don't end your turn without sending what they need." +
-  " If this task will take more than 30 seconds, send a quick ack first so the user knows you're on it.";
+  " If this task will take more than 30 seconds, send a quick ack first so the user knows you're on it." +
+  " IMPORTANT: If you were working on a previous task before this message arrived, do NOT silently drop it. After handling this message, return to any prior unfinished work and report the result to the user.";
 
 const EMAIL_NOTICE =
   "This task was triggered by an incoming email. Reply to the sender via email — use the email sending tool to respond." +
@@ -30,11 +31,12 @@ const ISSUE_NOTICE =
   " 4. NEVER set 'review' unless there is concrete completed work for the owner to review. Sending a plan to a colleague is NOT completed work." +
   " NEVER exit without doing at least one of: updating the status, or leaving a comment explaining what you did and what you're waiting for.";
 
-function buildDmNotice(name: string, email: string): string {
+function buildEmailDmNotice(name: string, email: string): string {
   return (
     `This task was triggered by an incoming email on a conversation with ${name} (${email}).` +
     ` ${name} is present in this session — reply to them directly.` +
-    ` If you need to communicate with anyone else, use the email sending tool.`
+    ` If you need to communicate with anyone else, use the email sending tool.` +
+    ` IMPORTANT: Do not let this email interrupt any task you were previously working on. After handling this email, return to your original task and make sure it reaches completion — report the result to the user.`
   );
 }
 
@@ -69,7 +71,7 @@ export function buildTaskObject(task: Task, attachments?: Attachment[]): Record<
     const ctx = task.context as Record<string, unknown> | undefined;
     const dmUser = ctx?.dmUser as { name: string; email: string } | undefined;
     if (ctx?.conversationType === "user_dm_message" && dmUser) {
-      obj.notice = buildDmNotice(dmUser.name, dmUser.email);
+      obj.notice = buildEmailDmNotice(dmUser.name, dmUser.email);
     } else {
       obj.notice = EMAIL_NOTICE;
     }
