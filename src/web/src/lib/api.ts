@@ -30,6 +30,7 @@ import type {
   Workspace,
 } from "@alook/shared";
 import { ApiError } from "@/lib/errors";
+import type { PendingFile } from "@/hooks/use-file-attachments";
 
 const API_BASE = "";
 
@@ -367,7 +368,7 @@ export const sendMessage = async (
   conversationId: string,
   content: string,
   workspaceId: string,
-  files?: File[],
+  files?: PendingFile[],
   metadata?: Record<string, unknown>,
 ): Promise<{ message: Message; task: TaskApi }> => {
   if (!files || files.length === 0) {
@@ -383,8 +384,12 @@ export const sendMessage = async (
   const fd = new FormData();
   fd.append("content", content);
   if (metadata) fd.append("metadata", JSON.stringify(metadata));
-  for (const file of files) {
-    fd.append("file", file);
+  for (const pf of files) {
+    fd.append("file", pf.file);
+  }
+  for (let i = 0; i < files.length; i++) {
+    const blob = files[i].thumbnailBlob;
+    if (blob) fd.append(`thumbnail:${i}`, blob, "thumbnail.jpg");
   }
 
   let res: Response;

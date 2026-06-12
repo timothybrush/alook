@@ -1,25 +1,43 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { generateThumbnail } from "../lib/image-thumbnail";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-/**
- * Owns the composer's file-staging UI: the pending (not-yet-sent) files, the
- * hidden file-input ref, add/remove handlers, and drag-and-drop state.
- *
- * Extracted verbatim from agent-chat-view.tsx. The optimistic-send bookkeeping
- * (`failedSends`, `pendingFilesByMessage`) intentionally stays OWNED by the
- * component — send/retry read and write it — so this hook only manages the
- * staging concern. `pendingFiles` + `setPendingFiles` are returned so the
- * component's send/retry path (Tier 3) can clear/restore them exactly as before.
- *
- * Has no effects, so it carries no effect-order constraints.
- */
+export type PendingFile = {
+  file: File;
+  thumbnailUrl: string | null;
+  thumbnailBlob: Blob | null;
+};
+
+function revokeThumbnailUrls(files: PendingFile[]) {
+  for (const pf of files) {
+    if (pf.thumbnailUrl) URL.revokeObjectURL(pf.thumbnailUrl);
+  }
+}
+
 export function useFileAttachments() {
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingFiles, _setPendingFiles] = useState<PendingFile[]>([]);
+  const pendingFilesRef = useRef(pendingFiles);
+  pendingFilesRef.current = pendingFiles;
+
+  const setPendingFiles = useCallback((next: PendingFile[] | ((prev: PendingFile[]) => PendingFile[])) => {
+    _setPendingFiles((prev) => {
+      const nextVal = typeof next === "function" ? next(prev) : next;
+      if (nextVal.length === 0 && prev.length > 0) {
+        revokeThumbnailUrls(prev);
+      }
+      return nextVal;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => revokeThumbnailUrls(pendingFilesRef.current);
+  }, []);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const addPendingFiles = useCallback((files: File[]) => {
+  const addPendingFiles = useCallback(async (files: File[]) => {
     const valid: File[] = [];
     for (const file of files) {
       if (file.size > MAX_FILE_SIZE) {
@@ -28,9 +46,17 @@ export function useFileAttachments() {
         valid.push(file);
       }
     }
-    if (valid.length > 0) {
-      setPendingFiles((prev) => [...prev, ...valid]);
-    }
+    if (valid.length === 0) return;
+
+    const pending: PendingFile[] = await Promise.all(
+      valid.map(async (file) => {
+        const blob = await generateThumbnail(file);
+        const thumbnailUrl = blob ? URL.createObjectURL(blob) : null;
+        return { file, thumbnailUrl, thumbnailBlob: blob };
+      }),
+    );
+
+    _setPendingFiles((prev) => [...prev, ...pending]);
   }, []);
 
   const handleFileSelect = useCallback(
@@ -38,14 +64,17 @@ export function useFileAttachments() {
       const fileList = e.target.files;
       if (!fileList) return;
       addPendingFiles(Array.from(fileList));
-      // Reset input so re-selecting the same file works
       e.target.value = "";
     },
     [addPendingFiles],
   );
 
   const removePendingFile = useCallback((index: number) => {
-    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+    _setPendingFiles((prev) => {
+      const removed = prev[index];
+      if (removed?.thumbnailUrl) URL.revokeObjectURL(removed.thumbnailUrl);
+      return prev.filter((_, i) => i !== index);
+    });
   }, []);
 
   const [dragging, setDragging] = useState(false);

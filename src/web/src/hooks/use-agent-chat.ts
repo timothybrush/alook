@@ -65,7 +65,9 @@ import type {
   WsMessage,
 } from "@alook/shared";
 import { toast } from "sonner";
+import type { PendingFile } from "@/hooks/use-file-attachments";
 import type { ChatComposerHandle } from "@/components/agent-chat/chat-composer";
+import { getArtifactThumbnailUrl } from "@/components/artifact-content-renderer";
 import { useCachedMessages } from "@/hooks/use-cached-messages";
 import { trackAgentChatOpened, trackMessageSent } from "@/lib/analytics";
 
@@ -90,7 +92,7 @@ export interface UseAgentChatProps {
 export interface UseAgentChatExternal {
   // (a) Setters the hook WRITES — state owned outside the hook, passed IN.
   setFlaggedIds: (ids: Set<string>) => void;
-  setPendingFiles: (files: File[]) => void;
+  setPendingFiles: (files: PendingFile[]) => void;
   setInput: (value: string) => void;
   setQuotedMessage: (value: { id: string; excerpt: string } | null) => void;
   setActiveSkill: (skill: SkillEntry | null) => void;
@@ -98,7 +100,7 @@ export interface UseAgentChatExternal {
   // (b) Values the hook READS — owned outside, passed IN via useLatest ref.
   inputRef: MutableRefObject<string>;
   quotedMessageRef: MutableRefObject<{ id: string; excerpt: string } | null>;
-  pendingFilesRef: MutableRefObject<File[]>;
+  pendingFilesRef: MutableRefObject<PendingFile[]>;
   activeSkillRef: MutableRefObject<SkillEntry | null>;
   // Component-owned ref written by the load effect (gates draft-meta persist).
   draftMetaRestoredRef: MutableRefObject<boolean>;
@@ -138,6 +140,8 @@ export function useAgentChat(
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const messagesSnapshotRef = useRef<Message[]>([]);
+  messagesSnapshotRef.current = messages;
   const [sending, setSending] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [taskMessages, setTaskMessages] = useState<TaskMessageResponse[]>([]);
@@ -145,7 +149,29 @@ export function useAgentChat(
   const [connectionLost, setConnectionLost] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifacts, setArtifactsRaw] = useState<Artifact[]>([]);
+
+  // Stable setter: skip the state update when the artifact list hasn't materially
+  // changed (same ids in same order, same thumbnail readiness). This prevents
+  // `listArtifacts` from creating a new array reference that cascades through
+  // `agentArtifacts` → `timeline` → every MessageItem re-render.
+  const artifactsRef = useRef(artifacts);
+  artifactsRef.current = artifacts;
+  const setArtifacts = useCallback((next: Artifact[] | ((prev: Artifact[]) => Artifact[])) => {
+    setArtifactsRaw((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      if (resolved === prev) return prev;
+      if (
+        resolved.length === prev.length &&
+        resolved.every((a, i) =>
+          a.id === prev[i].id && a.has_thumbnail === prev[i].has_thumbnail,
+        )
+      ) {
+        return prev; // content-equal — keep the old reference
+      }
+      return resolved;
+    });
+  }, []);
   const [previousConversations, setPreviousConversations] = useState<
     PreviousConversation[]
   >([]);
@@ -153,14 +179,18 @@ export function useAgentChat(
   const [napMarkers, setNapMarkers] = useState<NapMarker[]>([]);
 
   const [pendingFilesByMessage, setPendingFilesByMessage] = useState<
-    Map<string, File[]>
+    Map<string, PendingFile[]>
   >(() => new Map());
-  // Optimistic sends that failed to reach the server. The bubble stays in place
-  // with an inline "Not delivered · tap to retry" affordance (iMessage-style),
-  // keyed by the optimistic message id → the content + files to resend.
   const [failedSends, setFailedSends] = useState<
-    Map<string, { content: string; files: File[] }>
+    Map<string, { content: string; files: PendingFile[] }>
   >(() => new Map());
+
+  // Maps real (server) message IDs back to their optimistic (temp-*) IDs so
+  // the React key used in the timeline stays stable when the optimistic message
+  // is replaced — preventing an unmount/remount flash of the entire row.
+  const [stableKeyMap, setStableKeyMap] = useState<Map<string, string>>(
+    () => new Map(),
+  );
 
   const { writeToCache } = useCachedMessages(targetConvId ?? null, workspaceId);
   const writeToCacheRef = useRef(writeToCache);
@@ -283,6 +313,54 @@ export function useAgentChat(
     }, 50);
   }, []);
 
+  // Preload server thumbnail images in the background, then delete the
+  // corresponding pendingFilesByMessage entries and revoke their blob URLs.
+  // This prevents layout shift: the browser image cache is warm before we
+  // remove the local blob source, so the <img> switches without a flash.
+  const preloadThenCleanPending = useCallback(
+    (arts: Artifact[], conversationId: string) => {
+      // Collect thumbnail URLs for image artifacts that have server thumbnails.
+      const thumbUrls = arts
+        .filter((a) => a.content_type.startsWith("image/") && a.has_thumbnail)
+        .map((a) => getArtifactThumbnailUrl(a.id, workspaceId));
+
+      function preloadImage(url: string): Promise<void> {
+        return new Promise((resolve) => {
+          const img = new window.Image();
+          img.onload = () => resolve();
+          img.onerror = () => resolve(); // don't block cleanup on failure
+          img.src = url;
+        });
+      }
+
+      // Preload all thumbnails, then clean up only pending entries whose
+      // artifacts are actually resolved — avoids prematurely clearing entries
+      // for a second message still being uploaded.
+      const artIdSet = new Set(arts.map((a) => a.id));
+      Promise.all(thumbUrls.map(preloadImage)).then(() => {
+        setPendingFilesByMessage((prev) => {
+          if (prev.size === 0) return prev;
+          const msgs = messagesSnapshotRef.current;
+          const next = new Map(prev);
+          let changed = false;
+          for (const [msgId, files] of prev) {
+            const msg = msgs.find((m) => m.id === msgId);
+            const ids = msg?.attachment_ids;
+            if (ids && ids.length > 0 && ids.every((id: string) => artIdSet.has(id))) {
+              for (const pf of files) {
+                if (pf.thumbnailUrl) URL.revokeObjectURL(pf.thumbnailUrl);
+              }
+              next.delete(msgId);
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      });
+    },
+    [workspaceId],
+  );
+
   useEffect(() => {
     // The slow path (no targetConvId) resolves the conversation id via the
     // server using activeChannel, so it must wait for the channel list. The
@@ -314,8 +392,18 @@ export function useAgentChat(
     initialScrollDone.current = false;
     setActiveTask(null);
     setTaskMessages([]);
-    setPendingFilesByMessage(new Map());
+    // Revoke blob URLs before clearing the map — they were kept alive for the
+    // session to avoid layout shift, so this is the only place they get freed.
+    setPendingFilesByMessage((prev) => {
+      for (const files of prev.values()) {
+        for (const pf of files) {
+          if (pf.thumbnailUrl) URL.revokeObjectURL(pf.thumbnailUrl);
+        }
+      }
+      return new Map();
+    });
     setFailedSends(new Map());
+    setStableKeyMap(new Map());
     setNapMarkers([]);
     setPreviousConversations([]);
     setHasMoreConversations(false);
@@ -1316,6 +1404,11 @@ export function useAgentChat(
                 // Full-replace persist of the authoritative post-task artifacts
                 // so the cache stays consistent with what's rendered.
                 persistArtifactsToCache(conversationId, arts);
+                // Preload server thumbnails, then clean up pending blob entries.
+                // This prevents layout shift: the browser cache is warm before
+                // we remove the local blob, so the <img> switches sources without
+                // a visible flash or reflow.
+                preloadThenCleanPending(arts, conversationId);
               }
               setActiveTask(task);
             } catch {
@@ -1499,27 +1592,38 @@ export function useAgentChat(
           ).catch(() => { });
         }
         if (msg.conversationId === conversation?.id) {
+          const incomingTime = new Date(msg.message.created_at).getTime();
+          const optimisticMatch = messagesRef.current.find(
+            (m) =>
+              m.id.startsWith("temp-") &&
+              m.role === msg.message.role &&
+              m.content === msg.message.content &&
+              Math.abs(new Date(m.created_at).getTime() - incomingTime) < 2000,
+          );
+          if (optimisticMatch) {
+            setPendingFilesByMessage((p) => {
+              if (!p.has(optimisticMatch.id)) return p;
+              const files = p.get(optimisticMatch.id)!;
+              const next = new Map(p);
+              next.delete(optimisticMatch.id);
+              next.set(msg.message.id, files);
+              return next;
+            });
+            setStableKeyMap((prev) => {
+              if (prev.has(msg.message.id)) return prev;
+              const next = new Map(prev);
+              next.set(msg.message.id, optimisticMatch.id);
+              return next;
+            });
+          }
           setMessages((prev) => {
-            const incomingTime = new Date(msg.message.created_at).getTime();
-            const optimisticIdx = prev.findIndex(
-              (m) =>
-                m.id.startsWith("temp-") &&
-                m.role === msg.message.role &&
-                m.content === msg.message.content &&
-                Math.abs(new Date(m.created_at).getTime() - incomingTime) <
-                2000,
-            );
-            if (optimisticIdx !== -1) {
-              const optimisticId = prev[optimisticIdx].id;
-              setPendingFilesByMessage((p) => {
-                if (!p.has(optimisticId)) return p;
-                const next = new Map(p);
-                next.delete(optimisticId);
-                return next;
-              });
-              const updated = [...prev];
-              updated[optimisticIdx] = msg.message;
-              return updated;
+            if (optimisticMatch) {
+              const idx = prev.findIndex((m) => m.id === optimisticMatch.id);
+              if (idx !== -1) {
+                const updated = [...prev];
+                updated[idx] = msg.message;
+                return updated;
+              }
             }
             return mergeMessages(prev, [msg.message]);
           });
@@ -1597,6 +1701,16 @@ export function useAgentChat(
     }
 
     const filesToSend = [...pendingFilesRef.current];
+    // Create independent blob URLs for the copies that will live in
+    // pendingFilesByMessage. The originals will be revoked when
+    // setPendingFiles([]) clears the composer state below, so the copies
+    // need their own URLs to keep thumbnails visible until real artifacts load.
+    const filesToRender = filesToSend.map((pf) => ({
+      ...pf,
+      thumbnailUrl: pf.thumbnailBlob
+        ? URL.createObjectURL(pf.thumbnailBlob)
+        : null,
+    }));
     trackMessageSent({ agent_id: agentId, message_length: content.length });
     setInput("");
     setPendingFiles([]);
@@ -1620,11 +1734,12 @@ export function useAgentChat(
       created_at: new Date().toISOString(),
     };
 
-    // Store pending files for the optimistic message rendering
-    if (filesToSend.length > 0) {
+    // Store pending files (with independent blob URLs) for optimistic rendering.
+    // filesToRender has fresh blob URLs that won't be revoked by setPendingFiles([]).
+    if (filesToRender.length > 0) {
       setPendingFilesByMessage((prev) => {
         const next = new Map(prev);
-        next.set(optimisticId, filesToSend);
+        next.set(optimisticId, filesToRender);
         return next;
       });
     }
@@ -1640,11 +1755,21 @@ export function useAgentChat(
         filesToSend.length > 0 ? filesToSend : undefined,
         quoteRef ? { quote: { messageId: quoteRef.id, excerpt: quoteRef.excerpt } } : undefined,
       );
-      // Clean up pending files ref
+      // Remap pending files from optimistic ID → real message ID so the local
+      // blob thumbnails / file pills stay visible until real artifacts are loaded.
       setPendingFilesByMessage((prev) => {
         if (!prev.has(optimisticId)) return prev;
+        const files = prev.get(optimisticId)!;
         const next = new Map(prev);
         next.delete(optimisticId);
+        next.set(message.id, files);
+        return next;
+      });
+      // Record the optimistic→real ID mapping so the React key stays stable
+      // and React updates the existing DOM node instead of unmounting/remounting.
+      setStableKeyMap((prev) => {
+        const next = new Map(prev);
+        next.set(message.id, optimisticId);
         return next;
       });
       setMessages((prev) => {
@@ -1662,13 +1787,12 @@ export function useAgentChat(
         () => { },
       );
       if (message.attachment_ids && message.attachment_ids.length > 0) {
-        const convId = conversation.id;
-        listArtifacts(convId, workspaceId)
+        listArtifacts(conversation.id, workspaceId)
           .then((arts) => {
             setArtifacts(arts);
-            // Keep the cached card metadata consistent with the artifacts shown
-            // after a send-with-attachments refresh (full replace).
-            persistArtifactsToCache(convId, arts);
+            persistArtifactsToCache(conversation.id, arts);
+            // Preload server thumbnails, then clean up pending blob entries.
+            preloadThenCleanPending(arts, conversation.id);
           })
           .catch(() => { });
       }
@@ -1678,9 +1802,10 @@ export function useAgentChat(
     } catch {
       // Keep the optimistic bubble in place and surface an inline
       // "Not delivered · tap to retry" affordance instead of a toast (Priya).
+      // Store the rendering copies (with live blob URLs) so retries can re-use them.
       setFailedSends((prev) => {
         const next = new Map(prev);
-        next.set(optimisticId, { content, files: filesToSend });
+        next.set(optimisticId, { content, files: filesToRender });
         return next;
       });
     } finally {
@@ -1738,8 +1863,15 @@ export function useAgentChat(
         .then(({ message, task }) => {
           setPendingFilesByMessage((prev) => {
             if (!prev.has(optimisticId)) return prev;
+            const files = prev.get(optimisticId)!;
             const next = new Map(prev);
             next.delete(optimisticId);
+            next.set(message.id, files);
+            return next;
+          });
+          setStableKeyMap((prev) => {
+            const next = new Map(prev);
+            next.set(message.id, optimisticId);
             return next;
           });
           setMessages((prev) => {
@@ -1751,6 +1883,16 @@ export function useAgentChat(
           appendCachedMessage(conversation.id, message, workspaceId).catch(
             () => { },
           );
+          if (message.attachment_ids && message.attachment_ids.length > 0) {
+            listArtifacts(conversation.id, workspaceId)
+              .then((arts) => {
+                setArtifacts(arts);
+                persistArtifactsToCache(conversation.id, arts);
+                // Preload server thumbnails, then clean up pending blob entries.
+                preloadThenCleanPending(arts, conversation.id);
+              })
+              .catch(() => { });
+          }
           setActiveTask(task);
           setTaskMessages([]);
           startPolling(task.id, conversation.id);
@@ -1819,8 +1961,17 @@ export function useAgentChat(
       setTaskMessages([]);
       setArtifacts([]);
       setPendingFiles([]);
-      setPendingFilesByMessage(new Map());
+      // Revoke blob URLs before clearing (same as conversation-switch path).
+      setPendingFilesByMessage((prev) => {
+        for (const files of prev.values()) {
+          for (const pf of files) {
+            if (pf.thumbnailUrl) URL.revokeObjectURL(pf.thumbnailUrl);
+          }
+        }
+        return new Map();
+      });
       setFailedSends(new Map());
+      setStableKeyMap(new Map());
       lastSeqRef.current = 0;
       setConnectionLost(false);
       setHasMore(false);
@@ -1852,6 +2003,7 @@ export function useAgentChat(
     napping,
     pendingFilesByMessage,
     failedSends,
+    stableKeyMap,
     // derived
     agentArtifacts,
     agentName,

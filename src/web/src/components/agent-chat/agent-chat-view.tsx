@@ -179,6 +179,7 @@ export function AgentChatView({
     issueTaskId,
   } = useChatSheets(workspaceId);
   const [lightboxArtifact, setLightboxArtifact] = useState<Artifact | null>(null);
+  const [lightboxLocalUrl, setLightboxLocalUrl] = useState<{ url: string; filename: string } | null>(null);
   const {
     pendingFiles,
     setPendingFiles,
@@ -286,6 +287,7 @@ export function AgentChatView({
     napping,
     pendingFilesByMessage,
     failedSends,
+    stableKeyMap,
     agentArtifacts,
     agentName,
     timeline,
@@ -355,6 +357,14 @@ export function AgentChatView({
   );
   // First name only — presence copy reads socially ("Maya is typing…").
   const agentFirstName = useMemo(() => agentName.split(/\s+/)[0] || agentName, [agentName]);
+
+  const handlePendingImageClick = useCallback(
+    (file: File) => {
+      const url = URL.createObjectURL(file);
+      setLightboxLocalUrl({ url, filename: file.name });
+    },
+    [],
+  );
 
   const handleArtifactClick = useCallback(
     (artifact: Artifact) => {
@@ -524,6 +534,44 @@ export function AgentChatView({
     composerRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- composerRef is stable
   }, []);
+
+  const handleEmailClick = useCallback((emailId: string) => {
+    setSelectedEmailId(emailId);
+    setEmailSheetOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setState fns are stable
+  }, []);
+
+  const handleCalendarEventClick = useCallback((id: string) => {
+    setSelectedCalendarEventId(id);
+    setCalendarEventSheetOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setState fns are stable
+  }, []);
+
+  const handleIssueClick = useCallback((issueId: string) => {
+    openIssue(issueId);
+  }, [openIssue]);
+
+  const handleAgentChatOpen = useCallback((agId: string, convId: string) => {
+    openAgentChat(agId, { conversationId: convId });
+  }, [openAgentChat]);
+
+  const threadSummariesRef = useLatest(threadSummaries);
+  const conversationRef = useLatest(conversation);
+  const fetchThreadSummariesRef = useLatest(fetchThreadSummaries);
+
+  const handleReplyInThread = useCallback(async (msgId: string) => {
+    const summary = threadSummariesRef.current.get(msgId);
+    if (summary?.thread_id) {
+      openAgentChat(agentId, { conversationId: summary.thread_id });
+    } else if (conversationRef.current) {
+      try {
+        const result = await createThread(conversationRef.current.id, msgId, "", workspaceId);
+        openAgentChat(agentId, { conversationId: result.conversation.id });
+        fetchThreadSummariesRef.current();
+      } catch {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable
+  }, [openAgentChat, agentId, workspaceId]);
 
   useEffect(() => {
     if (!issueSheetOpen || !selectedIssueId) return;
@@ -716,6 +764,7 @@ export function AgentChatView({
                   taskMessages={[]}
                   connectionLost={false}
                   pendingFilesByMessage={new Map()}
+                  workspaceId={workspaceId}
                   onArtifactClick={() => {}}
                   onEmailClick={() => {}}
                   onIssueClick={() => {}}
@@ -827,8 +876,14 @@ export function AgentChatView({
               }
 
               const msg = item.data;
+              // Use the original optimistic ID as the React key when available,
+              // so replacing "temp-xxx" → "msg_abc" is an in-place UPDATE (same
+              // key, new props) instead of an unmount+remount — eliminating the
+              // visual flicker that occurred when the entire message row was torn
+              // down and rebuilt with a different key.
+              const stableKey = stableKeyMap.get(msg.id) ?? msg.id;
               return (
-                <div key={msg.id} className={spacing}>
+                <div key={stableKey} className={spacing}>
                   <MessageItem
                     msg={msg}
                     agents={agents}
@@ -839,16 +894,12 @@ export function AgentChatView({
                     connectionLost={connectionLost}
                     conversationType={conversation?.type}
                     pendingFilesByMessage={pendingFilesByMessage}
+                    workspaceId={workspaceId}
                     onArtifactClick={handleArtifactClick}
-                    onEmailClick={(emailId) => {
-                      setSelectedEmailId(emailId);
-                      setEmailSheetOpen(true);
-                    }}
-                    onCalendarEventClick={(id) => {
-                      setSelectedCalendarEventId(id);
-                      setCalendarEventSheetOpen(true);
-                    }}
-                    onIssueClick={(issueId) => openIssue(issueId)}
+                    onPendingImageClick={handlePendingImageClick}
+                    onEmailClick={handleEmailClick}
+                    onCalendarEventClick={handleCalendarEventClick}
+                    onIssueClick={handleIssueClick}
                     onRetry={handleRetryTask}
                     mentionComponents={MENTION_COMPONENTS}
                     isFlagged={flaggedIds.has(msg.id)}
@@ -862,20 +913,9 @@ export function AgentChatView({
                     isSendFailed={failedSends.has(msg.id)}
                     onRetrySend={handleRetrySend}
                     onQuote={handleQuoteMessage}
-                    onReplyInThread={conversation?.parent_message_id ? undefined : async (msgId) => {
-                      const summary = threadSummaries.get(msgId);
-                      if (summary?.thread_id) {
-                        openAgentChat(agentId, { conversationId: summary.thread_id });
-                      } else if (conversation) {
-                        try {
-                          const result = await createThread(conversation.id, msgId, "", workspaceId);
-                          openAgentChat(agentId, { conversationId: result.conversation.id });
-                          fetchThreadSummaries();
-                        } catch {}
-                      }
-                    }}
+                    onReplyInThread={conversation?.parent_message_id ? undefined : handleReplyInThread}
                     threadSummary={conversation?.parent_message_id ? null : threadSummaries.get(msg.id) ?? null}
-                    onAgentChatOpen={(agId, convId) => openAgentChat(agId, { conversationId: convId })}
+                    onAgentChatOpen={handleAgentChatOpen}
                   />
                 </div>
               );
@@ -1090,30 +1130,67 @@ export function AgentChatView({
                 onSelect={slashCommand.selectSkill}
                 anchorPos={slashCommand.anchorPos}
               />
-              {/* Pending file pills — above the input text, never disturbs the buttons */}
-              {pendingFiles.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 px-3.5 pt-3 pb-0.5">
-                  {pendingFiles.map((file, i) => (
-                    <span
-                      key={`${file.name}-${i}`}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
-                    >
-                      <FileText className="size-3 shrink-0" />
-                      <span className="truncate max-w-30">{file.name}</span>
-                      <span className="text-muted-foreground/60">
-                        {formatSize(file.size)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removePendingFile(i)}
-                        className="ml-0.5 rounded-sm p-0.5 hover:bg-muted-foreground/20 transition-colors"
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+              {/* Pending file previews — images and non-images in separate rows */}
+              {pendingFiles.length > 0 && (() => {
+                const images = pendingFiles.map((pf, i) => ({ pf, i })).filter(({ pf }) => pf.thumbnailUrl);
+                const others = pendingFiles.map((pf, i) => ({ pf, i })).filter(({ pf }) => !pf.thumbnailUrl);
+                return (
+                  <div className="px-3.5 pt-3 pb-0.5 space-y-1.5">
+                    {images.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {images.map(({ pf, i }) => (
+                          <div key={`${pf.file.name}-${i}`} className="relative group">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const url = URL.createObjectURL(pf.file);
+                                setLightboxLocalUrl({ url, filename: pf.file.name });
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <img
+                                src={pf.thumbnailUrl!}
+                                alt={pf.file.name}
+                                className="h-12 w-auto rounded-md object-cover"
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removePendingFile(i)}
+                              className="absolute -top-1.5 -right-1.5 size-4 rounded-full bg-muted-foreground text-background flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X className="size-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {others.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {others.map(({ pf, i }) => (
+                          <span
+                            key={`${pf.file.name}-${i}`}
+                            className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+                          >
+                            <FileText className="size-3 shrink-0" />
+                            <span className="truncate max-w-30">{pf.file.name}</span>
+                            <span className="text-muted-foreground/60">
+                              {formatSize(pf.file.size)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removePendingFile(i)}
+                              className="ml-0.5 rounded-sm p-0.5 hover:bg-muted-foreground/20 transition-colors"
+                            >
+                              <X className="size-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {/* Composer + absolutely-positioned buttons */}
               <div className="relative">
                 <input
@@ -1224,6 +1301,17 @@ export function AgentChatView({
         artifact={lightboxArtifact}
         workspaceId={workspaceId}
       />
+      {lightboxLocalUrl && (
+        <ImageLightbox
+          open
+          onClose={() => {
+            URL.revokeObjectURL(lightboxLocalUrl.url);
+            setLightboxLocalUrl(null);
+          }}
+          imageUrl={lightboxLocalUrl.url}
+          filename={lightboxLocalUrl.filename}
+        />
+      )}
 
       <ArtifactSheet
         open={artifactSheetOpen}

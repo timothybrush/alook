@@ -6,17 +6,17 @@ import type { Artifact } from "@alook/shared";
 import { X, Download } from "lucide-react";
 import { getArtifactUrl } from "@/components/artifact-content-renderer";
 
-export function ImageLightbox({
-  open,
-  onClose,
-  artifact,
-  workspaceId,
-}: {
+type LightboxProps = {
   open: boolean;
   onClose: () => void;
-  artifact: Artifact | null;
-  workspaceId: string;
-}) {
+} & (
+  | { artifact: Artifact | null; workspaceId: string; imageUrl?: undefined }
+  | { imageUrl: string; filename: string; artifact?: undefined; workspaceId?: undefined }
+);
+
+export function ImageLightbox(props: LightboxProps) {
+  const { open, onClose } = props;
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -30,10 +30,20 @@ export function ImageLightbox({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, handleKeyDown]);
 
-  if (!open || !artifact) return null;
+  let src: string;
+  let alt: string;
+  let downloadUrl: string | undefined;
 
-  const fullUrl = getArtifactUrl(artifact.id, workspaceId);
-  const downloadUrl = getArtifactUrl(artifact.id, workspaceId, true);
+  if (props.imageUrl) {
+    if (!open) return null;
+    src = props.imageUrl;
+    alt = props.filename;
+  } else {
+    if (!open || !props.artifact) return null;
+    src = getArtifactUrl(props.artifact.id, props.workspaceId);
+    alt = props.artifact.filename;
+    downloadUrl = getArtifactUrl(props.artifact.id, props.workspaceId, true);
+  }
 
   return createPortal(
     <div
@@ -41,14 +51,16 @@ export function ImageLightbox({
       onClick={onClose}
     >
       <div className="absolute top-4 right-4 flex items-center gap-2">
-        <a
-          href={downloadUrl}
-          download={artifact.filename}
-          onClick={(e) => e.stopPropagation()}
-          className="rounded-full p-2 text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-        >
-          <Download className="size-5" />
-        </a>
+        {downloadUrl && (
+          <a
+            href={downloadUrl}
+            download={alt}
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-full p-2 text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <Download className="size-5" />
+          </a>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -58,8 +70,8 @@ export function ImageLightbox({
         </button>
       </div>
       <img
-        src={fullUrl}
-        alt={artifact.filename}
+        src={src}
+        alt={alt}
         onClick={(e) => e.stopPropagation()}
         className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
       />

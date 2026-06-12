@@ -12,6 +12,8 @@ import { TaskStream } from "@/components/task-stream";
 import { RuntimeErrorBlock } from "@/components/agent-chat/runtime-error-block";
 import { AnimatedAvatar, type AvatarConfig } from "@/components/avatar";
 import { FileText, Flag, Copy, Check, MessageSquareQuote, MessageSquare, Image } from "lucide-react";
+import { getArtifactThumbnailUrl } from "@/components/artifact-content-renderer";
+import type { PendingFile } from "@/hooks/use-file-attachments";
 import { EmailCard } from "@/components/agent-chat/event-cards/email-card";
 import { CalendarCard } from "@/components/agent-chat/event-cards/calendar-card";
 import { IssueCard } from "@/components/agent-chat/event-cards/issue-card";
@@ -64,7 +66,8 @@ export interface MessageItemProps {
   taskMessages: TaskMessageResponse[];
   connectionLost: boolean;
   conversationType?: string | null;
-  pendingFilesByMessage: Map<string, File[]>;
+  pendingFilesByMessage: Map<string, PendingFile[]>;
+  workspaceId: string;
   onArtifactClick: (a: Artifact) => void;
   onEmailClick: (emailId: string) => void;
   onIssueClick: (issueId: string) => void;
@@ -82,6 +85,7 @@ export interface MessageItemProps {
   /** This optimistic user message failed to send — show the inline retry affordance. */
   isSendFailed?: boolean;
   onRetrySend?: (messageId: string) => void;
+  onPendingImageClick?: (file: File) => void;
   onQuote?: (messageId: string, excerpt: string) => void;
   onReplyInThread?: (messageId: string) => void;
   threadSummary?: { thread_id: string; reply_count: number; last_reply_at: string | null; thread_title: string } | null;
@@ -182,7 +186,8 @@ function AttachmentChips({
 }) {
   const matched = attachmentIds
     .map((id) => artifacts.find((a) => a.id === id))
-    .filter((a): a is Artifact => !!a);
+    .filter((a): a is Artifact => !!a)
+    .filter((a) => !a.content_type.startsWith("image/"));
 
   if (matched.length === 0) return null;
 
@@ -195,7 +200,7 @@ function AttachmentChips({
           onClick={(e) => { e.stopPropagation(); onArtifactClick(a); }}
           className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/10 border border-primary-foreground/20 px-2 py-0.5 text-xs text-primary-foreground/80 hover:bg-primary-foreground/20 transition-colors cursor-pointer"
         >
-          {a.content_type.startsWith("image/") ? <Image className="size-3 shrink-0" /> : <FileText className="size-3 shrink-0" />}
+          <FileText className="size-3 shrink-0" />
           <span className="truncate max-w-37.5">{a.filename}</span>
         </button>
       ))}
@@ -203,31 +208,53 @@ function AttachmentChips({
   );
 }
 
-function PendingFileChips({
-  pendingFiles,
-  messageId,
+function ImageAttachmentCards({
+  attachmentIds,
+  artifacts,
+  workspaceId,
+  onArtifactClick,
 }: {
-  pendingFiles: Map<string, File[]>;
-  messageId: string;
+  attachmentIds: string[];
+  artifacts: Artifact[];
+  workspaceId: string;
+  onArtifactClick: (a: Artifact) => void;
 }) {
-  const files = pendingFiles.get(messageId);
-  if (!files || files.length === 0) return null;
+  const images = attachmentIds
+    .map((id) => artifacts.find((a) => a.id === id))
+    .filter((a): a is Artifact => !!a && a.content_type.startsWith("image/"));
+
+  if (images.length === 0) return null;
 
   return (
     <div className="flex flex-wrap gap-1.5 mt-1.5">
-      {files.map((f, i) => (
-        <span
-          key={i}
-          className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/10 border border-primary-foreground/20 px-2 py-0.5 text-xs text-primary-foreground/80"
-        >
-          <FileText className="size-3 shrink-0" />
-          <span className="truncate max-w-37.5">{f.name}</span>
-        </span>
-      ))}
+      {images.map((a) => {
+        const thumbUrl = a.has_thumbnail
+          ? getArtifactThumbnailUrl(a.id, workspaceId)
+          : undefined;
+        return thumbUrl ? (
+          <button
+            key={a.id}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onArtifactClick(a); }}
+            className="max-w-48 overflow-hidden rounded-(--radius) border border-(--border) cursor-pointer [transition:translate_.2s_cubic-bezier(.2,.8,.2,1),box-shadow_.2s_ease] hover:-translate-y-0.5 [box-shadow:var(--e1)] hover:[box-shadow:var(--e2)]"
+          >
+            <img src={thumbUrl} alt={a.filename} loading="lazy" className="block w-full h-auto" />
+          </button>
+        ) : (
+          <button
+            key={a.id}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onArtifactClick(a); }}
+            className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/10 border border-primary-foreground/20 px-2 py-0.5 text-xs text-primary-foreground/80 hover:bg-primary-foreground/20 transition-colors cursor-pointer"
+          >
+            <Image className="size-3 shrink-0" />
+            <span className="truncate max-w-37.5">{a.filename}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
-
 
 // Slack/Discord cluster model: delegates to <MessageCluster> from
 // chat-primitives. This wrapper adapts the product's AnimatedAvatar + the
@@ -398,6 +425,7 @@ export const MessageItem = memo(function MessageItem({
   connectionLost,
   conversationType,
   pendingFilesByMessage,
+  workspaceId,
   onArtifactClick,
   onEmailClick,
   onIssueClick,
@@ -411,6 +439,7 @@ export const MessageItem = memo(function MessageItem({
   agentName,
   agentAvatarConfig,
   isSendFailed,
+  onPendingImageClick,
   onRetrySend,
   onQuote,
   onReplyInThread,
@@ -599,14 +628,62 @@ export const MessageItem = memo(function MessageItem({
                 </div>
               )}
               {(() => {
-                if (msg.attachment_ids && msg.attachment_ids.length > 0) {
-                  const hasMatch = msg.attachment_ids.some((id: string) => artifacts.some((a) => a.id === id));
-                  if (hasMatch) return <AttachmentChips attachmentIds={msg.attachment_ids} artifacts={artifacts} onArtifactClick={onArtifactClick} />;
+                // Non-image file chips inside the bubble.
+                // Prefer local pending pills (instant) to avoid flash on transition.
+                const pfs = pendingFilesByMessage.get(msg.id);
+                const nonImagePfs = pfs?.filter((pf) => !pf.thumbnailUrl);
+                if (nonImagePfs && nonImagePfs.length > 0) {
+                  return (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {nonImagePfs.map((pf, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 rounded-md bg-primary-foreground/10 border border-primary-foreground/20 px-2 py-0.5 text-xs text-primary-foreground/80">
+                          <FileText className="size-3 shrink-0" />
+                          <span className="truncate max-w-37.5">{pf.file.name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  );
                 }
-                return <PendingFileChips pendingFiles={pendingFilesByMessage} messageId={msg.id} />;
+                const ids = msg.attachment_ids;
+                if (ids && ids.length > 0) {
+                  const resolved = ids.map((id: string) => artifacts.find((a) => a.id === id)).filter((a): a is Artifact => !!a);
+                  const nonImageResolved = resolved.filter((a) => !a.content_type.startsWith("image/"));
+                  if (nonImageResolved.length > 0) return <AttachmentChips attachmentIds={nonImageResolved.map((a) => a.id)} artifacts={artifacts} onArtifactClick={onArtifactClick} />;
+                }
+                return null;
               })()}
               {toolbar}
             </MessageBubble>
+            {(() => {
+              // Image thumbnail cards below the bubble.
+              // Prefer local blob thumbnails (instant, no network fetch) over
+              // server thumbnails to avoid a flash when transitioning sources.
+              const pfs = pendingFilesByMessage.get(msg.id);
+              const imagePfs = pfs?.filter((pf) => pf.thumbnailUrl);
+              if (imagePfs && imagePfs.length > 0) {
+                return (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {imagePfs.map((pf, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onPendingImageClick?.(pf.file); }}
+                        className="max-w-48 overflow-hidden rounded-(--radius) border border-(--border) cursor-pointer [transition:translate_.2s_cubic-bezier(.2,.8,.2,1),box-shadow_.2s_ease] hover:-translate-y-0.5 [box-shadow:var(--e1)] hover:[box-shadow:var(--e2)]"
+                      >
+                        <img src={pf.thumbnailUrl!} alt={pf.file.name} className="block w-full h-auto" />
+                      </button>
+                    ))}
+                  </div>
+                );
+              }
+              const ids = msg.attachment_ids;
+              if (ids && ids.length > 0) {
+                const resolved = ids.map((id: string) => artifacts.find((a) => a.id === id)).filter((a): a is Artifact => !!a);
+                const imageResolved = resolved.filter((a) => a.content_type.startsWith("image/"));
+                if (imageResolved.length > 0) return <ImageAttachmentCards attachmentIds={imageResolved.map((a) => a.id)} artifacts={artifacts} workspaceId={workspaceId} onArtifactClick={onArtifactClick} />;
+              }
+              return null;
+            })()}
             {actionSheet}
             {isSendFailed && (
               <button

@@ -72,6 +72,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   let content: string;
   let messageMetadata: Record<string, unknown> | undefined;
   const files: File[] = [];
+  const thumbnails = new Map<number, File>();
 
   if (isMultipart) {
     let formData: FormData;
@@ -89,6 +90,10 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       if (key === "file" && value instanceof File) {
         files.push(value);
       }
+    }
+    for (const [key, value] of formData.entries()) {
+      const m = key.match(/^thumbnail:(\d+)$/);
+      if (m && value instanceof File) thumbnails.set(Number(m[1]), value);
     }
   } else {
     const [body, valErr] = await parseBody(req, CreateMessageRequestSchema);
@@ -118,7 +123,8 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
 
   // Upload files to R2 and create artifact rows
   const artifactIds: string[] = [];
-  for (const file of files) {
+  for (let fi = 0; fi < files.length; fi++) {
+    const file = files[fi];
     const filename = sanitizeFilename(file.name);
     const fileContentType = file.type || "application/octet-stream";
     const artifactId = "art_" + nanoid();
@@ -127,6 +133,15 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     await bucket.put(r2Key, await file.arrayBuffer(), {
       httpMetadata: { contentType: fileContentType },
     });
+
+    let thumbnailR2Key: string | undefined;
+    const thumb = thumbnails.get(fi);
+    if (thumb && thumb.size <= 50 * 1024) {
+      thumbnailR2Key = `artifacts/${ws.workspaceId}/${conversation.agentId}/${id}/${artifactId}/thumbnail.jpg`;
+      await bucket.put(thumbnailR2Key, await thumb.arrayBuffer(), {
+        httpMetadata: { contentType: "image/jpeg" },
+      });
+    }
 
     await queries.artifact.createArtifact(db, {
       id: artifactId,
@@ -137,6 +152,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       contentType: fileContentType,
       size: file.size,
       r2Key,
+      thumbnailR2Key,
       source: "attachment",
     });
 
