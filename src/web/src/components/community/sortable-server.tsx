@@ -44,8 +44,8 @@ export function SortableServer({ server, active, onClick, onLeave, onOpenSetting
                 </button>
                 {server.mentions > 0 && (
                   <span
-                    className="pointer-events-none absolute -bottom-1 -right-1 grid min-w-5 place-items-center rounded-full border-[3px] border-(--d-rail) px-1 text-[11px] font-bold leading-4.5 text-white"
-                    style={{ background: "var(--destructive)" }}
+                    className="pointer-events-none absolute -bottom-1 -right-1 grid min-w-5 place-items-center rounded-full border border-(--d-rail) px-1 text-[11px] font-black tracking-tight tabular-nums leading-4.5 text-white"
+                    style={{ background: "var(--destructive)", WebkitTextStroke: "0.4px currentColor" }}
                   >
                     {server.mentions}
                   </span>
