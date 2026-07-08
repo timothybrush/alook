@@ -27,7 +27,6 @@ import type {
   InviteRow,
   AuditEntry,
   Mention,
-  ForYouEvent,
   UnreadServer,
 } from "@/components/community/_types"
 
@@ -326,49 +325,6 @@ export const MENTIONS: Mention[] = [
   {
     id: "mn_3", server: "Alook", channel: "help-forum",
     m: { id: "mn_m3", authorName: "jgtech", createdAt: "2026-06-25T07:14:00Z", authorAvatar: "j", content: "@Gener 587 fixed the SMTP timeout, thank you!" },
-  },
-]
-
-// "For You" events — direct hits (mentions, replies, thread updates)
-export const FOR_YOU_FEED: ForYouEvent[] = [
-  {
-    eventKey: "mention:mn_m1",
-    kind: "mention",
-    serverId: "sv_alook",
-    serverName: "Alook",
-    channelId: "ch_general",
-    channelName: "general",
-    messageId: "mn_m1",
-    authorName: "Gus",
-    authorAvatar: "Gu",
-    preview: "thanks @Gener — can you cross-post this in #general?",
-    createdAt: "2026-06-25T09:48:00Z",
-  },
-  {
-    eventKey: "reply:r_m1",
-    kind: "reply",
-    serverId: "sv_alook",
-    serverName: "Alook",
-    channelId: "ch_general",
-    channelName: "general",
-    messageId: "r_m1",
-    authorName: "Lindsay",
-    authorAvatar: "L",
-    preview: "got it — that approach works for me",
-    createdAt: "2026-06-25T09:20:00Z",
-  },
-  {
-    eventKey: "thread:ch_thread_42",
-    kind: "thread",
-    serverId: "sv_cf",
-    serverName: "Cloudflare",
-    channelId: "ch_thread_42",
-    channelName: "workers-routing",
-    messageId: "ch_thread_42",
-    authorName: "",
-    authorAvatar: "",
-    preview: "",
-    createdAt: "2026-06-25T08:00:00Z",
   },
 ]
 

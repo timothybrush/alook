@@ -1,6 +1,5 @@
 "use client"
 
-import { useRef } from "react"
 import {
   useMutation,
   useQueryClient,
@@ -833,34 +832,14 @@ export function useMarkDmRead() {
 
 export function useMarkAllInboxRead() {
   const queryClient = useQueryClient()
-  // TanStack Query calls `onMutate` before `mutationFn`, so the optimistic
-  // clear below wipes the for-you cache before `mutationFn` can read the
-  // eventKeys. Capture the pre-clear eventKeys in `onMutate` via a ref, and
-  // read them back in `mutationFn`. Ref (not module state) so parallel calls
-  // from different hook instances don't stomp each other.
-  const eventKeysRef = useRef<string[]>([])
   return useMutation<void, Error, void>({
     mutationFn: async () => {
-      const eventKeys = eventKeysRef.current
       await Promise.all([
         apiFetch("/api/community/inbox/mentions/read-all", { method: "POST" }),
         apiFetch("/api/community/inbox/unreads/read-all", { method: "POST" }),
-        eventKeys.length > 0
-          ? apiFetch("/api/community/inbox/foryou/dismiss", {
-              method: "POST",
-              body: JSON.stringify({ eventKeys }),
-            })
-          : Promise.resolve(),
       ])
     },
     onMutate: async () => {
-      // Snapshot the for-you eventKeys BEFORE the optimistic clear — the
-      // dismiss POST needs them and `mutationFn` runs after this hook.
-      const forYou = queryClient.getQueryData<{ events: { eventKey: string }[] }>(
-        communityKeys.inboxForYou(),
-      )
-      eventKeysRef.current = forYou?.events.map((e) => e.eventKey) ?? []
-      queryClient.setQueryData(communityKeys.inboxForYou(), { events: [] })
       queryClient.setQueryData(communityKeys.inboxUnreads(), { servers: [] })
       queryClient.setQueryData(communityKeys.inboxMentions(), { mentions: [] })
     },
@@ -871,35 +850,10 @@ export function useMarkAllInboxRead() {
     },
     onError: () => {
       void queryClient.invalidateQueries({ queryKey: communityKeys.inbox() })
-      // A partial write is possible (one of the three POSTs may have
-      // succeeded before another failed) — refresh the rail badges too so
-      // the UI reflects whatever landed on the server.
+      // A partial write is possible (one of the two POSTs may have succeeded
+      // before the other failed) — refresh the rail badges too so the UI
+      // reflects whatever landed on the server.
       void queryClient.invalidateQueries({ queryKey: communityKeys.servers() })
-    },
-  })
-}
-
-export type DismissForYouArgs = { eventKey: string }
-
-export function useDismissForYouEvent() {
-  const queryClient = useQueryClient()
-  return useMutation<void, Error, DismissForYouArgs, { snapshot: unknown }>({
-    mutationFn: async ({ eventKey }) => {
-      await apiFetch("/api/community/inbox/foryou/dismiss", {
-        method: "POST",
-        body: JSON.stringify({ eventKeys: [eventKey] }),
-      })
-    },
-    onMutate: async (args) => {
-      const key = communityKeys.inboxForYou()
-      const snapshot = queryClient.getQueryData(key)
-      queryClient.setQueryData(key, (prev: { events: { eventKey: string }[] } | undefined) =>
-        prev ? { ...prev, events: prev.events.filter((e) => e.eventKey !== args.eventKey) } : prev,
-      )
-      return { snapshot }
-    },
-    onError: (_err, _args, ctx) => {
-      if (ctx?.snapshot) queryClient.setQueryData(communityKeys.inboxForYou(), ctx.snapshot)
     },
   })
 }

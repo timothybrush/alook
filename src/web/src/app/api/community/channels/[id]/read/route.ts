@@ -20,10 +20,9 @@ import { requireChannelMember } from "@/lib/community/permissions"
  *   message belongs to another channel (400) — protects against confused-
  *   deputy watermark advances.
  *
- * Mention clear + for-you dismiss still fire in one D1 batch on non-empty
- * channels. On an empty channel we short-circuit before writing anything —
- * there are no mentions / for-you entries to clear on a channel with no
- * messages.
+ * Mention clear still fires in one D1 batch on non-empty channels. On an
+ * empty channel we short-circuit before writing anything — there are no
+ * mentions to clear on a channel with no messages.
  */
 export const PUT = withAuth(async (req: NextRequest, ctx) => {
   const channelId = ctx.params?.id
@@ -76,9 +75,9 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
     if (!target) return writeJSON({ ok: true })
   }
 
-  // Fire all three writes in one D1 batch so partial failure can't leave the
-  // inbox inconsistent (mark-read succeeded but the mention/for-you dismissal
-  // didn't, or vice versa). D1 batches are atomic per SQLite guarantees.
+  // Fire both writes in one D1 batch so partial failure can't leave the
+  // inbox inconsistent (mark-read succeeded but the mention clear didn't, or
+  // vice versa). D1 batches are atomic per SQLite guarantees.
   await db.batch([
     queries.communityReadState.markReadToMessageBuilder(db, {
       userId: ctx.userId,
@@ -86,7 +85,6 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
       message: target,
     }),
     queries.communityMention.markChannelMentionsReadBuilder(db, ctx.userId, channelId),
-    queries.communityInbox.dismissForYouForChannelBuilder(db, ctx.userId, channelId),
   ])
 
   return writeJSON({ ok: true })

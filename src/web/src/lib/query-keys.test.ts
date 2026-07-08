@@ -83,7 +83,6 @@ describe("communityKeys", () => {
     const inbox = communityKeys.inbox()
     expect(inbox).toEqual(["community", "inbox"])
     expect(communityKeys.inboxUnreads()).toEqual([...inbox, "unreads"])
-    expect(communityKeys.inboxForYou()).toEqual([...inbox, "foryou"])
     expect(communityKeys.inboxMentions()).toEqual([...inbox, "mentions"])
   })
 

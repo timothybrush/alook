@@ -731,60 +731,28 @@ describe("useMarkDmRead — rollback", () => {
   })
 })
 
-// ── useMarkAllInboxRead — eventKeys captured pre-clear ───────────────────
+// ── useMarkAllInboxRead ───────────────────────────────────────────────────
 
-describe("useMarkAllInboxRead — captures eventKeys BEFORE optimistic clear", () => {
-  // Regression: the old implementation read the for-you cache inside
-  // `mutationFn`, which runs AFTER `onMutate` per TanStack ordering. Since
-  // `onMutate` wiped the cache to `{ events: [] }`, `mutationFn` always saw
-  // an empty list and skipped the dismiss POST. The fix uses a ref
-  // populated in `onMutate`.
-  it("dismisses each for-you eventKey with a POST containing the pre-clear keys", async () => {
-    capturedQc.setQueryData(communityKeys.inboxForYou(), {
-      events: [
-        { eventKey: "mention:m_1" },
-        { eventKey: "reply:r_2" },
-        { eventKey: "reaction:x_3" },
-      ],
-    })
+describe("useMarkAllInboxRead", () => {
+  it("fires exactly two POSTs — mentions read-all + unreads read-all", async () => {
     capturedQc.setQueryData(communityKeys.inboxUnreads(), { servers: [] })
     capturedQc.setQueryData(communityKeys.inboxMentions(), { mentions: [] })
     apiFetchMock.mockResolvedValue(undefined)
     const mod = await loadMod()
     mod.useMarkAllInboxRead()
     await runMutation<void>(undefined as unknown as void)
-    // Three POSTs — mentions read-all, unreads read-all, foryou dismiss.
-    const posts = apiFetchMock.mock.calls.filter(
-      (c) => (c[1] as { method?: string })?.method === "POST",
-    )
-    expect(posts).toHaveLength(3)
-    const dismiss = posts.find((c) => (c[0] as string).endsWith("/foryou/dismiss"))
-    expect(dismiss).toBeDefined()
-    const body = JSON.parse((dismiss![1] as { body: string }).body)
-    expect(body).toEqual({ eventKeys: ["mention:m_1", "reply:r_2", "reaction:x_3"] })
-  })
-
-  it("skips the dismiss POST when there are no for-you events", async () => {
-    capturedQc.setQueryData(communityKeys.inboxForYou(), { events: [] })
-    apiFetchMock.mockResolvedValue(undefined)
-    const mod = await loadMod()
-    mod.useMarkAllInboxRead()
-    await runMutation<void>(undefined as unknown as void)
-    const dismissCalls = apiFetchMock.mock.calls.filter((c) =>
-      (c[0] as string).endsWith("/foryou/dismiss"),
-    )
-    expect(dismissCalls).toHaveLength(0)
-    // Mentions + unreads read-all still fire.
     const posts = apiFetchMock.mock.calls.filter(
       (c) => (c[1] as { method?: string })?.method === "POST",
     )
     expect(posts).toHaveLength(2)
+    const paths = posts.map((c) => c[0] as string).sort()
+    expect(paths).toEqual([
+      "/api/community/inbox/mentions/read-all",
+      "/api/community/inbox/unreads/read-all",
+    ])
   })
 
-  it("still clears all three inbox caches optimistically", async () => {
-    capturedQc.setQueryData(communityKeys.inboxForYou(), {
-      events: [{ eventKey: "mention:m_1" }],
-    })
+  it("clears both inbox caches optimistically", async () => {
     capturedQc.setQueryData(communityKeys.inboxUnreads(), {
       servers: [{ serverId: "s_1", serverName: "s", channels: [{ channelId: "ch_1" }] }],
     })
@@ -795,7 +763,6 @@ describe("useMarkAllInboxRead — captures eventKeys BEFORE optimistic clear", (
     const mod = await loadMod()
     mod.useMarkAllInboxRead()
     await runMutation<void>(undefined as unknown as void)
-    expect(capturedQc.getQueryData(communityKeys.inboxForYou())).toEqual({ events: [] })
     expect(capturedQc.getQueryData(communityKeys.inboxUnreads())).toEqual({ servers: [] })
     expect(capturedQc.getQueryData(communityKeys.inboxMentions())).toEqual({ mentions: [] })
   })
@@ -803,7 +770,6 @@ describe("useMarkAllInboxRead — captures eventKeys BEFORE optimistic clear", (
   it("onSuccess invalidates communityKeys.servers() so every rail badge drops to 0", async () => {
     // Mark-all-read clears every unread mention row on the server — the rail
     // aggregate must refresh across all servers, not just the inbox feeds.
-    capturedQc.setQueryData(communityKeys.inboxForYou(), { events: [] })
     apiFetchMock.mockResolvedValue(undefined)
     const mod = await loadMod()
     mod.useMarkAllInboxRead()
@@ -814,24 +780,6 @@ describe("useMarkAllInboxRead — captures eventKeys BEFORE optimistic clear", (
       return Array.isArray(key) && key.length === 2 && key[0] === "community" && key[1] === "servers"
     })
     expect(serversInvalidates.length).toBeGreaterThanOrEqual(1)
-  })
-})
-
-// ── useDismissForYouEvent — rollback ─────────────────────────────────────
-
-describe("useDismissForYouEvent — rollback", () => {
-  it("restores the event on failure", async () => {
-    capturedQc.setQueryData(communityKeys.inboxForYou(), {
-      events: [{ eventKey: "mention:m_1", kind: "mention" }],
-    })
-    apiFetchMock.mockRejectedValueOnce(new Error("boom"))
-    const mod = await loadMod()
-    mod.useDismissForYouEvent()
-    await runMutation({ eventKey: "mention:m_1" }).catch(() => {})
-    const cache = capturedQc.getQueryData<{ events: { eventKey: string }[] }>(
-      communityKeys.inboxForYou(),
-    )
-    expect(cache?.events).toHaveLength(1)
   })
 })
 

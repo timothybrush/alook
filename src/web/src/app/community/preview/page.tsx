@@ -26,7 +26,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog"
 import {
   SERVERS, CATEGORIES, MESSAGES, NEW_DIVIDER_BEFORE, PINNED, SEARCH_RESULTS,
   THREADS, THREAD_MESSAGES, FORUM_POSTS, FORUM_TAGS, MEMBERS, FRIENDS, PENDING, BLOCKED, DMS, DM_MESSAGES,
-  PROFILES, INVITES, AUDIT_LOG, MENTIONS, FOR_YOU_FEED, UNREAD_SERVERS, MOCK_FOLDERS,
+  PROFILES, INVITES, AUDIT_LOG, MENTIONS, UNREAD_SERVERS, MOCK_FOLDERS,
 } from "./_mock"
 import type { RightPanel, MobileZone, View, SettingsSection, Msg, PendingRequest, BlockedUser, ForumPost, Profile, Thread, Role, DM, Member } from "@/components/community/_types"
 import { useBreakpoint } from "@/hooks/use-mobile"
@@ -99,7 +99,6 @@ export default function CommunityPreview() {
   const [searchQuery] = useState("")
   // image attachment being previewed in the lightbox
   const [preview, setPreview] = useState<string | null>(null)
-  const [forYouFeed, setForYouFeed] = useState(FOR_YOU_FEED)
   const [unreadFeed] = useState(UNREAD_SERVERS)
 
   // open an inbox event → jump to its server + channel
@@ -115,16 +114,13 @@ export default function CommunityPreview() {
     appName: "Alook",
     inbox: (
       <InboxPopover
-        forYou={forYouFeed}
         unreads={unreadFeed}
         mentions={MENTIONS}
-        onOpenEvent={(e) => openServerChannel(e.serverId, e.channelId)}
         onOpenChannel={openServerChannel}
-        onDismissEvent={(eventKey) => setForYouFeed((prev) => prev.filter((e) => e.eventKey !== eventKey))}
-        onMarkAllRead={() => setForYouFeed([])}
+        onMarkAllRead={() => {}}
       />
     ),
-    hasUnread: forYouFeed.length > 0 || unreadFeed.length > 0 || MENTIONS.length > 0,
+    hasUnread: unreadFeed.length > 0 || MENTIONS.length > 0,
   }
 
   // open a profile card near the click point (desktop popover / mobile sheet).

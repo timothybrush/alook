@@ -11,7 +11,6 @@ const mockGetMessage = vi.fn()
 const mockGetLatestMessage = vi.fn()
 const mockMarkReadToMessageBuilder = vi.fn()
 const mockMarkChannelMentionsReadBuilder = vi.fn()
-const mockDismissForYouForChannelBuilder = vi.fn()
 const mockBatch = vi.fn()
 
 vi.mock("@/lib/db", () => ({
@@ -37,10 +36,6 @@ vi.mock("@alook/shared", async () => {
       communityMention: {
         markChannelMentionsReadBuilder: (...a: unknown[]) =>
           mockMarkChannelMentionsReadBuilder(...a),
-      },
-      communityInbox: {
-        dismissForYouForChannelBuilder: (...a: unknown[]) =>
-          mockDismissForYouForChannelBuilder(...a),
       },
     },
   }
@@ -80,13 +75,10 @@ describe("PUT /api/community/channels/[id]/read", () => {
     mockMarkChannelMentionsReadBuilder.mockReturnValue({
       __builder: "markChannelMentionsRead",
     })
-    mockDismissForYouForChannelBuilder.mockReturnValue({
-      __builder: "dismissForYouForChannel",
-    })
     mockBatch.mockResolvedValue(undefined)
   })
 
-  it("no-body call on non-empty channel: uses latest message and issues one batch with all three builders", async () => {
+  it("no-body call on non-empty channel: uses latest message and issues one batch with both builders", async () => {
     mockGetChannel.mockResolvedValue({ id: "c1", serverId: "s1" })
     mockGetChannelForMember.mockResolvedValue({ id: "c1", serverId: "s1" })
     mockGetLatestMessage.mockResolvedValue({
@@ -104,14 +96,13 @@ describe("PUT /api/community/channels/[id]/read", () => {
       message: { id: "m_latest", createdAt: "2026-07-05T10:00:00.000Z" },
     })
 
-    // Exactly one batch call carrying all three statements in order.
+    // Exactly one batch call carrying both statements in order.
     expect(mockBatch).toHaveBeenCalledTimes(1)
     const batchArg = mockBatch.mock.calls[0]![0]
     expect(Array.isArray(batchArg)).toBe(true)
-    expect(batchArg).toHaveLength(3)
+    expect(batchArg).toHaveLength(2)
     expect(batchArg[0]).toEqual({ __builder: "markReadToMessage" })
     expect(batchArg[1]).toEqual({ __builder: "markChannelMentionsRead" })
-    expect(batchArg[2]).toEqual({ __builder: "dismissForYouForChannel" })
   })
 
   it("no-body call on EMPTY channel: no writes at all, returns 200 { ok: true }", async () => {
@@ -128,7 +119,6 @@ describe("PUT /api/community/channels/[id]/read", () => {
 
     expect(mockMarkReadToMessageBuilder).not.toHaveBeenCalled()
     expect(mockMarkChannelMentionsReadBuilder).not.toHaveBeenCalled()
-    expect(mockDismissForYouForChannelBuilder).not.toHaveBeenCalled()
     expect(mockBatch).not.toHaveBeenCalled()
   })
 
@@ -166,7 +156,6 @@ describe("PUT /api/community/channels/[id]/read", () => {
     expect(mockGetChannelForMember).not.toHaveBeenCalled()
     expect(mockMarkReadToMessageBuilder).not.toHaveBeenCalled()
     expect(mockMarkChannelMentionsReadBuilder).not.toHaveBeenCalled()
-    expect(mockDismissForYouForChannelBuilder).not.toHaveBeenCalled()
     expect(mockBatch).not.toHaveBeenCalled()
   })
 
@@ -179,7 +168,6 @@ describe("PUT /api/community/channels/[id]/read", () => {
     expect(res.status).toBe(403)
     expect(mockMarkReadToMessageBuilder).not.toHaveBeenCalled()
     expect(mockMarkChannelMentionsReadBuilder).not.toHaveBeenCalled()
-    expect(mockDismissForYouForChannelBuilder).not.toHaveBeenCalled()
     expect(mockBatch).not.toHaveBeenCalled()
   })
 

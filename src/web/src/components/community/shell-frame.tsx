@@ -24,7 +24,7 @@ import { useServers } from "@/hooks/community/use-servers"
 import { useFolders } from "@/hooks/community/use-folders"
 import { useFriends } from "@/hooks/community/use-friends"
 import { useServerMembers } from "@/hooks/community/use-server-members"
-import { useInboxForYou, useInboxUnreads, useInboxMentions } from "@/hooks/community/use-inbox"
+import { useInboxUnreads, useInboxMentions } from "@/hooks/community/use-inbox"
 import {
   useCreateServer,
   useJoinServer,
@@ -37,7 +37,6 @@ import {
   useCreateServerFolderWith,
   useCreateOrGetDm,
   useMarkAllInboxRead,
-  useDismissForYouEvent,
   useDeleteMention,
   useUpdateProfile,
   useSendDmMessage,
@@ -91,15 +90,12 @@ export function ShellFrame({
   const membersHook = useServerMembers(currentServerId)
   const members = membersHook.members
 
-  // Inbox trio — the shell reads all three to drive the bell badge.
-  const inboxForYou = useInboxForYou()
+  // Inbox pair — the shell reads both to drive the bell badge.
   const inboxUnreads = useInboxUnreads()
   const inboxMentions = useInboxMentions()
-  const forYouFeed = inboxForYou.events
   const unreadFeed = inboxUnreads.servers
   const mentions = inboxMentions.mentions
-  const inboxLoading =
-    inboxForYou.isLoading || inboxUnreads.isLoading || inboxMentions.isLoading
+  const inboxLoading = inboxUnreads.isLoading || inboxMentions.isLoading
 
   // Mutations wired through the shell.
   const createServer = useCreateServer()
@@ -114,7 +110,6 @@ export function ShellFrame({
   const createOrGetDm = useCreateOrGetDm()
   const sendDmMessage = useSendDmMessage()
   const markAllInboxRead = useMarkAllInboxRead()
-  const dismissForYouEvent = useDismissForYouEvent()
   const deleteMention = useDeleteMention()
   const updateProfile = useUpdateProfile()
 
@@ -390,24 +385,19 @@ export function ShellFrame({
 
   const inboxElement = (
     <InboxPopover
-      forYou={forYouFeed}
       unreads={unreadFeed}
       mentions={mentions}
       loading={inboxLoading}
-      onOpenEvent={(e) => openServerChannel(e.serverId, e.channelId)}
       onOpenChannel={openServerChannel}
       onOpenMention={(mention) => {
         if (mention.serverId && mention.channelId) openServerChannel(mention.serverId, mention.channelId)
       }}
       onMarkAllRead={() => { markAllInboxRead.mutate() }}
-      onDismissEvent={(eventKey) => { dismissForYouEvent.mutate({ eventKey }) }}
       onDeleteMention={(id) => deleteMention.mutate({ mentionId: id })}
     />
   )
   const inboxHasUnread =
-    (forYouFeed?.length ?? 0) > 0 ||
-    (unreadFeed?.length ?? 0) > 0 ||
-    (mentions?.length ?? 0) > 0
+    (unreadFeed?.length ?? 0) > 0 || (mentions?.length ?? 0) > 0
 
   const userSettingsDialog = (
     <Dialog open={editingProfile} onOpenChange={(o) => { if (!o) setEditingProfile(false) }}>

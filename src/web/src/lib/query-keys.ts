@@ -5,8 +5,8 @@
  * - Every key is `as const` so its literal-tuple type is preserved for
  *   `queryClient.setQueryData` / `invalidateQueries` inference.
  * - Every key derived from a parent extends the parent's tuple, so
- *   `invalidateQueries({ queryKey: communityKeys.inbox() })` invalidates all
- *   three inbox feeds under it, `invalidateQueries({ queryKey: communityKeys.server(id) })`
+ *   `invalidateQueries({ queryKey: communityKeys.inbox() })` invalidates both
+ *   inbox feeds under it, `invalidateQueries({ queryKey: communityKeys.server(id) })`
  *   invalidates every subkey of that server, and so on.
  * - Parameterisation matches the underlying route params. Message list keys
  *   include an optional cursor so pagination pages nest under a stable
@@ -71,7 +71,6 @@ export const communityKeys = {
   // ── Inbox ───────────────────────────────────────────────────────────────
   inbox: () => [...communityKeys.all, "inbox"] as const,
   inboxUnreads: () => [...communityKeys.inbox(), "unreads"] as const,
-  inboxForYou: () => [...communityKeys.inbox(), "foryou"] as const,
   inboxMentions: () => [...communityKeys.inbox(), "mentions"] as const,
 
   // ── Social ──────────────────────────────────────────────────────────────

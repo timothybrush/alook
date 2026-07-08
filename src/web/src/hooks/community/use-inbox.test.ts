@@ -11,18 +11,6 @@ beforeEach(() => {
   apiFetchMock.mockReset()
 })
 
-describe("useInboxForYou / inboxForYouQueryFn", () => {
-  it("fetches /inbox/foryou and populates queryClient at communityKeys.inboxForYou()", async () => {
-    apiFetchMock.mockResolvedValueOnce({ events: [] })
-    const { inboxForYouQueryFn } = await import("./use-inbox")
-    const qc = new QueryClient()
-    const key = communityKeys.inboxForYou()
-    await qc.fetchQuery({ queryKey: key, queryFn: inboxForYouQueryFn })
-    expect(apiFetchMock).toHaveBeenCalledWith("/api/community/inbox/foryou")
-    expect(qc.getQueryData(key)).toEqual({ events: [] })
-  })
-})
-
 describe("useInboxUnreads / inboxUnreadsQueryFn", () => {
   it("fetches /inbox/unreads and populates queryClient at communityKeys.inboxUnreads()", async () => {
     apiFetchMock.mockResolvedValueOnce({ servers: [] })
@@ -47,30 +35,24 @@ describe("useInboxMentions / inboxMentionsQueryFn", () => {
   })
 })
 
-// The plan pins this invariant: `invalidateQueries({ queryKey: inbox() })`
-// must refresh all three feeds. Step 3's WS reconciliation depends on this
-// working, so we test it here — losing this behaviour would silently regress
-// mention/unread refreshing.
+// WS reconciliation invalidates the shared `inbox()` prefix — both feeds must
+// pick it up, otherwise mentions or unread refreshes would silently drop.
 describe("communityKeys.inbox() prefix invalidation", () => {
-  it("invalidates all three inbox queries in a single call", async () => {
+  it("invalidates both inbox queries in a single call", async () => {
     apiFetchMock
-      .mockResolvedValueOnce({ events: [] })
       .mockResolvedValueOnce({ servers: [] })
       .mockResolvedValueOnce({ mentions: [] })
-    const { inboxForYouQueryFn, inboxUnreadsQueryFn, inboxMentionsQueryFn } = await import(
+    const { inboxUnreadsQueryFn, inboxMentionsQueryFn } = await import(
       "./use-inbox"
     )
     const qc = new QueryClient()
-    const forYouKey = communityKeys.inboxForYou()
     const unreadsKey = communityKeys.inboxUnreads()
     const mentionsKey = communityKeys.inboxMentions()
-    await qc.fetchQuery({ queryKey: forYouKey, queryFn: inboxForYouQueryFn })
     await qc.fetchQuery({ queryKey: unreadsKey, queryFn: inboxUnreadsQueryFn })
     await qc.fetchQuery({ queryKey: mentionsKey, queryFn: inboxMentionsQueryFn })
 
     await qc.invalidateQueries({ queryKey: communityKeys.inbox() })
 
-    expect(qc.getQueryState(forYouKey)?.isInvalidated).toBe(true)
     expect(qc.getQueryState(unreadsKey)?.isInvalidated).toBe(true)
     expect(qc.getQueryState(mentionsKey)?.isInvalidated).toBe(true)
   })

@@ -1,76 +1,10 @@
-import type React from "react"
-import { AtSign, ChevronRight, Hash, Inbox, MessagesSquare, MoreHorizontal, Reply, Trash2 } from "lucide-react"
+import { ChevronRight, Hash, Inbox, MoreHorizontal, Trash2 } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar } from "./avatar"
 import { EmptyState } from "./empty-state"
-import { formatRelativeTime } from "./format-time"
-import type { ForYouEvent, ForYouKind, Mention, UnreadServer } from "./_types"
-
-function KindIcon({ kind }: { kind: ForYouKind }) {
-  const cls = "size-4 text-muted-foreground"
-  if (kind === "mention") return <AtSign className={cls} />
-  if (kind === "reply") return <Reply className={cls} />
-  return <MessagesSquare className={cls} />
-}
-
-function kindLabel(e: ForYouEvent): React.ReactNode {
-  if (e.kind === "mention") return <><span className="font-medium">{e.authorName}</span> mentioned you</>
-  if (e.kind === "reply") return <><span className="font-medium">{e.authorName}</span> replied to you</>
-  return <>New activity in thread</>
-}
-
-function ForYouTab({ events, loading, onOpenEvent, onDismissEvent }: {
-  events: ForYouEvent[]
-  loading?: boolean
-  onOpenEvent?: (e: ForYouEvent) => void
-  onDismissEvent?: (eventKey: string) => void
-}) {
-  return (
-    <div className="h-full overflow-y-auto thin-scrollbar p-3">
-      {loading && events.length === 0 && <InboxRowsSkeleton />}
-      {!loading && events.length === 0 && <EmptyState icon={Inbox} label="Nothing for you right now" />}
-      {events.map((e) => (
-        <div key={e.eventKey} className="group flex w-full items-start gap-3 rounded-md p-2 text-left hover:bg-accent">
-          <button onClick={() => onOpenEvent?.(e)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-            {e.kind === "thread" ? (
-              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-muted">
-                <MessagesSquare className="size-4 text-muted-foreground" />
-              </div>
-            ) : (
-              <Avatar label={e.authorAvatar || "?"} size={36} />
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <KindIcon kind={e.kind} />
-                <div className="truncate text-sm">{kindLabel(e)}</div>
-              </div>
-              <div className="truncate text-xs text-muted-foreground">
-                in <span className="font-medium">{e.serverName}</span> · #{e.channelName}
-              </div>
-              {e.preview && <div className="mt-1 truncate text-sm text-muted-foreground">{e.preview}</div>}
-              <div className="mt-1 text-xs text-muted-foreground" suppressHydrationWarning>{formatRelativeTime(e.createdAt)}</div>
-            </div>
-          </button>
-          {onDismissEvent && (
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<button className="mt-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100" aria-label="More" />}>
-                <MoreHorizontal className="size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={4} className="w-36">
-                <DropdownMenuItem onClick={() => onDismissEvent(e.eventKey)}>
-                  <Trash2 className="size-4" />
-                  Remove
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
+import type { Mention, UnreadServer } from "./_types"
 
 function UnreadsTab({ servers, loading, onOpenChannel }: {
   servers: UnreadServer[]
@@ -146,31 +80,25 @@ function MentionsTab({ mentions, loading, onOpenMention, onDeleteMention }: {
 }
 
 export function InboxPopover({
-  forYou,
   unreads,
   mentions,
   loading,
-  onOpenEvent,
   onOpenChannel,
   onOpenMention,
-  onDismissEvent,
   onDeleteMention,
   onMarkAllRead,
 }: {
-  forYou: ForYouEvent[]
   unreads: UnreadServer[]
   mentions: Mention[]
   loading?: boolean
-  onOpenEvent?: (e: ForYouEvent) => void
   onOpenChannel?: (serverId: string, channelId: string) => void
   onOpenMention?: (m: Mention) => void
-  onDismissEvent?: (eventKey: string) => void
   onDeleteMention?: (id: string) => void
   onMarkAllRead?: () => void
 }) {
-  const hasAnything = forYou.length > 0 || unreads.length > 0 || mentions.length > 0
+  const hasAnything = unreads.length > 0 || mentions.length > 0
   return (
-    <Tabs defaultValue="foryou" className="flex h-112 flex-col">
+    <Tabs defaultValue="unreads" className="flex h-112 flex-col">
       <div className="flex items-center gap-2 px-3 pt-4">
         <Inbox className="size-5" />
         <h2 className="flex-1 text-lg font-semibold">Inbox</h2>
@@ -185,12 +113,6 @@ export function InboxPopover({
         )}
       </div>
       <TabsList variant="line" className="mt-3 w-full border-b border-border px-3">
-        <TabsTrigger value="foryou">
-          <span className="inline-flex items-center gap-2">
-            For You
-            {forYou.length > 0 && <span className="size-1.5 rounded-full bg-primary" />}
-          </span>
-        </TabsTrigger>
         <TabsTrigger value="unreads">
           <span className="inline-flex items-center gap-2">
             Unreads
@@ -204,9 +126,6 @@ export function InboxPopover({
           </span>
         </TabsTrigger>
       </TabsList>
-      <TabsContent value="foryou" className="min-h-0 flex-1">
-        <ForYouTab events={forYou} loading={loading} onOpenEvent={onOpenEvent} onDismissEvent={onDismissEvent} />
-      </TabsContent>
       <TabsContent value="unreads" className="min-h-0 flex-1">
         <UnreadsTab servers={unreads} loading={loading} onOpenChannel={onOpenChannel} />
       </TabsContent>
@@ -217,10 +136,9 @@ export function InboxPopover({
   )
 }
 
-// Skeleton rows shared by ForYou + Mentions — both render an avatar + two
-// text lines per item, so a single shape covers them. Reserves the same gap
-// as <ForYouTab> / <MentionsTab> rows so the popover doesn't reflow when data
-// lands.
+// Skeleton rows for Mentions — avatar + two text lines per item. Reserves
+// the same gap as <MentionsTab> rows so the popover doesn't reflow when
+// data lands.
 function InboxRowsSkeleton() {
   return (
     <div className="flex flex-col gap-1">

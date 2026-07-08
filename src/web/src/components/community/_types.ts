@@ -224,24 +224,6 @@ export type Mention = {
   m: Msg
 }
 
-// "For You" — a single event the user should see.
-// eventKey is opaque: "mention:<msgId>" | "reply:<msgId>" | "thread:<channelId>".
-export type ForYouKind = "mention" | "reply" | "thread"
-
-export type ForYouEvent = {
-  eventKey: string
-  kind: ForYouKind
-  serverId: string
-  serverName: string
-  channelId: string
-  channelName: string
-  messageId: string
-  authorName: string
-  authorAvatar: string
-  preview: string
-  createdAt: string
-}
-
 // "Unreads" — channels with unread messages, grouped by server.
 export type UnreadServer = {
   serverId: string

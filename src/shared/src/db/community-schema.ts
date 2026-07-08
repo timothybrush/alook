@@ -458,23 +458,3 @@ export const communityBotApprovalRequest = sqliteTable(
   (t) => [index("idx_community_bot_approval_bot").on(t.botId, t.status)]
 );
 
-// 21. community_inbox_dismissal
-// Tracks which "For You" inbox events the user has hard-dismissed.
-// eventKey is opaque, formed like "mention:<messageId>" / "reply:<messageId>" /
-// "thread:<channelId>". Once dismissed, the corresponding event is filtered out
-// of /api/community/inbox/foryou permanently.
-export const communityInboxDismissal = sqliteTable(
-  "community_inbox_dismissal",
-  {
-    id: text("id").primaryKey().$defaultFn(() => nanoid()),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    eventKey: text("event_key").notNull(),
-    dismissedAt: text("dismissed_at").notNull().$defaultFn(() => new Date().toISOString()),
-  },
-  (t) => [
-    unique("uq_inbox_dismissal_user_event").on(t.userId, t.eventKey),
-    index("idx_inbox_dismissal_user").on(t.userId),
-  ]
-);
