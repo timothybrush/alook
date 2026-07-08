@@ -17,29 +17,38 @@ import type { ProbeResult } from "./types.js";
 /**
  * Locate the Alook agent CLI entry point.
  *
- * Search order (first existing wins):
- *   1. Bundled: `<daemon-pkg>/dist/cli/index.js`
- *   2. Workspace sibling: `<monorepo>/src/daemon/dist/cli/index.js` (pnpm workspace)
- *   3. Source (dev): `<monorepo>/src/daemon/src/cli/index.ts` (for tsx usage)
+ * This path gets symlinked (POSIX) or `.cmd`-wrapped (Windows) straight into
+ * every spawned agent's PATH as `alook` (see `cliLink.ts`) — on POSIX the OS
+ * execs it directly, so it MUST be a self-executable entrypoint. The raw TS
+ * source (`cli/index.ts`) does NOT qualify: even with a shebang, executing it
+ * without `tsx` leaves Node's ESM resolver looking for literal `./*.js`
+ * sibling files that only exist once built, throwing `ERR_MODULE_NOT_FOUND`.
  *
- * Returns null if no candidate exists (caller should log a warning).
+ * Deliberately NOT a multi-candidate existence probe — this module always
+ * compiles `src/discovery.ts` → `dist/discovery.js` (see tsconfig
+ * `rootDir`/`outDir`), so `thisDir` unambiguously tells us which of the two
+ * real deployment shapes we're in; there is exactly one correct answer per
+ * shape, not a list of guesses to try:
+ *   - running from `dist/` (built/published): the CLI entry is the sibling
+ *     `dist/cli/index.js` — if it's missing, that's a real packaging bug.
+ *   - running from `src/` (dev, via `tsx`): the CLI entry is the dev shim
+ *     `scripts/alook-shim.mjs`, which execs the TS source through `tsx` so
+ *     relative `.js` import specifiers resolve to their `.ts` siblings.
+ *     (Deliberately never falls back to a possibly-stale prebuilt `dist/` —
+ *     that would silently serve old CLI behavior after source edits.)
+ *
+ * Returns null if the one expected entry doesn't exist (caller should log a
+ * warning) — never silently substitutes a different candidate.
  */
 export function resolveAlookCliPath(moduleDir?: string): string | null {
   const thisDir = moduleDir ?? path.dirname(fileURLToPath(import.meta.url));
 
-  const candidates = [
-    // 1. Bundled dist CLI (production: daemon built + CLI entry in same dist)
-    path.resolve(thisDir, "cli", "index.js"),
-    // 2. Dist from package root (built but running from src via tsx)
-    path.resolve(thisDir, "..", "dist", "cli", "index.js"),
-    // 3. Source entry (dev: running unbuilt via tsx)
-    path.resolve(thisDir, "cli", "index.ts"),
-  ];
+  const target =
+    path.basename(thisDir) === "dist"
+      ? path.resolve(thisDir, "cli", "index.js")
+      : path.resolve(thisDir, "..", "scripts", "alook-shim.mjs");
 
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
+  return fs.existsSync(target) ? target : null;
 }
 
 /**

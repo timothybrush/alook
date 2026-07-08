@@ -28,6 +28,7 @@ import { AgentProcessManager, AgentRouter } from "../manager/index.js";
 import { UnknownBotError, BotEnrollFailedError, UnknownRuntimeError } from "../manager/agentRouter.js";
 import { createTimelineRecorder } from "../timeline/index.js";
 import { resolveAlookCliPathWithFallback } from "../discovery.js";
+import { createPiSdkDriverDeps } from "../drivers/piSdkDeps.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { Driver, LaunchContext } from "../types.js";
 import type { RuntimeConfig } from "../runtimeConfig.js";
@@ -324,6 +325,9 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
     },
     tickIntervalMs: opts.tickIntervalMs ?? 2000,
     onAgentSession: (info) => void channel.reportAgentSession(info),
+    // Only the "pi" runtime declares `Driver.createSession` today (in-process
+    // SDK, no child process) — this is only ever consulted for that case.
+    sdkDriverDepsFor: (ctx) => createPiSdkDriverDeps(ctx),
     timeline,
     wakePromptFooter: "Use `alook inbox pull` to read your messages, then reply with `alook message send`.",
     logger: log.child("manager"),

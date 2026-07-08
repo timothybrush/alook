@@ -11,7 +11,7 @@
 import { spawn } from "child_process";
 import type { Driver, LaunchConfig, LaunchContext, ParsedEvent, SpawnResult } from "../types.js";
 import { prepareCliTransport, buildCliTransportSystemPrompt } from "./cliTransport.js";
-import { resolveCommandOnPath, probeCliRuntime } from "./probe.js";
+import { probeCliRuntime, resolveSpawnSpec } from "./probe.js";
 import { resolveLaunchFieldsOrDefault } from "../runtimeConfig.js";
 
 export class OpenCodeDriver implements Driver {
@@ -57,11 +57,14 @@ export class OpenCodeDriver implements Driver {
     const promptArg = ctx.prompt === ctx.standingPrompt ? "No new messages are pending. Stop now." : ctx.prompt;
     args.push("--", promptArg);
 
-    const command = resolveCommandOnPath("opencode") ?? "opencode";
-    const proc = spawn(command, args, {
+    // Cross-platform spawn: on Windows the opencode entry is often a `.cmd`
+    // shim, which `child_process.spawn` can't exec without a shell.
+    const spec = resolveSpawnSpec("opencode", args);
+    const proc = spawn(spec.command, spec.args, {
       cwd: ctx.workingDirectory,
       stdio: ["pipe", "pipe", "pipe"],
       env: spawnEnv,
+      shell: spec.shell,
     });
     proc.stdin?.end();
     return { process: proc };
@@ -91,7 +94,11 @@ export class OpenCodeDriver implements Driver {
         out.push({ kind: "tool_call", name: event.part?.tool ?? "unknown_tool", input: event.part?.state?.input });
         break;
       case "step_finish":
-        if (event.reason !== "tool-calls") out.push({ kind: "turn_end", sessionId: this.sessionId ?? undefined });
+        // `reason` lives under `part` (e.g. `part: { reason: "stop" | "tool-calls" | ... }`),
+        // not at the top level — reading `event.reason` directly is always
+        // `undefined`, which made every step (including intermediate
+        // tool-call steps) look like the final one.
+        if (event.part?.reason !== "tool-calls") out.push({ kind: "turn_end", sessionId: this.sessionId ?? undefined });
         break;
       case "error":
         out.push({

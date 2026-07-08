@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import {
@@ -9,15 +11,79 @@ import {
   getAvailableRuntimes,
 } from "./discovery";
 
+const tmpDirs: string[] = [];
+function mkTmp(): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "discovery-"));
+  tmpDirs.push(d);
+  return d;
+}
+afterEach(() => {
+  for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+});
+
 describe("resolveAlookCliPath", () => {
-  it("finds the source CLI entry from the src directory", () => {
-    // When running from src/, the source .ts entry should exist
+  it("finds the dev shim from the real src directory (never the raw .ts entry)", () => {
+    // The real discovery.ts lives in src/, so this always exercises the dev
+    // branch. It must resolve to the shim, never the raw cli/index.ts.
     const thisDir = path.dirname(fileURLToPath(import.meta.url));
     const result = resolveAlookCliPath(thisDir);
-    // cli/index.ts should exist relative to src/
     expect(result).not.toBeNull();
-    expect(result!).toContain("cli");
-    expect(result!).toContain("index");
+    expect(fs.existsSync(result!)).toBe(true);
+    expect(result!.endsWith("alook-shim.mjs")).toBe(true);
+  });
+
+  it("dev shape (moduleDir named `src`): resolves to the sibling scripts/alook-shim.mjs", () => {
+    const root = mkTmp();
+    const srcDir = path.join(root, "src");
+    const scriptsDir = path.join(root, "scripts");
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    const shim = path.join(scriptsDir, "alook-shim.mjs");
+    fs.writeFileSync(shim, "#!/usr/bin/env node\n", { mode: 0o755 });
+
+    const result = resolveAlookCliPath(srcDir);
+    expect(result).toBe(shim);
+    // Must be a real, executable-looking entrypoint — not a raw .ts file
+    // that would throw ERR_MODULE_NOT_FOUND when exec'd directly.
+    expect(result!.endsWith(".ts")).toBe(false);
+    expect(fs.readFileSync(result!, "utf8")).toMatch(/^#!/);
+  });
+
+  it("dev shape: does NOT fall back to a prebuilt dist/cli/index.js even if one exists", () => {
+    // A stale dist/ sitting next to src/ must never be picked while running
+    // unbuilt — that would silently serve old CLI behavior after source
+    // edits. Only the always-fresh dev shim is a valid target in this shape.
+    const root = mkTmp();
+    const srcDir = path.join(root, "src");
+    const distCliDir = path.join(root, "dist", "cli");
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.mkdirSync(distCliDir, { recursive: true });
+    fs.writeFileSync(path.join(distCliDir, "index.js"), "#!/usr/bin/env node\n", { mode: 0o755 });
+    // No scripts/alook-shim.mjs created — the dev target genuinely doesn't exist.
+
+    const result = resolveAlookCliPath(srcDir);
+    expect(result).toBeNull();
+  });
+
+  it("production shape (moduleDir named `dist`): resolves to the sibling cli/index.js", () => {
+    const root = mkTmp();
+    const distDir = path.join(root, "dist");
+    const cliDir = path.join(distDir, "cli");
+    fs.mkdirSync(cliDir, { recursive: true });
+    const entry = path.join(cliDir, "index.js");
+    fs.writeFileSync(entry, "#!/usr/bin/env node\n", { mode: 0o755 });
+
+    const result = resolveAlookCliPath(distDir);
+    expect(result).toBe(entry);
+  });
+
+  it("production shape: returns null (not a different guess) when cli/index.js is missing", () => {
+    const root = mkTmp();
+    const distDir = path.join(root, "dist");
+    fs.mkdirSync(distDir, { recursive: true });
+
+    const result = resolveAlookCliPath(distDir);
+    expect(result).toBeNull();
   });
 
   it("returns null for a nonexistent directory", () => {

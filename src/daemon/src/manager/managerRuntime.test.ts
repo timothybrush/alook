@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { AgentProcessManager, type ManagedSession, type SessionFactory } from "./managerRuntime.js";
-import type { Driver, LaunchContext } from "../types.js";
+import { SdkRuntimeSession, type SdkSessionHandle } from "../runtime/sdkRuntimeSession.js";
+import type { Driver, LaunchContext, SdkDriverDeps } from "../types.js";
 import type { Logger } from "../logger.js";
 
 /** Stub logger — records calls per level for assertions. */
@@ -60,8 +61,8 @@ function fakeSession(): FakeSession {
         s.startRejector = reject;
       });
     },
-    send() {},
-    stop() {},
+    send() { },
+    stop() { },
     get currentSessionId() {
       return null;
     },
@@ -259,6 +260,56 @@ describe("AgentProcessManager — logging", () => {
     expect((ended[0]![1][0] as any).reason).toBe("turn_end");
   });
 
+  // Regression test: a `stop()`/`terminate_stalled` effect can race a
+  // still-in-flight `session.start()` and win — its `exit` handler runs
+  // first, deleting the session from the manager's map and dispatching
+  // `{type: "exit"}` (FSM → idle) — all BEFORE the original `start()` call
+  // finally resolves. Without an identity check, `doSpawn`'s `.then()`
+  // would still unconditionally dispatch `{type: "spawned"}` afterward,
+  // reviving the FSM into "running" for a session nobody tracks anymore —
+  // any later wake would then just queue forever behind a dead spawn
+  // instead of triggering a fresh one.
+  it("a stop that races and wins against an in-flight start() does not let start()'s later resolution revive the FSM into 'running'", async () => {
+    const logger = stubLogger();
+    const sessions: FakeSession[] = [];
+    const factory: SessionFactory = () => {
+      const s = fakeSession();
+      sessions.push(s);
+      return s;
+    };
+    const mgr = new AgentProcessManager({
+      driverFor: () => fakeDriver("codex"),
+      baseContextFor: () => ({
+        workingDirectory: "/tmp",
+        agentId: "a1",
+        standingPrompt: "",
+        config: {} as LaunchContext["config"],
+        credentialProxy: {} as LaunchContext["credentialProxy"],
+      }),
+      sessionFactory: factory,
+      logger,
+    });
+    mgr.register("a1");
+
+    mgr.deliver("a1", { seq: 1, text: "hello" }); // spawns sessions[0]; start() left pending
+    const session1 = sessions[0]!;
+
+    // The race: exit fires (as it would from a stop()/terminate_stalled
+    // effect) WHILE start() is still pending.
+    session1.fire("exit");
+    // Only now does the slow start() finally resolve.
+    session1.startResolver?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A later wake must trigger a genuinely fresh spawn.
+    mgr.deliver("a1", { seq: 2, text: "are you there" });
+
+    expect(sessions).toHaveLength(2);
+    const spawnLogs = logger.calls.info.filter(([m]) => m === "spawning agent");
+    expect(spawnLogs).toHaveLength(2);
+  });
+
   it("does NOT double-log session-ended when the process exit follows an explicit stop/terminate_stalled", async () => {
     vi.useFakeTimers();
     try {
@@ -359,5 +410,92 @@ describe("AgentProcessManager — logging", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// A driver in the shape of PiDriver — declares `createSession` instead of a
+// usable `spawn`, mirroring the real "in-process SDK" contract.
+function fakeSdkDriver(id: string): { driver: Driver & { createSession: NonNullable<Driver["createSession"]> }; createSession: ReturnType<typeof vi.fn> } {
+  let session: SdkRuntimeSession;
+  const handle: SdkSessionHandle = {
+    prompt: (text: string) => {
+      session.emitEvents([{ kind: "text", text }]);
+    },
+    steer: () => { },
+  };
+  const createSession = vi.fn(async () => {
+    session = new SdkRuntimeSession(handle, "sdk-sess-1");
+    return session;
+  });
+  const driver = {
+    ...fakeDriver(id),
+    spawn: async () => {
+      throw new Error("in-process SDK driver — spawn unsupported");
+    },
+    createSession,
+  } as unknown as Driver & { createSession: NonNullable<Driver["createSession"]> };
+  return { driver, createSession };
+}
+
+describe("AgentProcessManager — in-process SDK driver dispatch (Driver.createSession)", () => {
+  it("throws a clear error when a driver declares createSession but no sessionFactory/sdkDriverDepsFor was configured", () => {
+    const { driver } = fakeSdkDriver("pi");
+    const mgr = new AgentProcessManager({
+      driverFor: () => driver,
+      baseContextFor: () => ({
+        workingDirectory: "/tmp",
+        agentId: "a1",
+        standingPrompt: "",
+        config: {} as LaunchContext["config"],
+        credentialProxy: {} as LaunchContext["credentialProxy"],
+      }),
+    });
+    mgr.register("a1");
+    expect(() => mgr.deliver("a1", { seq: 1, text: "hello" })).toThrow(/sdkDriverDepsFor/);
+  });
+
+  it("dispatches through SdkManagedSession (not a child process) when sdkDriverDepsFor is configured, and streams runtime_events normally", async () => {
+    const { driver, createSession } = fakeSdkDriver("pi");
+    const onRuntimeSessionEstablished = vi.fn();
+    const sdkDeps: SdkDriverDeps = {
+      buildSpawnEnv: vi.fn().mockResolvedValue({}),
+      createAgentSession: vi.fn(),
+    };
+    const mgr = new AgentProcessManager({
+      driverFor: () => driver,
+      baseContextFor: () => ({
+        workingDirectory: "/tmp",
+        agentId: "a1",
+        standingPrompt: "",
+        config: {} as LaunchContext["config"],
+      }),
+      sdkDriverDepsFor: () => sdkDeps,
+      onRuntimeSessionEstablished,
+    });
+    mgr.register("a1");
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+    // createSession is async — let its microtasks (and the subsequent send()) drain.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(onRuntimeSessionEstablished).toHaveBeenCalledWith("pi");
+  });
+
+  it("does NOT require a credentialProxy for an in-process SDK driver (that guard is child-process-only)", () => {
+    const { driver } = fakeSdkDriver("pi");
+    const sdkDeps: SdkDriverDeps = { buildSpawnEnv: vi.fn().mockResolvedValue({}), createAgentSession: vi.fn() };
+    const mgr = new AgentProcessManager({
+      driverFor: () => driver,
+      baseContextFor: () => ({
+        workingDirectory: "/tmp",
+        agentId: "a1",
+        standingPrompt: "",
+        config: {} as LaunchContext["config"],
+        // no credentialProxy on purpose
+      }),
+      sdkDriverDepsFor: () => sdkDeps,
+    });
+    mgr.register("a1");
+    expect(() => mgr.deliver("a1", { seq: 1, text: "hello" })).not.toThrow();
   });
 });

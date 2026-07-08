@@ -11,7 +11,7 @@ import { spawn } from "child_process";
 import { randomUUID } from "crypto";
 import type { Driver, EncodeOpts, LaunchConfig, LaunchContext, ParsedEvent, SpawnResult } from "../types.js";
 import { prepareCliTransport, buildCliTransportSystemPrompt } from "./cliTransport.js";
-import { resolveCommandOnPath, probeCliRuntime } from "./probe.js";
+import { probeCliRuntime, resolveSpawnSpec } from "./probe.js";
 import { resolveLaunchFieldsOrDefault } from "../runtimeConfig.js";
 
 function parseToolArguments(args: unknown): unknown {
@@ -55,11 +55,14 @@ export class KimiDriver implements Driver {
     const args = ["--wire", "--yolo", "--session", this.sessionId];
     if (f.model) args.push("--model", f.model);
 
-    const command = resolveCommandOnPath("kimi") ?? "kimi";
-    const proc = spawn(command, args, {
+    // Cross-platform spawn: on Windows the kimi entry is often a `.cmd`
+    // shim, which `child_process.spawn` can't exec without a shell.
+    const spec = resolveSpawnSpec("kimi", args);
+    const proc = spawn(spec.command, spec.args, {
       cwd: ctx.workingDirectory,
       stdio: ["pipe", "pipe", "pipe"],
       env: spawnEnv,
+      shell: spec.shell,
     });
 
     proc.stdin?.write(

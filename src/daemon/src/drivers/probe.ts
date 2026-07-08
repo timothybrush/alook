@@ -44,6 +44,15 @@ export type VersionProbeResult =
   | { ok: true; version: string }
   | { ok: false; error: string };
 
+/** True when `command` needs a shell to exec on this platform — Windows
+ * can't run a `.cmd`/`.bat` shim (which is what most npm global installs
+ * resolve to) directly via `CreateProcess`. Shared by `resolveSpawnSpec`
+ * (actual agent spawn) and `probeCommandVersion` (health-check spawn) so the
+ * two never disagree about whether a given resolved path is runnable. */
+function needsWindowsShimShell(command: string, platform: NodeJS.Platform): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/i.test(command);
+}
+
 /**
  * Actually spawn `<command> --version` and read stdout. Returns `ok: true`
  * only when the child exits 0 AND emits a non-empty first line. A spawn
@@ -55,15 +64,23 @@ export type VersionProbeResult =
  * npm packages sometimes ship a JS wrapper whose `which` succeeds but whose
  * vendored native binary is broken. Requiring `--version` to actually run
  * catches that class of failure at startup instead of at first spawn.
+ *
+ * Runs through a shell on Windows when `command` is a `.cmd`/`.bat` shim —
+ * same detection `resolveSpawnSpec` uses for the real agent spawn. Without
+ * this, a runtime whose actual `spawn()` succeeds (because it already
+ * routes through `resolveSpawnSpec`) would still probe as `unhealthy` here,
+ * hiding an available runtime from the UI.
  */
 export function probeCommandVersion(
   command: string,
   args: string[] = [],
-  deps: ProbeDeps = {}
+  deps: ProbeDeps = {},
+  platform: NodeJS.Platform = process.platform,
 ): VersionProbeResult {
   void deps;
   try {
-    const out = execFileSync(command, [...args, "--version"], { encoding: "utf8", timeout: 5000 });
+    const shell = needsWindowsShimShell(command, platform);
+    const out = execFileSync(command, [...args, "--version"], { encoding: "utf8", timeout: 5000, shell });
     const line = out.split("\n")[0]?.trim();
     if (!line) return { ok: false, error: "empty_version_output" };
     return { ok: true, version: line };
@@ -113,8 +130,7 @@ export function resolveSpawnSpec(
   platform: NodeJS.Platform = process.platform,
 ): SpawnSpec {
   const resolved = resolveCommandOnPath(command, deps) ?? command;
-  const shell = platform === "win32" && /\.(cmd|bat)$/i.test(resolved);
-  return { command: resolved, args, shell };
+  return { command: resolved, args, shell: needsWindowsShimShell(resolved, platform) };
 }
 
 /** Detect the Claude Code CLI, including macOS app-bundle fallbacks. */

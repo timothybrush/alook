@@ -19,9 +19,10 @@ import {
   type AgentRuntimeCaps,
   type AgentMsg,
 } from "./managerPolicy.js";
-import type { Driver, LaunchContext } from "../types.js";
+import type { Driver, LaunchContext, SdkDriverDeps } from "../types.js";
 import type { RuntimeConfig } from "../runtimeConfig.js";
 import { createChildProcessRuntimeSession, type ChildProcessRuntimeSession } from "../runtime/runtimeSession.js";
+import { SdkManagedSession } from "../runtime/sdkManagedSession.js";
 import { createLogger, type Logger } from "../logger.js";
 
 /** Minimal shape the executor needs from a runtime session. */
@@ -62,6 +63,14 @@ export interface ManagerRuntimeOpts {
    * runtime without it (no plaintext fallback). Threaded into each LaunchContext.
    */
   credentialProxy?: LaunchContext["credentialProxy"];
+  /**
+   * Builds the `SdkDriverDeps` for an in-process SDK driver's `createSession`
+   * (see `types.ts`). Required when NOT using a `sessionFactory` AND a
+   * resolved driver declares `createSession` (Pi today) — mirrors the
+   * `credentialProxy` requirement for child-process drivers. Called once per
+   * spawn with the same base `ctx` a `ChildProcessRuntimeSession` would get.
+   */
+  sdkDriverDepsFor?: (ctx: LaunchContext) => SdkDriverDeps;
   staleThresholdMs?: number;
   /** Idle hibernation timeout (ms): stop a persistent process idle this long. */
   idleTimeoutMs?: number;
@@ -156,6 +165,7 @@ export class AgentProcessManager {
       | "sessionFactory"
       | "now"
       | "credentialProxy"
+      | "sdkDriverDepsFor"
       | "onAgentSession"
       | "timeline"
       | "wakePromptFooter"
@@ -169,6 +179,7 @@ export class AgentProcessManager {
       | "sessionFactory"
       | "now"
       | "credentialProxy"
+      | "sdkDriverDepsFor"
       | "onAgentSession"
       | "timeline"
       | "wakePromptFooter"
@@ -331,16 +342,28 @@ export class AgentProcessManager {
       config,
     };
 
-    if (!this.opts.sessionFactory && !ctx.credentialProxy) {
+    if (!this.opts.sessionFactory && driver.createSession && !this.opts.sdkDriverDepsFor) {
+      throw new Error(
+        `AgentProcessManager: real spawn of "${agentId}" on in-process SDK runtime "${driver.id}" needs ` +
+        "sdkDriverDepsFor — set ManagerRuntimeOpts.sdkDriverDepsFor, or pass a sessionFactory for tests.",
+      );
+    }
+    if (!this.opts.sessionFactory && !driver.createSession && !ctx.credentialProxy) {
       throw new Error(
         `AgentProcessManager: real spawn of "${agentId}" needs a credentialProxy — ` +
-          "set ManagerRuntimeOpts.credentialProxy (or baseContextFor's), or pass a sessionFactory for tests.",
+        "set ManagerRuntimeOpts.credentialProxy (or baseContextFor's), or pass a sessionFactory for tests.",
       );
     }
 
     const session: ManagedSession = this.opts.sessionFactory
       ? this.opts.sessionFactory({ agentId, driver, ctx })
-      : (createChildProcessRuntimeSession(driver, ctx) as ChildProcessRuntimeSession);
+      : driver.createSession
+        ? new SdkManagedSession(
+          driver as Driver & { createSession: NonNullable<Driver["createSession"]> },
+          ctx,
+          this.opts.sdkDriverDepsFor!(ctx),
+        )
+        : (createChildProcessRuntimeSession(driver, ctx) as ChildProcessRuntimeSession);
 
     this.sessions.set(agentId, session);
 
@@ -417,6 +440,14 @@ export class AgentProcessManager {
 
     void Promise.resolve(session.start({ text: prompt, sessionId: ctx.config.sessionId }))
       .then(() => {
+        // A concurrent stop()/terminate_stalled can race this in-flight
+        // start() and finish first — its `exit` handler above already
+        // deleted this session from `this.sessions` and dispatched
+        // `{type: "exit"}`. If that happened, don't ALSO dispatch `spawned`:
+        // that would revive the FSM into "running" for a session nobody
+        // tracks anymore, wedging the agent (its inbox already drained into
+        // this now-dead spawn) until the daemon restarts.
+        if (this.sessions.get(agentId) !== session) return;
         this.dispatch({ type: "spawned", agentId, nowMs: this.now() });
       })
       .catch((err: unknown) => {
@@ -427,7 +458,7 @@ export class AgentProcessManager {
           (err as { code?: string } | undefined)?.code ??
           "spawn_threw";
         reportSpawnFailure(String(code));
-        this.sessions.delete(agentId);
+        if (this.sessions.get(agentId) === session) this.sessions.delete(agentId);
         this.dispatch({ type: "exit", agentId });
       });
   }

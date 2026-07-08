@@ -8,7 +8,7 @@
 import { spawn } from "child_process";
 import type { Driver, LaunchConfig, LaunchContext, ParsedEvent, SpawnResult } from "../types.js";
 import { prepareCliTransport, buildCliTransportSystemPrompt } from "./cliTransport.js";
-import { resolveCommandOnPath, probeCliRuntime } from "./probe.js";
+import { probeCliRuntime, resolveSpawnSpec } from "./probe.js";
 import { resolveLaunchFieldsOrDefault } from "../runtimeConfig.js";
 
 export class CopilotDriver implements Driver {
@@ -43,11 +43,14 @@ export class CopilotDriver implements Driver {
     if (f.reasoningEffort) args.push("--effort", f.reasoningEffort);
     if (ctx.config.sessionId) args.push(`--resume=${ctx.config.sessionId}`);
 
-    const command = resolveCommandOnPath("copilot") ?? "copilot";
-    const proc = spawn(command, args, {
+    // Cross-platform spawn: on Windows the copilot entry is often a `.cmd`
+    // shim, which `child_process.spawn` can't exec without a shell.
+    const spec = resolveSpawnSpec("copilot", args);
+    const proc = spawn(spec.command, spec.args, {
       cwd: ctx.workingDirectory,
       stdio: ["pipe", "pipe", "pipe"],
       env: spawnEnv,
+      shell: spec.shell,
     });
     return { process: proc };
   }
