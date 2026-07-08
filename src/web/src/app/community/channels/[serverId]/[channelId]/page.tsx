@@ -50,6 +50,7 @@ import {
   communityWsSubscribe,
   communityWsUnsubscribe,
   communityWsSendTyping,
+  communityWsResetTypingThrottle,
 } from "@/hooks/community/use-community-ws"
 
 /**
@@ -360,6 +361,7 @@ function ChannelView() {
       mentionType,
       attachments: uploadedAttachments.length > 0 ? uploadedAttachments : undefined,
     })
+    communityWsResetTypingThrottle({ channelId })
     setReplyTo(null)
   }
 

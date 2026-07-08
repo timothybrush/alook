@@ -28,6 +28,7 @@ import {
   communityWsSubscribe,
   communityWsUnsubscribe,
   communityWsSendTyping,
+  communityWsResetTypingThrottle,
 } from "@/hooks/community/use-community-ws"
 
 // Thin re-mount wrapper — same reason as the server-side channel view: the
@@ -157,6 +158,7 @@ function DmView() {
         avatar: currentUser.avatar,
       },
     })
+    communityWsResetTypingThrottle({ dmConversationId: dmId })
     setReplyTo(null)
   }
 

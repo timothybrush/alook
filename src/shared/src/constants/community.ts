@@ -68,7 +68,14 @@ export const PRESENCE_MEMBER_CAP = 500
 export const BANNER_COLOR_REGEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
 
 // Typing indicator
+// TIMEOUT: how long a received typing.start stays visible before auto-expire
+// if no follow-up arrives. Kept generous so a missed heartbeat doesn't blink
+// the indicator off mid-burst.
+// THROTTLE: how often the local client will re-emit typing.start for the
+// same target while the user is still typing. Shorter than TIMEOUT so the
+// indicator on other clients gets refreshed with room to spare.
 export const TYPING_INDICATOR_TIMEOUT_MS = 8_000
+export const TYPING_INDICATOR_THROTTLE_MS = 3_000
 
 // Message deduplication cache
 export const MESSAGE_DEDUP_CACHE_MAX = 500

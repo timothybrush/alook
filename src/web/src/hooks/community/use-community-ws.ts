@@ -51,7 +51,7 @@ import type {
   CommunityMachineUpdated,
   CommunityMachineRemoved,
 } from "@alook/shared"
-import { isCommunityEvent, TYPING_INDICATOR_TIMEOUT_MS } from "@alook/shared"
+import { isCommunityEvent, TYPING_INDICATOR_TIMEOUT_MS, TYPING_INDICATOR_THROTTLE_MS } from "@alook/shared"
 import type { Msg, Attachment } from "@/components/community/_types"
 import { avatarInitial } from "@/lib/community/avatar"
 import type { MachinesResponse } from "@/hooks/community/use-machines"
@@ -293,10 +293,25 @@ export function communityWsSendTyping(target: {
   const now = Date.now()
   const map = useCommunityStore.getState().lastTypingSent
   const lastSent = map.get(key) || 0
-  if (now - lastSent < TYPING_INDICATOR_TIMEOUT_MS) return
+  if (now - lastSent < TYPING_INDICATOR_THROTTLE_MS) return
 
   map.set(key, now)
   send({ type: "community:typing.start", ...target })
+}
+
+/**
+ * Reset the outbound typing.start throttle for a target. Sending a message
+ * ends the current typing burst; the very next keystroke should re-emit
+ * typing.start immediately, not wait out the 8s dedup window.
+ */
+export function communityWsResetTypingThrottle(target: {
+  channelId?: string
+  dmConversationId?: string
+  threadId?: string
+}) {
+  const key = target.channelId || target.dmConversationId || target.threadId || ""
+  if (!key) return
+  useCommunityStore.getState().lastTypingSent.delete(key)
 }
 
 export function useCommunityWs(options?: UseCommunityWsOptions) {
@@ -347,6 +362,11 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
         case "community:message.create": {
           if (wsStore.hasSeenMessage(event.message.id)) return
           wsStore.markSeenMessage(event.message.id)
+
+          // Sending a message is an implicit typing.stop for its author —
+          // clear immediately so the indicator doesn't linger under the
+          // freshly-arrived message until the 8s timeout expires.
+          clearTypingIndicator(event.message.authorId)
 
           // 1) Patch the focused channel/dm page cache if the event matches.
           if (event.channelId && event.channelId === sub.channelId) {
@@ -811,7 +831,7 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
   }, [])
 
   /**
-   * Send a typing indicator. Client-side debounced at 8s per channelId /
+   * Send a typing indicator. Client-side throttled per channelId /
    * dmConversationId. The DO also applies server-side dedup.
    */
   const sendTyping = useCallback(
@@ -822,7 +842,7 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
       const now = Date.now()
       const map = useCommunityStore.getState().lastTypingSent
       const lastSent = map.get(key) || 0
-      if (now - lastSent < TYPING_INDICATOR_TIMEOUT_MS) return
+      if (now - lastSent < TYPING_INDICATOR_THROTTLE_MS) return
 
       // Mutate the map in place — no equality change, no re-render (nothing
       // subscribes to it). Keeping it in the store keeps the lifetime tied
@@ -879,6 +899,26 @@ function applyTypingIndicator(userId: string) {
       ? state.typingUsers
       : [...state.typingUsers, userId]
     return { typingUsers: nextUsers, typingTimers: nextTimers }
+  })
+}
+
+/**
+ * Immediately remove userId from `typingUsers` and cancel its pending timer.
+ * Called when the user sends a message — sending is an implicit typing.stop,
+ * and waiting for the 8s timeout leaves a ghost indicator hanging under the
+ * message that just arrived.
+ */
+function clearTypingIndicator(userId: string) {
+  useCommunityStore.setState((state) => {
+    const existing = state.typingTimers.get(userId)
+    if (!existing && !state.typingUsers.includes(userId)) return {}
+    if (existing) clearTimeout(existing)
+    const nextTimers = new Map(state.typingTimers)
+    nextTimers.delete(userId)
+    return {
+      typingUsers: state.typingUsers.filter((id) => id !== userId),
+      typingTimers: nextTimers,
+    }
   })
 }
 

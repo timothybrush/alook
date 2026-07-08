@@ -182,6 +182,7 @@ export function MessageList({
         count={belowCount}
         onClick={scrollToBottom}
       />
+      <TypingIndicator names={typingUsers ?? []} />
       <div ref={scrollRef} className="flex-1 overflow-y-auto thin-scrollbar">
         <div className="flex min-h-full flex-col justify-end px-4 py-8">
           <div className="mb-6">
@@ -229,7 +230,6 @@ export function MessageList({
             </div>
           ))}
 
-          {typingUsers && typingUsers.length > 0 && <TypingIndicator names={typingUsers} />}
         </div>
       </div>
     </div>
