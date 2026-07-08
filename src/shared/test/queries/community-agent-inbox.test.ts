@@ -183,6 +183,41 @@ describe("listUnreadMessagesForAgent", () => {
   });
 });
 
+describe("getLatestUnreadMessageForAgent", () => {
+  it("returns null when there's no unread anywhere", async () => {
+    const db = createSequentialDb([[]]);
+    const result = await agentInbox.getLatestUnreadMessageForAgent(db, "bot_1");
+    expect(result).toBeNull();
+  });
+
+  it("returns the single most-recent unread message id, ordered by createdAt desc limit 1", async () => {
+    // The mock DB only records the LAST call to each chain method, so this
+    // exercises the id extraction — the createdAt-desc/limit-1 ordering
+    // itself is asserted via the `.orderBy`/`.limit` call-args check below.
+    const db = createSequentialDb([[{ id: "m_latest" }]]);
+    const result = await agentInbox.getLatestUnreadMessageForAgent(db, "bot_1");
+    expect(result).toEqual({ messageId: "m_latest" });
+  });
+
+  it("orders by createdAt desc and limits to 1 (comparable across channel + DM scopes, unlike seq)", async () => {
+    const db = createSequentialDb([[]]);
+    await agentInbox.getLatestUnreadMessageForAgent(db, "bot_1");
+    const chainResult = db.select.mock.results[0]!.value;
+    expect(chainResult.orderBy).toHaveBeenCalledTimes(1);
+    expect(chainResult.limit).toHaveBeenCalledWith(1);
+  });
+
+  it("joins scope tables before unread filtering (same predicates as listUnreadMessagesForAgent)", async () => {
+    const db = createSequentialDb([[]]);
+    await agentInbox.getLatestUnreadMessageForAgent(db, "bot_1");
+    const chainResult = db.select.mock.results[0]!.value;
+    expect(chainResult.leftJoin).toHaveBeenCalledTimes(4);
+    expect(chainResult.leftJoin.mock.invocationCallOrder[0]).toBeLessThan(
+      chainResult.where.mock.invocationCallOrder[0]
+    );
+  });
+});
+
 describe("getInboxSnapshotForAgent", () => {
   it("returns [] and skips the user-name lookup when there's no pending unread", async () => {
     const db = createSequentialDb([[]]);

@@ -1,10 +1,11 @@
 /**
  * Kimi driver — persistent child-process CLI over JSON-RPC, DIRECT steering.
  *
- * `kimi --wire --yolo --agent-file <file> --session <id>` runs a long-lived
- * process speaking JSON-RPC 2.0 over stdio (the "wire" protocol). On spawn we
- * send `initialize` then a `prompt`; thereafter idle messages are `prompt` and
- * busy messages are `steer`.
+ * `kimi --wire --yolo --session <id>` runs a long-lived process speaking
+ * JSON-RPC 2.0 over stdio (the "wire" protocol). The standing prompt is
+ * delivered via the `AGENTS.md` that `prepareCliTransport` writes into the
+ * workdir (Kimi auto-reads it from cwd). On spawn we send `initialize` then a
+ * `prompt`; thereafter idle messages are `prompt` and busy messages are `steer`.
  */
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
@@ -45,15 +46,13 @@ export class KimiDriver implements Driver {
   async spawn(ctx: LaunchContext): Promise<SpawnResult> {
     this.sessionId = ctx.config.sessionId || randomUUID();
     const isResume = Boolean(ctx.config.sessionId);
-    const { stateDir, spawnEnv } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
-
-    // The standing prompt is delivered to Kimi via an agent file.
-    const agentFilePath = `${stateDir}/kimi-agent.md`;
-    const fs = await import("fs");
-    fs.writeFileSync(agentFilePath, ctx.standingPrompt, { mode: 0o600 });
+    // The standing prompt reaches Kimi via the AGENTS.md that prepareCliTransport
+    // writes into the workdir (unified packing — see cliTransport.ts) — Kimi
+    // auto-reads it from cwd, no --agent-file flag needed.
+    const { spawnEnv } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
 
     const f = resolveLaunchFieldsOrDefault(ctx.config.runtimeConfig);
-    const args = ["--wire", "--yolo", "--agent-file", agentFilePath, "--session", this.sessionId];
+    const args = ["--wire", "--yolo", "--session", this.sessionId];
     if (f.model) args.push("--model", f.model);
 
     const command = resolveCommandOnPath("kimi") ?? "kimi";
@@ -155,11 +154,6 @@ export class KimiDriver implements Driver {
   }
 
   buildSystemPrompt(config: LaunchConfig): string {
-    return buildCliTransportSystemPrompt(config, {
-      extraCriticalRules: [],
-      postStartupNotes: [],
-      includeStdinNotificationSection: true,
-      messageNotificationStyle: "direct",
-    });
+    return buildCliTransportSystemPrompt(config, { lifecycleKind: this.lifecycle.kind });
   }
 }

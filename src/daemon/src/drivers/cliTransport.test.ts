@@ -96,3 +96,26 @@ describe("prepareCliTransport — layered spawn env", () => {
     expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
   });
 });
+
+describe("prepareCliTransport — unified AGENTS.md packing", () => {
+  it("writes AGENTS.md (+ CLAUDE.md symlink) into the workdir when standingPrompt is non-empty", async () => {
+    const wd = mkTmp();
+    await prepareCliTransport(baseCtx(wd, { standingPrompt: "You are an AI agent." }), {}, undefined, "linux");
+    expect(fs.readFileSync(path.join(wd, "AGENTS.md"), "utf-8")).toBe("You are an AI agent.");
+    expect(fs.lstatSync(path.join(wd, "CLAUDE.md")).isSymbolicLink()).toBe(true);
+  });
+
+  it("does not write AGENTS.md when standingPrompt is empty", async () => {
+    const wd = mkTmp();
+    await prepareCliTransport(baseCtx(wd), {}, undefined, "linux");
+    expect(fs.existsSync(path.join(wd, "AGENTS.md"))).toBe(false);
+  });
+
+  it("every child-process driver gets the same file regardless of its own delivery mechanism", async () => {
+    // Simulates what claude/kimi/codex/gemini/etc. all do: call prepareCliTransport
+    // with a real standingPrompt before their driver-specific spawn logic.
+    const wd = mkTmp();
+    await prepareCliTransport(baseCtx(wd, { standingPrompt: "standing prompt content" }), { NO_COLOR: "1" }, undefined, "linux");
+    expect(fs.readFileSync(path.join(wd, "AGENTS.md"), "utf-8")).toBe("standing prompt content");
+  });
+});

@@ -6,10 +6,16 @@
  * auth/settings registry (Google / OpenAI / OpenRouter). Sessions persist as
  * JSONL; a custom bash tool is injected so shell calls inherit the CLI-transport
  * env. Steering is `direct` (guarded by `session.isStreaming`).
+ *
+ * The standing prompt is delivered via `AGENTS.md` written directly into the
+ * workdir (Pi never calls `prepareCliTransport`, so it can't get the file for
+ * free the way child-process drivers do — it writes it itself, same file,
+ * same convention).
  */
 import { createRequire } from "module";
 import type { Driver, LaunchConfig, LaunchContext, ParsedEvent, SpawnResult } from "../types.js";
 import { buildCliTransportSystemPrompt } from "./cliTransport.js";
+import { writeAgentFile } from "./agentFile.js";
 import { SdkRuntimeSession, type SdkSessionHandle } from "../runtime/sdkRuntimeSession.js";
 import { resolveLaunchFieldsOrDefault } from "../runtimeConfig.js";
 
@@ -107,11 +113,14 @@ export class PiDriver implements Driver {
     },
   ): Promise<SdkRuntimeSession> {
     const spawnEnv = await deps.buildSpawnEnv();
+    // Pi has no child process, so it never goes through prepareCliTransport —
+    // write AGENTS.md here directly (same unified packing every other driver
+    // gets); Pi's SDK auto-reads it from cwd, same as the CLI drivers.
+    if (ctx.standingPrompt) writeAgentFile(ctx.workingDirectory, ctx.standingPrompt);
     const f = resolveLaunchFieldsOrDefault(ctx.config.runtimeConfig);
     const { session, sessionId } = await deps.createAgentSession({
       cwd: ctx.workingDirectory,
       sessionId: ctx.config.sessionId,
-      standingPrompt: ctx.standingPrompt,
       model: f.model,
       thinkingLevel: f.reasoningEffort,
       spawnEnv, // injected into the custom bash tool
@@ -150,13 +159,6 @@ export class PiDriver implements Driver {
   }
 
   buildSystemPrompt(config: LaunchConfig): string {
-    return buildCliTransportSystemPrompt(config, {
-      extraCriticalRules: [],
-      postStartupNotes: [
-        "**Pi runtime note:** The host keeps Pi running as a persistent SDK session. While you are working, the host may send inbox-count notifications into the current turn; call `alook message check` at natural breakpoints.",
-      ],
-      includeStdinNotificationSection: true,
-      messageNotificationStyle: "direct",
-    });
+    return buildCliTransportSystemPrompt(config, { lifecycleKind: this.lifecycle.kind });
   }
 }

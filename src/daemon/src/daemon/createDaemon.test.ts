@@ -44,7 +44,7 @@ class FakeSocket {
   close(): void {
     this.emit("close");
   }
-  ping(): void {}
+  ping(): void { }
   emit(event: string, arg?: unknown): void {
     (this.handlers[event] ?? []).forEach((h) => h(arg));
   }
@@ -68,7 +68,7 @@ function fullFakeDriver(id: string): Driver {
     probe: () => ({ status: "healthy" as const, version: "test" }),
     spawn: async () => {
       const proc = new EventEmitter() as unknown as { kill: () => void };
-      proc.kill = () => {};
+      proc.kill = () => { };
       return { process: proc as never };
     },
     parseLine: () => [],
@@ -278,6 +278,65 @@ describe("createDaemon — logging", () => {
     expect(
       logger.calls.warn.some(([, m, d]) => m === "agent enroll failed" && (d[0] as any).agentId === "bot_1"),
     ).toBe(true);
+    await daemon.stop();
+  });
+
+  it("calls resync-wakes with the machine key bearer on open and logs the woken count", async () => {
+    global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes("/resync-wakes")) {
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer cmk_resync");
+        return new Response(JSON.stringify({ woken: 2 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ bots: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const sockets: FakeSocket[] = [];
+    const logger = stubLogger();
+    const daemon = await createDaemon({
+      machineKey: "cmk_resync",
+      serverUrl: "http://localhost:9999",
+      serverWsUrl: "ws://x",
+      webSocketFactory: factory(sockets) as any,
+      runtimeReport: [],
+      driverFor: () => fakeDriver,
+      capabilities: [],
+      logger,
+    });
+    sockets[0].emit("open");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(
+      logger.calls.info.some(([, m, d]) => m === "wake resync completed" && (d[0] as any).woken === 2),
+    ).toBe(true);
+    await daemon.stop();
+  });
+
+  it("logs (never throws) when resync-wakes fails", async () => {
+    global.fetch = vi.fn(async (url: string | URL) => {
+      const href = String(url);
+      if (href.includes("/resync-wakes")) {
+        return new Response("boom", { status: 500 });
+      }
+      return new Response(JSON.stringify({ bots: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const sockets: FakeSocket[] = [];
+    const logger = stubLogger();
+    const daemon = await createDaemon({
+      machineKey: "cmk_resync_fail",
+      serverUrl: "http://localhost:9999",
+      serverWsUrl: "ws://x",
+      webSocketFactory: factory(sockets) as any,
+      runtimeReport: [],
+      driverFor: () => fakeDriver,
+      capabilities: [],
+      logger,
+    });
+    sockets[0].emit("open");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(logger.calls.warn.some(([, m]) => m === "wake resync failed")).toBe(true);
     await daemon.stop();
   });
 });

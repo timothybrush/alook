@@ -176,6 +176,31 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
     log.warn("cold-start bot-cache warmup exhausted its ceiling", { ceilingMs: WARMUP_CEILING_MS, attempts: attempt });
   }
 
+  /**
+   * Ask the server to re-check each of this machine's bots for unread work
+   * and re-wake any that have some. Recovers a message that arrived while
+   * this daemon was offline: the wake-queue consumer acks (never retries) a
+   * `delivered_nowhere` outcome, so without this call that wake is gone for
+   * good once the daemon reconnects. The daemon drives WHEN this runs; the
+   * server alone decides WHAT an `agent:wake` looks like (same
+   * `dispatchOneUnreadWake` rebuild the queue consumer uses) — this call
+   * carries no addressing/config, just "check now". Best-effort: logged, never
+   * thrown, never blocks the rest of connect.
+   */
+  async function resyncPendingWakes(): Promise<void> {
+    try {
+      const res = await fetch(`${opts.serverUrl}/api/community/daemon/resync-wakes`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${opts.machineKey}` },
+      });
+      if (!res.ok) throw new Error(`resync-wakes ${res.status}`);
+      const json = (await res.json()) as { woken?: number };
+      log.info("wake resync completed", { woken: json.woken ?? 0 });
+    } catch (err) {
+      log.warn("wake resync failed", { err: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   const enrollAgent = async (agentId: string): Promise<string> => {
     const existing = enrolledKeys.get(agentId);
     if (existing) return existing;
@@ -348,9 +373,11 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
     handleBotFrame(cmd);
   });
   // Warmup on every (re)connect — including the first open. `onOpen` fires
-  // after resync completes.
+  // after resync completes. Wake-resync runs alongside it so a message
+  // dropped while this daemon was offline gets a second chance right away.
   channel.onOpen(() => {
     void coldStartWarmup();
+    void resyncPendingWakes();
   });
 
   channel.connect();

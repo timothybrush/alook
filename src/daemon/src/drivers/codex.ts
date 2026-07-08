@@ -109,12 +109,14 @@ export class CodexDriver implements Driver {
 
       const f = resolveLaunchFieldsOrDefault(ctx.config.runtimeConfig);
       const resuming = Boolean(ctx.config.sessionId);
+      // The standing prompt reaches Codex via the AGENTS.md that
+      // prepareCliTransport writes into the workdir (unified packing) —
+      // Codex auto-reads it from cwd, no developerInstructions param needed.
       const params: Record<string, unknown> = {
         cwd: ctx.workingDirectory,
         approvalPolicy: "never",
         sandbox: "danger-full-access",
         sandbox_mode: "danger-full-access",
-        developerInstructions: ctx.standingPrompt,
         experimentalRawEvents: true,
       };
       if (resuming) params.threadId = ctx.config.sessionId;
@@ -165,13 +167,6 @@ export class CodexDriver implements Driver {
   }
 
   buildSystemPrompt(config: LaunchConfig): string {
-    return buildCliTransportSystemPrompt(config, {
-      extraCriticalRules: [],
-      postStartupNotes: [
-        "**IMPORTANT**: Your process stays alive across turns. Use `alook message check` to pull pending messages at natural breakpoints.",
-      ],
-      includeStdinNotificationSection: true,
-      messageNotificationStyle: "direct",
-    });
+    return buildCliTransportSystemPrompt(config, { lifecycleKind: this.lifecycle.kind });
   }
 }

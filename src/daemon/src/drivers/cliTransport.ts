@@ -21,6 +21,19 @@
  *   - authenticate back to the host, and
  *   - see the neutral `<PREFIX>_*` runtime-context env vars.
  *
+ * It also writes the assembled standing prompt as `AGENTS.md` (+ `CLAUDE.md`
+ * symlink) into the agent's workdir — the ONE packing step every child-process
+ * driver relies on, mirroring `src/cli/daemon/execenv/index.ts`'s
+ * `writeInstructionFileIfChanged`, which does the same thing unconditionally
+ * regardless of which runtime is about to be spawned. Every mainstream
+ * coding-agent CLI this backend drives (Claude Code, Codex, Kimi, OpenCode,
+ * Gemini, Cursor, Copilot, Antigravity) auto-reads `AGENTS.md`/`CLAUDE.md`
+ * from cwd, so no driver needs its own bespoke delivery channel — there is
+ * exactly one packing mechanism, not nine. (`pi` is the sole exception: it
+ * runs in-process with no child process, so it doesn't go through
+ * `prepareCliTransport` at all — it calls `writeAgentFile` directly with the
+ * same file, for the same reason: its SDK auto-reads `AGENTS.md` from cwd.)
+ *
  * AUTH IS ZERO-TRUST ONLY. The host must pass `ctx.credentialProxy` (a running
  * `CredentialBroker` + proxy URL); the transport mints a per-launch voucher and
  * injects `<PREFIX>_PROXY_URL` + `<PREFIX>_PROXY_TOKEN_FILE` as a sensitive layer.
@@ -35,6 +48,7 @@ import { buildCliSystemPrompt, type SystemPromptOpts } from "./systemPrompt.js";
 import { resolveLaunchFieldsOrDefault } from "../runtimeConfig.js";
 import { writeCliLink } from "./cliLink.js";
 import { mergeEnvLayers, platformEnv, runtimeContextEnv, type EnvLayer } from "./spawnEnv.js";
+import { writeAgentFile } from "./agentFile.js";
 
 export interface PreparedCliTransport {
   /** Per-launch state directory created under the working directory. */
@@ -140,6 +154,11 @@ export async function prepareCliTransport(
   const stateDir = path.join(ctx.workingDirectory, cli.stateDirName);
   await fs.promises.mkdir(stateDir, { recursive: true });
 
+  // Unified packing step for every child-process driver: write the standing
+  // prompt as AGENTS.md (+ CLAUDE.md symlink) so any runtime that auto-reads
+  // it from cwd picks it up, with no driver-specific plumbing required.
+  if (ctx.standingPrompt) writeAgentFile(ctx.workingDirectory, ctx.standingPrompt);
+
   // Decouple the agent-facing `cliName` from the host binary via a filesystem
   // link in a PATH-prepended bin dir (symlink on POSIX, .cmd shim on Windows).
   const binDir = writeCliLink(stateDir, cli.cliName, cli.hostCliPath, platform);
@@ -150,7 +169,7 @@ export async function prepareCliTransport(
   if (!ctx.credentialProxy) {
     throw new Error(
       "prepareCliTransport: ctx.credentialProxy is required — start a credential proxy " +
-        "(see src/credentials) and pass { broker, proxyUrl }. There is no plaintext mode.",
+      "(see src/credentials) and pass { broker, proxyUrl }. There is no plaintext mode.",
     );
   }
   const reg = ctx.credentialProxy.broker.mint(

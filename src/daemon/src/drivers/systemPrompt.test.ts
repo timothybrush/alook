@@ -15,13 +15,10 @@ const baseConfig: LaunchConfig = {
   },
 };
 
-describe("buildCliSystemPrompt — host-neutral slim default", () => {
-  const prompt = buildCliSystemPrompt(baseConfig, {
-    messageNotificationStyle: "direct",
-    includeStdinNotificationSection: true,
-  });
+describe("buildCliSystemPrompt — Alook default", () => {
+  const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
 
-  it("keeps the host-neutral core sections", () => {
+  it("keeps the core sections", () => {
     expect(prompt).toContain("You are an AI agent operating in");
     expect(prompt).toContain("## CLI tool");
     expect(prompt).toContain("## Sending & receiving messages");
@@ -33,8 +30,7 @@ describe("buildCliSystemPrompt — host-neutral slim default", () => {
     expect(prompt).toContain("## Message Notifications");
   });
 
-  it("does NOT bake in any platform's protocol conventions", () => {
-    // Platform-specific details belong to the host's communicationGuide.
+  it("does NOT bake in any other product's protocol conventions", () => {
     expect(prompt).not.toContain("RFC 5424");
     expect(prompt).not.toContain(":shortid");
     expect(prompt).not.toContain("todo → in_progress");
@@ -42,52 +38,37 @@ describe("buildCliSystemPrompt — host-neutral slim default", () => {
     expect(prompt).not.toMatch(/##\s*CRITICAL RULES/);
   });
 
-  it("uses the configured cli name everywhere", () => {
-    const p = buildCliSystemPrompt(baseConfig, { cli: "mock-cli", messageNotificationStyle: "direct" });
-    expect(p).toContain("`mock-cli`");
-    expect(p).not.toContain("`alook`");
+  it("no longer has the removed Additional rules / Notes / communicationGuide sections", () => {
+    expect(prompt).not.toContain("## Additional rules");
+    expect(prompt).not.toMatch(/##\s*Notes\b/);
+  });
+
+  it("hardcodes the alook CLI name and Alook platform label everywhere", () => {
+    expect(prompt).toContain("`alook`");
+    expect(prompt).toContain("You are an AI agent operating in Alook.");
   });
 });
 
-describe("buildCliSystemPrompt — runtime-driven notification section", () => {
-  it("direct (steering) describes busy-time notices", () => {
-    const p = buildCliSystemPrompt(baseConfig, { messageNotificationStyle: "direct" });
+describe("buildCliSystemPrompt — lifecycle-driven notification section", () => {
+  it("persistent describes busy-time inbox notices", () => {
+    const p = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
     expect(p).toContain("inbox notice");
     expect(p).toContain("inbox pull");
   });
 
-  it("poll (per-turn) describes re-checking each wake", () => {
-    const p = buildCliSystemPrompt(baseConfig, { messageNotificationStyle: "poll" });
+  it("per_turn describes finishing the wake and stopping instead of polling", () => {
+    const p = buildCliSystemPrompt(baseConfig, { lifecycleKind: "per_turn" });
     expect(p).toContain("once per wake");
-    expect(p).toContain("inbox pull");
-  });
-
-  it("omits the notification section when disabled", () => {
-    const p = buildCliSystemPrompt(baseConfig, { includeStdinNotificationSection: false });
-    expect(p).not.toContain("## Message Notifications");
+    expect(p).not.toContain("inbox notice");
   });
 });
 
-describe("buildCliSystemPrompt — host injection points", () => {
-  it("appends the host communicationGuide verbatim", () => {
-    const guide = "## Communication\nUse `mock-cli message send` with the [target=…] header.";
-    const p = buildCliSystemPrompt(baseConfig, { communicationGuide: guide });
-    expect(p).toContain(guide);
-  });
-
-  it("appends extraCriticalRules and postStartupNotes when provided", () => {
-    const p = buildCliSystemPrompt(baseConfig, {
-      extraCriticalRules: ["Claim a task before working on it."],
-      postStartupNotes: ["Process stays alive across turns."],
-    });
-    expect(p).toContain("## Additional rules");
-    expect(p).toContain("Claim a task before working on it.");
-    expect(p).toContain("## Notes");
-    expect(p).toContain("Process stays alive across turns.");
-  });
-
+describe("buildCliSystemPrompt — role injection", () => {
   it("includes the role when config.description is set", () => {
-    const p = buildCliSystemPrompt({ ...baseConfig, description: "You are the onboarding assistant." }, {});
+    const p = buildCliSystemPrompt(
+      { ...baseConfig, description: "You are the onboarding assistant." },
+      { lifecycleKind: "persistent" },
+    );
     expect(p).toContain("## Role");
     expect(p).toContain("You are the onboarding assistant.");
   });

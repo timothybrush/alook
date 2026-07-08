@@ -89,13 +89,6 @@ export class AntigravityDriver implements Driver {
   }
 
   buildSystemPrompt(config: LaunchConfig): string {
-    return buildCliTransportSystemPrompt(config, {
-      extraCriticalRules: [],
-      postStartupNotes: [
-        "**Antigravity runtime note:** The host launches you as a per-turn process. Complete the current wake using `alook` commands, then stop; the host will restart you when new messages arrive.",
-      ],
-      includeStdinNotificationSection: false,
-      messageNotificationStyle: "poll",
-    });
+    return buildCliTransportSystemPrompt(config, { lifecycleKind: this.lifecycle.kind });
   }
 }

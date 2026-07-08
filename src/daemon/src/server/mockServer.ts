@@ -111,6 +111,14 @@ export class MockServer implements ServerApi, AdminApi, EnrollmentApi {
   private readonly machineKeys = new Set<string>();
   /** runnerKey → agentId, so a swapped-in runner key is traceable (tier-2). */
   private readonly runnerKeys = new Map<string, string>();
+  /**
+   * agentId → machineKey, when `createAgent` was given one. Mirrors production's
+   * bot↔machine binding (`communityBotBinding`) so `mintAgentCredential` can
+   * reject a mint attempted from a different machine. Agents created without a
+   * `machineKey` are left unbound (no check performed) for backward
+   * compatibility with callers that don't care about this invariant.
+   */
+  private readonly agentMachineKey = new Map<string, string>();
 
   constructor(seed?: MockServerSeed) {
     this.seed = seed;
@@ -146,7 +154,13 @@ export class MockServer implements ServerApi, AdminApi, EnrollmentApi {
     if (!this.agentHandles.has(req.agentId)) {
       throw apiError("NOT_FOUND", `agent ${req.agentId} not found`);
     }
-    // MVP: no machine↔agent binding check yet (TODO once that table exists).
+    // Mirrors the production enroll-agent route: an agent bound to a machine
+    // can only be minted a runner key from THAT machine's key. Agents created
+    // without a `machineKey` (most tests) are left unbound and unchecked.
+    const boundTo = this.agentMachineKey.get(req.agentId);
+    if (boundTo && boundTo !== req.machineKey) {
+      throw apiError("NOT_FOUND", `agent ${req.agentId} not bound to this machine`);
+    }
     const runnerKey = `sk_agent_${crypto.randomBytes(24).toString("base64url")}`;
     this.runnerKeys.set(runnerKey, req.agentId);
     return { runnerKey };
@@ -448,10 +462,12 @@ export class MockServer implements ServerApi, AdminApi, EnrollmentApi {
     name: string;
     runtime?: string;
     instruction?: string;
+    machineKey?: string;
   }): Promise<{ agent: Agent }> {
     // Agent is the user's asset — created independent of any server.
     const agent: Agent = { id: this.mkId("agent"), name: req.name, userId: req.userId };
     this.agentHandles.set(agent.id, `@${req.name}`);
+    if (req.machineKey) this.agentMachineKey.set(agent.id, req.machineKey);
     // The agent's identity (name + instruction) lives in its RuntimeConfig — the
     // same config downlinked via agent:wake — so the daemon gets it from the
     // server, not by inventing it.

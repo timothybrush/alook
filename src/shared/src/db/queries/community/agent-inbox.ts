@@ -456,6 +456,59 @@ export async function toInboxRows(
 }
 
 /**
+ * The single most-recent unread message id for a bot, across ALL its scopes
+ * (channels + DMs combined) — feeds `dispatchOneUnreadWake`'s `{ messageId,
+ * botUserId }` input for a daemon-initiated wake resync (as opposed to
+ * `getInboxSnapshotForAgent`'s per-scope aggregation, which has no single
+ * message id to hand back). "Most recent" is by `createdAt`, since `seq` is a
+ * per-scope counter and isn't comparable across scopes (see
+ * `listUnreadMessagesForAgent`'s doc comment). Same scope/membership/
+ * exclude-self-authored predicates as `listUnreadMessagesForAgent`. Returns
+ * `null` when the bot has no unread anywhere.
+ */
+export async function getLatestUnreadMessageForAgent(
+  db: Database,
+  botUserId: string
+): Promise<{ messageId: string } | null> {
+  const rows = await db
+    .select({ id: communityMessage.id })
+    .from(communityMessage)
+    .leftJoin(communityChannel, eq(communityChannel.id, communityMessage.channelId))
+    .leftJoin(
+      communityServerMember,
+      and(eq(communityServerMember.serverId, communityChannel.serverId), eq(communityServerMember.userId, botUserId))
+    )
+    .leftJoin(communityDmConversation, eq(communityDmConversation.id, communityMessage.dmConversationId))
+    .leftJoin(
+      communityReadState,
+      and(
+        eq(communityReadState.userId, botUserId),
+        or(
+          eq(communityReadState.channelId, communityMessage.channelId),
+          eq(communityReadState.dmConversationId, communityMessage.dmConversationId)
+        )
+      )
+    )
+    .where(
+      and(
+        ne(communityMessage.authorId, botUserId),
+        sql`${communityMessage.seq} > COALESCE(${communityReadState.lastReadSeq}, 0)`,
+        or(
+          and(isNotNull(communityMessage.channelId), eq(communityServerMember.userId, botUserId)),
+          and(
+            isNotNull(communityMessage.dmConversationId),
+            or(eq(communityDmConversation.user1Id, botUserId), eq(communityDmConversation.user2Id, botUserId))
+          )
+        )
+      )
+    )
+    .orderBy(desc(communityMessage.createdAt))
+    .limit(1);
+
+  return rows[0] ? { messageId: rows[0].id } : null;
+}
+
+/**
  * Seq-anchored pagination for `read` — the existing `listMessages` orders by
  * `createdAt` and has no `around` support, so this is a dedicated query.
  * Exactly one of `before`/`after`/`around` should be set (validated at the

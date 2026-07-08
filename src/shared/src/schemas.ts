@@ -1025,20 +1025,6 @@ export type CommunityBotAddToServerRequest = z.infer<
   typeof CommunityBotAddToServerRequestSchema
 >;
 
-export const CommunityDaemonSendAsBotRequestSchema = z.object({
-  // Target — channel or dm — plus target id.
-  target: z.enum(["channel", "dm"]),
-  targetId: z.string().min(1),
-  content: z.string().max(4000),
-  replyToId: z.string().optional(),
-  mentionType: z.enum(["everyone", "here", "user"]).optional(),
-  embeds: z.array(z.unknown()).optional(),
-  attachments: z.array(z.unknown()).optional(),
-});
-export type CommunityDaemonSendAsBotRequest = z.infer<
-  typeof CommunityDaemonSendAsBotRequestSchema
->;
-
 // ---------------------------------------------------------------------------
 // Community agent CLI bridge — `withAgentRunnerAuth`-mounted `/api/community/agent/*`
 // request/response validators. Mirror the lifted `@alook/shared/community-cli-contract`

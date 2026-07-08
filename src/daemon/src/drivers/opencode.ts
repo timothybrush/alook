@@ -4,8 +4,9 @@
  * Distinctive lifecycle: it DEFERS spawning until a concrete message arrives
  * (bookkeeping-only wakes don't launch a process) and explicitly TERMINATES the
  * process when the turn ends (rather than relying on natural exit). The
- * standing prompt is injected via `OPENCODE_CONFIG_CONTENT` (a `host` agent
- * definition), and the user message is the trailing `-- <prompt>` positional.
+ * standing prompt reaches OpenCode via the `AGENTS.md` that `prepareCliTransport`
+ * writes into the workdir (OpenCode auto-reads it from cwd); the user message
+ * is the trailing `-- <prompt>` positional.
  */
 import { spawn } from "child_process";
 import type { Driver, LaunchConfig, LaunchContext, ParsedEvent, SpawnResult } from "../types.js";
@@ -46,14 +47,12 @@ export class OpenCodeDriver implements Driver {
   async spawn(ctx: LaunchContext): Promise<SpawnResult> {
     this.sessionId = ctx.config.sessionId ?? null;
     const f = resolveLaunchFieldsOrDefault(ctx.config.runtimeConfig);
-    const { spawnEnv } = await prepareCliTransport(ctx, {
-      NO_COLOR: "1",
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ agent: { host: { prompt: ctx.standingPrompt } } }),
-    });
+    // prepareCliTransport writes AGENTS.md into the workdir (unified packing) —
+    // OpenCode auto-reads it from cwd, no custom `host` agent config needed.
+    const { spawnEnv } = await prepareCliTransport(ctx, { NO_COLOR: "1" });
 
     const args = ["run", "--format", "json", "--dangerously-skip-permissions", "--pure", "--dir", ctx.workingDirectory];
     if (f.model) args.push("--model", f.model);
-    args.push("--agent", "host");
     if (ctx.config.sessionId) args.push("--session", ctx.config.sessionId);
     const promptArg = ctx.prompt === ctx.standingPrompt ? "No new messages are pending. Stop now." : ctx.prompt;
     args.push("--", promptArg);
@@ -114,13 +113,6 @@ export class OpenCodeDriver implements Driver {
   }
 
   buildSystemPrompt(config: LaunchConfig): string {
-    return buildCliTransportSystemPrompt(config, {
-      extraCriticalRules: [],
-      postStartupNotes: [
-        "**OpenCode runtime note:** The host launches you as a per-turn process. Complete the current wake using `alook` commands, then stop; the host will restart you when new messages arrive.",
-      ],
-      includeStdinNotificationSection: false,
-      messageNotificationStyle: "poll",
-    });
+    return buildCliTransportSystemPrompt(config, { lifecycleKind: this.lifecycle.kind });
   }
 }

@@ -165,9 +165,9 @@ describe("startCredentialProxy (zero-trust end to end)", () => {
     upstreamClose = upstream.close;
     const broker = new CredentialBroker({ upstreamBaseUrl: upstream.url });
     proxy = await startCredentialProxy(broker);
-    const reg = broker.mint("a", "l", ["send", "read"], REAL_KEY); // no "tasks"
+    const reg = broker.mint("a", "l", ["read"], REAL_KEY); // no "send"
 
-    const r = await post(proxy.url, reg.voucher, "/tasks/claim");
+    const r = await post(proxy.url, reg.voucher, "/send");
     expect(r.status).toBe(403);
     expect(upstream.seen.length).toBe(0);
   });

@@ -236,8 +236,6 @@ export const DEFAULT_CAPABILITY_RESOLVER: CapabilityResolver = (_method, pathnam
   if (pathname.includes("/send")) return "send";
   if (pathname.includes("/history") || pathname.includes("/search") || pathname.includes("/inbox"))
     return "read";
-  if (pathname.includes("/tasks")) return "tasks";
-  if (pathname.includes("/react")) return "reactions";
   if (pathname.includes("/server") || pathname.includes("/channel")) return "server";
   return undefined;
 };

@@ -44,4 +44,23 @@ describe("MockServer enrollment (machine credential surface)", () => {
     const machineKey = s.enrollMachine();
     await expect(s.mintAgentCredential({ machineKey, agentId: "agent_nope" })).rejects.toThrow(/not found/i);
   });
+
+  it("rejects minting for an agent bound to a different machine", async () => {
+    const s = new MockServer();
+    const { user } = await s.createUser({ name: "u" });
+    const machineA = s.enrollMachine();
+    const machineB = s.enrollMachine();
+    const { agent } = await s.createAgent({ userId: user.id, name: "cindy", runtime: "mock", machineKey: machineA });
+    await expect(s.mintAgentCredential({ machineKey: machineB, agentId: agent.id })).rejects.toThrow(/not bound/i);
+    // The bound machine still mints fine.
+    const { runnerKey } = await s.mintAgentCredential({ machineKey: machineA, agentId: agent.id });
+    expect(runnerKey.startsWith("sk_agent_")).toBe(true);
+  });
+
+  it("agents created without a machineKey remain unbound (no regression)", async () => {
+    const { s, agentId } = await withAgent();
+    const anyMachine = s.enrollMachine();
+    const { runnerKey } = await s.mintAgentCredential({ machineKey: anyMachine, agentId });
+    expect(runnerKey.startsWith("sk_agent_")).toBe(true);
+  });
 });

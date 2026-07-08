@@ -17,7 +17,6 @@ import {
   resolveClaudeLaunchCommand,
   buildClaudeSpawnSpec,
 } from "./claudeLaunch.js";
-import { writeAgentFile } from "./agentFile.js";
 import { ClaudeEventNormalizer } from "./claudeEventNormalizer.js";
 import { probeClaude } from "./probe.js";
 
@@ -44,10 +43,10 @@ export class ClaudeDriver implements Driver {
     const cliConfig = ctx.agentCliPath
       ? { ...DEFAULT_CLI_CONFIG, hostCliPath: ctx.agentCliPath }
       : undefined;
+    // prepareCliTransport writes AGENTS.md (+ CLAUDE.md symlink) into the
+    // workdir as part of the shared transport setup — Claude Code auto-reads
+    // CLAUDE.md from cwd, no CLI flag needed.
     const { spawnEnv } = await prepareCliTransport(ctx, buildClaudeProviderIsolationEnv(ctx), cliConfig);
-    // Write system prompt as AGENTS.md in workdir — Claude Code auto-reads
-    // CLAUDE.md (symlinked to AGENTS.md) from cwd, no CLI flag needed.
-    writeAgentFile(ctx.workingDirectory, ctx.standingPrompt);
     const args = buildClaudeArgs(ctx.config);
 
     // Let Claude detect it is NOT nested in another Claude Code session.
@@ -91,11 +90,6 @@ export class ClaudeDriver implements Driver {
   }
 
   buildSystemPrompt(config: LaunchConfig): string {
-    return buildCliTransportSystemPrompt(config, {
-      extraCriticalRules: [],
-      postStartupNotes: [],
-      includeStdinNotificationSection: true,
-      messageNotificationStyle: "direct",
-    });
+    return buildCliTransportSystemPrompt(config, { lifecycleKind: this.lifecycle.kind });
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Shared system-prompt builder (host-neutral).
+ * Shared system-prompt builder.
  *
  * Every CLI driver's `buildSystemPrompt` funnels through here. The prompt is
  * assembled from a fixed sequence of sections:
@@ -12,67 +12,68 @@
  *   7. Communication style & etiquette
  *   8. Channel awareness
  *   9. Workspace & Memory
- *   10. Message notifications
- *   11. Host communicationGuide / extra rules / initial role
+ *   10. Message notifications (auto-generated from `lifecycleKind`)
+ *   11. Role (from `config.description`, when set)
  *
- * This builder intentionally hardcodes NO platform. The host's CLI name and
- * platform label are parameters (`SystemPromptOpts.cli` / `.platformName`),
- * defaulting to the `alook` placeholder. A real deployment passes its own CLI
- * guide via `opts.communicationGuide` rather than baking it in.
+ * Alook is the product — there's no other host to be neutral toward, so the
+ * CLI name (`alook`) and platform label (`Alook`) are hardcoded, not
+ * configurable options.
+ *
+ * ONE generation path, not nine: every driver passes only `lifecycleKind`
+ * (`"persistent" | "per_turn"`, taken straight from `driver.lifecycle.kind`)
+ * — there is no per-driver hand-typed reminder text. Section 10 is derived
+ * entirely from that one value, so every driver of the same lifecycle kind
+ * gets identical, complete notification/reminder guidance with zero
+ * duplication or drift between drivers.
  */
 import type { LaunchConfig } from "../types.js";
 
+const CLI = "alook";
+
 export interface SystemPromptOpts {
-  extraCriticalRules?: string[];
-  postStartupNotes?: string[];
-  includeStdinNotificationSection?: boolean;
-  messageNotificationStyle?: "direct" | "poll" | "inline";
-  /** Host CLI command name the agent uses (default: the mock `alook`). */
-  cli?: string;
-  /** Host platform label used in the identity line (default: generic). */
-  platformName?: string;
   /**
-   * Optional host-supplied communication-guide section. When omitted, a generic
-   * placeholder is used. Hosts inject their real CLI guide here — keeping any
-   * platform-specific command documentation OUT of this backend.
+   * Drives the auto-generated `## Message Notifications` section: whether
+   * this runtime's process stays alive across turns (`"persistent"`) or
+   * handles exactly one turn and exits (`"per_turn"`). Pass
+   * `driver.lifecycle.kind` directly — do not hand-write reminder text per
+   * driver.
    */
-  communicationGuide?: string;
+  lifecycleKind: "persistent" | "per_turn";
 }
 
 /* ------------------------------------------------------------------ */
 /* Section builders                                                     */
 /* ------------------------------------------------------------------ */
 
-
-function cliToolsSection(cli: string): string {
+function cliToolsSection(): string {
   return [
     "## CLI tool",
     "",
-    `\`${cli}\` is your only way to send or receive messages. Commands:`,
+    `\`${CLI}\` is your only way to send or receive messages. Commands:`,
     "",
-    `1. \`${cli} inbox pull\` — fetch unread messages.`,
-    `2. \`${cli} message send\` — send a message to a channel, DM, or thread.`,
+    `1. \`${CLI} inbox pull\` — fetch unread messages.`,
+    `2. \`${CLI} message send\` — send a message to a channel, DM, or thread.`,
     "",
-    `Run \`${cli} <subcommand> -h\` for full usage and flags.`,
+    `Run \`${CLI} <subcommand> -h\` for full usage and flags.`,
   ].join("\n");
 }
 
-function messagingHowToSection(cli: string): string {
+function messagingHowToSection(): string {
   return [
     "## Sending & receiving messages",
     "",
-    `- Read incoming messages with \`${cli} inbox pull\`.`,
+    `- Read incoming messages with \`${CLI} inbox pull\`.`,
     "- Send a reply — two options depending on length:",
-    `  - Short: \`${cli} message send --target <ref> --text "brief reply"\``,
-    `  - Long: write body to a file, then \`${cli} message send --target <ref> --file /path/to/msg.txt\``,
+    `  - Short: \`${CLI} message send --target <ref> --text "brief reply"\``,
+    `  - Long: write body to a file, then \`${CLI} message send --target <ref> --file /path/to/msg.txt\``,
     "- Address your reply to where the message came from.",
     "- **Channel alignment**: you cannot send to a channel with unread messages. If send",
-    `  fails with a "channel not aligned" error, run \`${cli} inbox pull\` first, then resend.`,
+    `  fails with a "channel not aligned" error, run \`${CLI} inbox pull\` first, then resend.`,
     "- Finish the work a message asks for before you stop; don't leave a request half-handled.",
   ].join("\n");
 }
 
-function channelRefSection(cli: string): string {
+function channelRefSection(): string {
   return [
     "## Channel refs & message format",
     "",
@@ -93,7 +94,7 @@ function channelRefSection(cli: string): string {
     "",
     "### Message shape",
     "",
-    `When you call \`${cli} inbox pull\`, you receive messages as JSON objects:`,
+    `When you call \`${CLI} inbox pull\`, you receive messages as JSON objects:`,
     "",
     "```json",
     '{"seq": "#3", "channel": "/demo/general", "sender": "@gustavo", "content": {"text": "hello"}, "time": "2026-06-01T12:00:00Z"}',
@@ -108,7 +109,7 @@ function channelRefSection(cli: string): string {
     "",
     "### CLI output format",
     "",
-    `All \`${cli}\` commands output a single JSON line (envelope):`,
+    `All \`${CLI}\` commands output a single JSON line (envelope):`,
     '- Success: `{"success": { ... }}`',
     '- Error: `{"error": "message", "hint": "optional recovery hint"}`',
   ].join("\n");
@@ -125,14 +126,14 @@ function credentialHygieneSection(): string {
   ].join("\n");
 }
 
-function startupSequenceSection(cli: string): string {
+function startupSequenceSection(): string {
   return [
     "## On wake",
     "",
     "Each time you're woken up:",
     "1. Acknowledge any message already in front of you.",
     "2. Read `./memory.md` + latest context timeline to restore state.",
-    `3. If notified of unread messages, run \`${cli} inbox pull\` to fetch them.`,
+    `3. If notified of unread messages, run \`${CLI} inbox pull\` to fetch them.`,
     "4. Do the work, reply, finish completely before stopping.",
   ].join("\n");
 }
@@ -152,6 +153,7 @@ function communicationStyleSection(): string {
     "- Let the person who did the work report on it.",
     "- Before going idle, unblock anyone waiting on you.",
     "- Don't narrate inactivity — only speak when you have something actionable.",
+    "- Talk in the same language as the sender.",
   ].join("\n");
 }
 
@@ -192,19 +194,35 @@ function workspaceMemorySection(): string {
   ].join("\n");
 }
 
-function messageNotificationSection(style: SystemPromptOpts["messageNotificationStyle"], cli: string): string {
-  if (style === "poll") {
+/**
+ * The ONE place that decides what an agent needs to know about message
+ * delivery, derived entirely from `lifecycleKind` — no driver hand-types this.
+ *
+ * - `persistent`: the process stays alive across turns, so busy-time inbox
+ *   notices can arrive mid-turn; the agent pulls bodies at a natural
+ *   breakpoint instead of blocking.
+ * - `per_turn`: the process handles exactly one turn and exits; there is
+ *   nothing to poll for mid-turn — finish the current wake, then stop, and
+ *   the host spawns a fresh process for the next message.
+ */
+function messageNotificationSection(lifecycleKind: SystemPromptOpts["lifecycleKind"]): string {
+  if (lifecycleKind === "per_turn") {
     return [
       "## Message Notifications",
-      "You run once per wake. Do your work, then stop. The host restarts you on new messages.",
-      `Pull the inbox with \`${cli} inbox pull\` at the start of each wake.`,
+      "",
+      "You run once per wake, then your process exits — there is nothing to poll for mid-turn.",
+      "Finish the current wake's work, then stop. The host spawns a brand-new process for the",
+      "next message; it re-checks the inbox at the start of that new wake.",
     ].join("\n");
   }
   return [
     "## Message Notifications",
-    "Alook may inject a lightweight inbox notice mid-turn (no message bodies included).",
-    `It's non-urgent — finish your current step, then run \`${cli} inbox pull\` to fetch bodies.`,
-    "A notification without bodies still means messages are waiting.",
+    "",
+    "Your process stays alive across turns. Alook may inject a lightweight inbox notice",
+    "mid-turn (no message bodies included) — a notification without bodies still means",
+    "messages are waiting.",
+    `It's non-urgent: finish your current step, then run \`${CLI} inbox pull\` at a natural`,
+    "breakpoint to fetch the bodies.",
   ].join("\n");
 }
 
@@ -215,44 +233,28 @@ function messageNotificationSection(style: SystemPromptOpts["messageNotification
 /**
  * Assemble the standing/system prompt.
  *
- * Host-NEUTRAL: the backend asserts what's universally true for any agent
- * workspace — identity, CLI tool, messaging shape, credential hygiene, startup
- * sequence, communication style, channel awareness, workspace/memory model, and
- * notification handling. Platform-specific details (message header format, CLI
- * command catalog, thread/task model) are injected by the host via
- * `communicationGuide`.
+ * Asserts what's universally true for any Alook agent workspace — identity,
+ * CLI tool, messaging shape, credential hygiene, startup sequence,
+ * communication style, channel awareness, workspace/memory model, and
+ * notification handling. The only per-driver input is `lifecycleKind`.
  */
 export function buildCliSystemPrompt(config: LaunchConfig, opts: SystemPromptOpts): string {
-  const cli = opts.cli ?? "alook";
-  const platformName = opts.platformName ?? "a collaborative agent workspace";
-
-  const identityParts = [`You are an AI agent operating in ${platformName}.`];
+  const identityParts = ["You are an AI agent operating in Alook."];
   if (config.agentName) identityParts.push(`Your name is ${config.agentName}.`);
   if (config.agentHandle) identityParts.push(`Your handle is \`${config.agentHandle}\` (others use this to @mention you).`);
 
   const sections: string[] = [
     identityParts.join(" "),
-    cliToolsSection(cli),
-    messagingHowToSection(cli),
-    channelRefSection(cli),
+    cliToolsSection(),
+    messagingHowToSection(),
+    channelRefSection(),
     credentialHygieneSection(),
-    startupSequenceSection(cli),
+    startupSequenceSection(),
     communicationStyleSection(),
     channelAwarenessSection(),
     workspaceMemorySection(),
+    messageNotificationSection(opts.lifecycleKind),
   ];
-
-  if (opts.includeStdinNotificationSection !== false) {
-    sections.push(messageNotificationSection(opts.messageNotificationStyle, cli));
-  }
-
-  if (opts.communicationGuide) sections.push(opts.communicationGuide);
-  if (opts.extraCriticalRules?.length) {
-    sections.push("## Additional rules\n" + opts.extraCriticalRules.map((r) => `- ${r}`).join("\n"));
-  }
-  if (opts.postStartupNotes?.length) {
-    sections.push("## Notes\n" + opts.postStartupNotes.map((n) => `- ${n}`).join("\n"));
-  }
 
   if (config.description) {
     sections.push("## Role\n" + config.description);

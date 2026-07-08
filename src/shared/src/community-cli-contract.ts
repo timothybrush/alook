@@ -538,8 +538,18 @@ export interface AdminApi {
   /**
    * Create an agent. An agent is a USER's asset and exists independently of any
    * server — it joins servers later via `addAgentToServer`. No server here.
+   *
+   * `machineKey` optionally binds the agent to that machine (mirrors production's
+   * bot↔machine binding), enabling `EnrollmentApi.mintAgentCredential` to reject
+   * a mint from a different machine. Omitting it leaves the agent unbound.
    */
-  createAgent(req: { userId: UserId; name: string; runtime?: string; instruction?: string }): Promise<{ agent: Agent }>;
+  createAgent(req: {
+    userId: UserId;
+    name: string;
+    runtime?: string;
+    instruction?: string;
+    machineKey?: string;
+  }): Promise<{ agent: Agent }>;
   createServer(req: { name: string }): Promise<{ server: Server }>;
   /** Membership is a separate agent↔server relation; an agent may join many. */
   addAgentToServer(req: { agentId: AgentId; server: ServerId }): Promise<void>;
@@ -579,8 +589,10 @@ export interface EnrollmentApi {
    * machineKey (401 if unknown) and that the agent exists (404 if not). Returns a
    * scoped, revocable `sk_agent_` runner key the daemon's proxy swaps in.
    *
-   * MVP: does NOT yet enforce that `agentId` is bound to this machine (no
-   * machine↔agent assignment table) — TODO once that ownership model exists.
+   * Implementations MUST also enforce that `agentId` is bound to THIS machine
+   * (404 if bound elsewhere or unbound) — see the production `enroll-agent`
+   * route's binding check, mirrored by `MockServer` when `createAgent` was
+   * given a `machineKey`.
    */
   mintAgentCredential(req: { machineKey: string; agentId: AgentId }): Promise<{ runnerKey: string; expiresAt?: number }>;
 }

@@ -11,9 +11,10 @@ import { withCommunityDaemonAuth } from "@/lib/middleware/community-daemon-auth"
  * POST /api/community/daemon/enroll-agent
  *
  * Given a valid Bearer `cmk_...` credential, mint (or reuse) a per-agent
- * runner key (`crk_...`) scoped to (userId, machineId, agentId). The daemon
- * uses this via its local credential proxy when it launches subprocess
- * CLIs — v1 has no data-plane consumer yet, but the wire is settled.
+ * runner key (`crk_...`) scoped to (userId, machineId, agentId). The daemon's
+ * `CredentialBroker` swaps this runner key in for the agent's per-launch
+ * voucher at its local credential proxy, so subprocess CLIs never see it
+ * directly — they only reach `/api/community/agent/*` through that proxy.
  */
 export const POST = withCommunityDaemonAuth(async (req, ctx) => {
   let raw: unknown
