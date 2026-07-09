@@ -1,5 +1,16 @@
 import type React from "react"
-import { Spoiler, MentionPill, ChannelPill } from "./inline-marks"
+import { Spoiler, MentionPill } from "./inline-marks"
+import { ChannelRefPill } from "./channel-ref-pill"
+
+// Match a `/server/channel` or `/server/channel/#N` (thread) ref — the CLI's
+// path grammar (`parseRef`/`formatRef` in `community-cli-contract.ts`). Segment
+// charset `[A-Za-z0-9_-]+` is the nanoid alphabet every `communityServer.id`/
+// `communityChannel.id` is generated with, so a compact ref must be built from
+// ids (see `channel-ref-extension.ts`'s `renderText`) — display names with
+// spaces/punctuation can't round-trip through this regex (same limitation the
+// legacy `#channel-name` chip had). The pinned-message form (`#N` directly, no
+// slash) is intentionally not matched — see plan §1 for why.
+const CHANNEL_REF_REGEX = /(^|\s)(\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+(?:\/#\d+)?)/g
 
 // Sentinels for stashing code spans/fences (private-use chars — won't collide with
 // real text or markdown punctuation).
@@ -50,6 +61,13 @@ export function preprocessMarkdown(text: string): string {
   let out = text
     .replace(/```[\s\S]*?```/g, protect) // fenced code
     .replace(/`[^`\n]*`/g, protect) // inline code
+  // Stash invite-link URLs BEFORE `CHANNEL_REF_REGEX` runs — `/community/invite/<token>`
+  // shape-matches the channel-ref regex too (server="community", channel="invite"),
+  // which would otherwise wrap `/community/invite` in a `<channelref>` tag and
+  // leave the token as a disconnected trailing text node, breaking streamdown's
+  // GFM autolinking of the whole URL. A fresh (non-shared) regex copy avoids
+  // inheriting `lastIndex` from `INVITE_URL_RE`/other callers.
+  out = out.replace(new RegExp(INVITE_URL_RE.source, "g"), protect)
   out = out
     // CommonMark needs a blank line before a blockquote; chat-style quotes are line-by-line.
     // Insert one so a `> ` that immediately follows text still renders as a quote.
@@ -71,16 +89,22 @@ export function preprocessMarkdown(text: string): string {
       const bare = m.replace(/#\d{4}$/, "")
       return tagMatch ? `<mention data-tag="${tagMatch[1]}">${bare}</mention>` : `<mention>${bare}</mention>`
     })
-    .replace(/(^|\s)#([\w-]+)/g, (_m, pre, name) => `${pre}<channel>#${name}</channel>`)
+    // `/server/channel` refs (see `CHANNEL_REF_REGEX`'s doc comment). Leading
+    // boundary `(^|\s)` kept outside the tag, same convention the old
+    // `#channel` step used — `" /channel-ref"` matches, `"text/channel-ref"`
+    // doesn't. The tag's content is fed straight into `@alook/shared`'s
+    // `parseRef` at render time (`channel-ref-pill.tsx`), reusing the exact
+    // grammar the backend already uses.
+    .replace(CHANNEL_REF_REGEX, (_m, pre, ref) => `${pre}<channelref>${ref}</channelref>`)
   return out.replace(new RegExp(`${S0}(\\d+)${S1}`, "g"), (_m, i) => stash[Number(i)])
 }
 
 export const MD_ALLOWED_TAGS = {
   spoiler: [],
   mention: ["data-everyone", "data-tag"],
-  channel: [],
+  channelref: [],
 }
-export const MD_LITERAL_TAGS = ["spoiler", "mention", "channel"]
+export const MD_LITERAL_TAGS = ["spoiler", "mention", "channelref"]
 
 // A mention pill's rendered text is always `@name` (see `preprocessMarkdown`,
 // which already drops the `#0042` discriminator) — this strips the leading
@@ -96,7 +120,11 @@ export const MD_COMPONENTS = {
   mention: ({ children, ...rest }: Record<string, unknown> & { children?: React.ReactNode }) => (
     <MentionPill everyone={rest["data-everyone"] === "1"}>{children}</MentionPill>
   ),
-  channel: ({ children }: { children?: React.ReactNode }) => <ChannelPill>{children}</ChannelPill>,
+  // `channelref` is fully self-sufficient via hooks (resolves via
+  // `useChannelRefDirectory`, navigates via `useRouter`) — unlike `mention`,
+  // it needs no closure injected by `buildMdComponents`, so the same static
+  // entry is reused there too (see the spread below).
+  channelref: ChannelRefPill,
 } as Record<string, React.ComponentType<Record<string, unknown> & { children?: React.ReactNode }>>
 
 // Same as `MD_COMPONENTS`, but the `mention` pill opens the profile card on

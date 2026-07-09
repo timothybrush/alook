@@ -109,6 +109,19 @@ function ChannelView() {
   const isForum = channelInServer?.type === "forum"
   const isChildChannel = !channelInServer && !!currentServer?.categories
 
+  // `/`-autocomplete candidates for both Composer call sites below — single
+  // server, so no directory hook needed here (see `me/[dmId]/page.tsx` for
+  // the cross-server DM case).
+  const channelRefCandidates = useMemo(() => {
+    const allChannels = currentServer?.categories?.flatMap((c) => c.channels) ?? []
+    return allChannels.map((ch) => ({
+      id: ch.id,
+      name: ch.name,
+      serverId,
+      serverName: currentServer?.name ?? "",
+    }))
+  }, [currentServer, serverId])
+
   const messagesQuery = useMessages(channelId)
   const { messages, isLoading: messagesLoading } = messagesQuery
 
@@ -526,6 +539,7 @@ function ChannelView() {
             context="thread"
             members={composerMembers}
             onSearchMembers={membersHook.searchMembers}
+            channelRefCandidates={channelRefCandidates}
             onSend={sendMessage}
             onTyping={handleTyping}
             replyingTo={replyTo?.authorName}
@@ -636,6 +650,7 @@ function ChannelView() {
           context="channel"
           members={composerMembers}
           onSearchMembers={membersHook.searchMembers}
+          channelRefCandidates={channelRefCandidates}
           onSend={sendMessage}
           onCreateThread={() => setCreatingThread(true)}
           onTyping={handleTyping}

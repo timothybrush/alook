@@ -132,7 +132,7 @@ function messagingSection(): string {
     "",
     "- Send a reply — two options depending on length:",
     `  - Short: \`${CLI} message send --target <ref> --text "brief reply"\``,
-    `  - Long: write body to a file, then \`${CLI} message send --target <ref> --file /path/to/msg.txt\``,
+    `  - Long&Complicated: write body to a tmp file, then \`${CLI} message send --target <ref> --file /path/to/msg.md\``,
     "- Address your reply to where the message came from.",
     "",
     "### Channel refs & addressing",
@@ -149,6 +149,12 @@ function messagingSection(): string {
     "",
     "Use the `channel` field from received messages as the `--target` when replying.",
     "To reply in a thread, use the thread ref (`/<server>/<channel>/#N`).",
+    "",
+    "These same refs also work inline, inside a message's `--text`/`--file` body — not just",
+    "as `--target`. Write `/<server>/<channel>` or `/<server>/<channel>/#N` anywhere in your",
+    "message text (preceded by a space or at the start) and it renders as a clickable channel",
+    "or thread link for human readers in the web client. Use this to cross-reference other",
+    "channels/threads naturally instead of describing them in prose.",
     "",
     "### Message shape",
     "",
@@ -225,7 +231,7 @@ function channelAwarenessSection(): string {
     "",
     "- Reply where the message came from — same channel or thread.",
     "- Post results in the channel that owns the topic.",
-    "- When uncertain, check the channel's stated description or history.",
+    "- When uncertain, check the channel's history or just DM the relevant friends.",
   ].join("\n");
 }
 

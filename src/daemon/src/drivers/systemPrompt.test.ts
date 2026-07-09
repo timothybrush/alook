@@ -73,4 +73,14 @@ describe("buildCliSystemPrompt", () => {
     expect(prompt).toContain("alook");
     expect(prompt).toContain("Alook");
   });
+
+  it("tells the agent that channel refs also render as clickable links when written inline in message text", () => {
+    // Contract check, not prose pinning (see file-level comment above): both
+    // lifecycle kinds share `messagingSection()`, so a single stable phrase
+    // covering "refs work inline, not just as --target" is enough — no need
+    // to duplicate per lifecycle kind.
+    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
+    expect(prompt).toContain("also work inline");
+    expect(prompt).toContain("clickable channel");
+  });
 });

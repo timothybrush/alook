@@ -43,19 +43,36 @@ describe("preprocessMarkdown", () => {
     expect(preprocessMarkdown("@here ping")).toBe('<mention data-everyone="1">@here</mention> ping')
   })
 
-  it("wraps #channel and preserves the leading separator", () => {
-    expect(preprocessMarkdown("see #general")).toBe("see <channel>#general</channel>")
-    expect(preprocessMarkdown("#general")).toBe("<channel>#general</channel>")
+  it("the old #channel step/tag no longer exists — #general renders as plain text", () => {
+    // Regression guard for the retired legacy chip (plan community-channel-ref.md).
+    expect(preprocessMarkdown("see #general")).toBe("see #general")
+    expect(preprocessMarkdown("#general")).toBe("#general")
   })
 
-  it("leaves @ / # / || inside inline code literal", () => {
+  it("wraps /server/channel preceded by a space or at start-of-string into <channelref>, preserving the leading separator outside the tag", () => {
+    expect(preprocessMarkdown("see /studio/general")).toBe("see <channelref>/studio/general</channelref>")
+    expect(preprocessMarkdown("/studio/general")).toBe("<channelref>/studio/general</channelref>")
+  })
+
+  it("leaves text/studio/general (no leading space) untouched", () => {
+    expect(preprocessMarkdown("text/studio/general")).toBe("text/studio/general")
+  })
+
+  it("wraps the thread form /studio/general/#42", () => {
+    expect(preprocessMarkdown("see /studio/general/#42")).toBe(
+      "see <channelref>/studio/general/#42</channelref>",
+    )
+  })
+
+  it("leaves @ / # / || / channel-refs inside inline code literal", () => {
     expect(preprocessMarkdown("use `@Lindsay` here")).toBe("use `@Lindsay` here")
     expect(preprocessMarkdown("`#general`")).toBe("`#general`")
     expect(preprocessMarkdown("`||x||`")).toBe("`||x||`")
+    expect(preprocessMarkdown("`/studio/general`")).toBe("`/studio/general`")
   })
 
   it("leaves content inside fenced code literal", () => {
-    const fenced = "```\n@Lindsay #general ||x||\n```"
+    const fenced = "```\n@Lindsay #general /studio/general ||x||\n```"
     expect(preprocessMarkdown(fenced)).toBe(fenced)
   })
 
@@ -63,23 +80,34 @@ describe("preprocessMarkdown", () => {
     expect(preprocessMarkdown("steps:\n> do it")).toBe("steps:\n\n> do it")
   })
 
-  it("leaves community invite URLs literal in the body (auto-link handles them)", () => {
+  it("leaves community invite URLs literal in the body (auto-link handles them) — regression guard for the invite-URL stash fix", () => {
     // Preprocess no longer rewrites invite URLs — they stay as plain text so
     // streamdown auto-links them; the card renders separately via
-    // extractInviteTokens.
+    // extractInviteTokens. Must round-trip COMPLETELY unchanged (literal
+    // equality, not just `.toContain()`) — this confirms invite URLs are
+    // stashed BEFORE `CHANNEL_REF_REGEX` runs (which would otherwise
+    // shape-match `/community/invite` as a two-segment channel ref and split
+    // the URL across a `<channelref>` tag boundary, breaking streamdown's
+    // GFM autolink of the whole URL).
     expect(preprocessMarkdown("join /community/invite/abc123XYZ")).toBe(
       "join /community/invite/abc123XYZ",
     )
   })
 
+  it("regression guard: the full-origin invite URL form also round-trips unchanged", () => {
+    expect(preprocessMarkdown("join https://alook.ai/community/invite/xY9k2vW7aQ")).toBe(
+      "join https://alook.ai/community/invite/xY9k2vW7aQ",
+    )
+  })
+
   it("handles a mix and round-trips stashed code unchanged", () => {
-    const input = "Here's the **setup**:\n> Clone the repo\n`pnpm install`\nping @Gus in #dev"
+    const input = "Here's the **setup**:\n> Clone the repo\n`pnpm install`\nping @Gus in /studio/dev"
     const out = preprocessMarkdown(input)
     expect(out).toContain("**setup**")
     expect(out).toContain("\n\n> Clone the repo")
     expect(out).toContain("`pnpm install`")
     expect(out).toContain("<mention>@Gus</mention>")
-    expect(out).toContain("<channel>#dev</channel>")
+    expect(out).toContain("<channelref>/studio/dev</channelref>")
   })
 })
 

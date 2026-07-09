@@ -124,6 +124,10 @@ export type Thread = {
   messageCount: number
   lastMessageAt: string
   parent: { authorName: string; text: string }
+  // The root message's per-channel seq, when the thread was created from a
+  // parent message (omitted for threads with no parent, e.g. forum posts).
+  // Used by `channel-ref-pill.tsx` to match a `/server/channel/#N` ref.
+  parentSeq?: number
 }
 
 export type ForumPost = Thread & {
