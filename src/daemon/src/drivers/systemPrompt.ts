@@ -15,12 +15,14 @@
  *      message shape — the "how" for the messaging commands specifically;
  *      named to match `## CLI commands`' `### Messaging` subsection, not
  *      "Communication", so it doesn't collide with `## Communication style`)
- *   4. Critical rules (hard constraints, visually separated from style advice)
- *   5. Startup sequence
- *   6. Communication style & etiquette
- *   7. Channel awareness
- *   8. Workspace & memory
- *   9. Message notifications (auto-generated from `lifecycleKind`)
+ *   4. Servers (the "how" for the server commands — proactively act on
+ *      invite links, since the server enforces the owner-only check itself)
+ *   5. Critical rules (hard constraints, visually separated from style advice)
+ *   6. Startup sequence
+ *   7. Communication style & etiquette
+ *   8. Channel awareness
+ *   9. Workspace & memory
+ *   10. Message notifications (auto-generated from `lifecycleKind`)
  *
  * Alook is the product — there's no other host to be neutral toward, so the
  * CLI name (`alook`) and platform label (`Alook`) are hardcoded, not
@@ -108,6 +110,12 @@ function cliCommandsSection(): string {
     `1. \`${CLI} inbox pull\` — fetch unread messages.`,
     `2. \`${CLI} message send\` — send a message to a channel, DM, or thread.`,
     "",
+    "### Servers",
+    "",
+    `1. \`${CLI} server list\` — list servers you're a member of.`,
+    `2. \`${CLI} server member --server <id-or-name>\` — list members of a server.`,
+    `3. \`${CLI} server join --invite <link>\` — join a server via an invite link or token.`,
+    "",
     "### Output format",
     "",
     `Every \`${CLI}\` command outputs a single JSON line (envelope):`,
@@ -170,6 +178,23 @@ function messagingSection(): string {
     "- `sender` — handle (`@name#0042`) of who sent it.",
     "- `content.text` — the message body.",
     "- `time` — ISO-8601 timestamp.",
+  ].join("\n");
+}
+
+/**
+ * The "how" for the server commands specifically — mirrors `## Messaging`'s
+ * split from `## CLI commands` (existence vs usage). The one proactive
+ * instruction here: act on invite links without reasoning about who sent
+ * them, since the server enforces the owner-only check itself.
+ */
+function serversSection(): string {
+  return [
+    "## Servers",
+    "",
+    `If a message contains a \`/community/invite/...\` link, just run \`${CLI} server join --invite <link>\`.`,
+    "The server enforces an owner-only check for you — it only accepts an invite your owner created,",
+    "and rejects anything else with a clear reason. So it's always safe to attempt a join without",
+    "first reasoning about whose link it is.",
   ].join("\n");
 }
 
@@ -314,6 +339,7 @@ export function buildCliSystemPrompt(config: LaunchConfig, opts: SystemPromptOpt
     identitySection(config),
     cliCommandsSection(),
     messagingSection(),
+    serversSection(),
     criticalRulesSection(),
     startupSequenceSection(),
     communicationStyleSection(),

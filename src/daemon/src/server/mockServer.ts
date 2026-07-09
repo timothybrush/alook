@@ -39,6 +39,7 @@ import type {
   ReadRequest,
   ResolveRequest,
   ListChannelsRequest,
+  ServerMember,
   Page,
   AdminApi,
   Agent,
@@ -99,6 +100,10 @@ export class MockServer implements ServerApi, AdminApi, EnrollmentApi {
   private readonly membership = new Map<string, Set<string>>();
   /** agentId → global handle ("@name#0042") for sender stamping. */
   private readonly agentHandles = new Map<string, string>();
+  /** agentId → owning UserId, populated by `createAgent` — the "server join" owner check. */
+  private readonly agentOwner = new Map<AgentId, UserId>();
+  /** invite token → { serverId, createdBy } — see `createInvite`/`joinServer`. */
+  private readonly invites = new Map<string, { serverId: ServerId; createdBy: UserId }>();
   /**
    * agentId → RuntimeConfig, as set by `createAgent`. Admin-surface storage
    * only — a test harness that wants to push an `agent:wake` HostCommand for
@@ -456,6 +461,47 @@ export class MockServer implements ServerApi, AdminApi, EnrollmentApi {
     return { message: toAgentMessage(found) };
   }
 
+  /**
+   * Members of a server, resolved by id-or-name (reuses `resolveServerId`).
+   * The mock has no owner/admin role concept beyond membership — every member
+   * comes back as `role: "member"`; tests that care about role
+   * differentiation exercise the CLI layer directly via `setApiForTesting`,
+   * not through `MockServer` (see plan's "Out of scope").
+   */
+  async listMembers(req: { agentId: AgentId; server: string }): Promise<{ members: ServerMember[] }> {
+    const serverId = this.resolveServerId(req.server);
+    if (!serverId) throw apiError("NOT_FOUND", `server ${req.server} not found`);
+    const agentIds = [...(this.membership.get(serverId) ?? [])];
+    const members: ServerMember[] = agentIds.map((id) => ({
+      handle: (this.agentHandles.get(id) ?? `@${id}`).replace(/^@/, ""),
+      role: "member",
+    }));
+    return { members };
+  }
+
+  /**
+   * Join a server via an invite token. `NOT_FOUND` if the token is unknown;
+   * `FORBIDDEN` (with a `.hint`) if the invite's creator isn't this agent's
+   * owner. Expiry/max-uses and "already a member" are NOT modeled — see
+   * plan's "Out of scope".
+   */
+  async joinServer(req: { agentId: AgentId; invite: string }): Promise<{ server: Server }> {
+    const invite = this.invites.get(req.invite);
+    if (!invite) throw apiError("NOT_FOUND", "Invalid or expired invite");
+    const owner = this.agentOwner.get(req.agentId);
+    if (invite.createdBy !== owner) {
+      throw Object.assign(apiError("FORBIDDEN", "This invite was not created by your owner — refusing to join."), {
+        hint: "Ask your owner to send an invite link they created themselves.",
+      });
+    }
+    (this.membership.get(invite.serverId) ?? this.membership.set(invite.serverId, new Set()).get(invite.serverId)!).add(
+      req.agentId,
+    );
+    const server = this.servers.get(invite.serverId);
+    if (!server) throw apiError("NOT_FOUND", `server ${invite.serverId} not found`);
+    return { server };
+  }
+
   /* ----- AdminApi (provisioning / test surface) ----- */
 
   private adminCounter = 0;
@@ -485,6 +531,7 @@ export class MockServer implements ServerApi, AdminApi, EnrollmentApi {
     const discriminator = computeDiscriminator(agent.id);
     const handle = `@${formatHandle(req.name, discriminator)}`;
     this.agentHandles.set(agent.id, handle);
+    this.agentOwner.set(agent.id, req.userId);
     if (req.machineKey) this.agentMachineKey.set(agent.id, req.machineKey);
     // The agent's identity (name + instruction) lives in its RuntimeConfig — the
     // same config downlinked via agent:wake — so the daemon gets it from the
@@ -522,6 +569,14 @@ export class MockServer implements ServerApi, AdminApi, EnrollmentApi {
     // class doc comment. Callers that want a wake push a HostCommand
     // themselves (real deployments: via the wake producer/consumer path).
     return { message: this.post({ channel: req.channel, sender: req.sender, text: req.text }) };
+  }
+
+  async createInvite(req: { server: ServerId; createdBy: UserId }): Promise<{ token: string }> {
+    const serverId = this.resolveServerId(req.server) ?? req.server;
+    if (!this.servers.has(serverId)) throw apiError("NOT_FOUND", `server ${req.server} not found`);
+    const token = crypto.randomBytes(16).toString("base64url");
+    this.invites.set(token, { serverId, createdBy: req.createdBy });
+    return { token };
   }
 
   async readChannel(req: { channel: ChannelRef; limit?: number }): Promise<Page<Message>> {

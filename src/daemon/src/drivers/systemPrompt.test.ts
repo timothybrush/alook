@@ -74,6 +74,19 @@ describe("buildCliSystemPrompt", () => {
     expect(prompt).toContain("Alook");
   });
 
+  it("lists the three server commands under ### Servers", () => {
+    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
+    expect(prompt).toContain("### Servers");
+    expect(prompt).toContain("server list");
+    expect(prompt).toContain("server member");
+    expect(prompt).toContain("server join");
+  });
+
+  it("instructs the agent to act on /community/invite/ links", () => {
+    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
+    expect(prompt).toContain("/community/invite/");
+  });
+
   it("tells the agent that channel refs also render as clickable links when written inline in message text", () => {
     // Contract check, not prose pinning (see file-level comment above): both
     // lifecycle kinds share `messagingSection()`, so a single stable phrase

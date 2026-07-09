@@ -278,6 +278,15 @@ export interface ListChannelsRequest {
   server?: ServerId;
 }
 
+/** One server member, as surfaced to the agent CLI (`server member`). */
+export interface ServerMember {
+  /** "name#0042" — always via `formatHandle`, never a bare name. */
+  handle: string;
+  /** "owner" | "admin" | "member" — never null on the wire (defaults to "member"). */
+  role: string;
+  nickname?: string;
+}
+
 /* ------------------------------------------------------------------ */
 /* The ServerApi contract                                              */
 /* ------------------------------------------------------------------ */
@@ -317,6 +326,12 @@ export interface ServerApi {
 
   /** Look up a single message by channel + seq. */
   resolve(req: ResolveRequest): Promise<{ message: Message }>;
+
+  /** Members of a server, resolved by id-or-name (never id-only, never name-only). */
+  listMembers(req: { agentId: AgentId; server: string }): Promise<{ members: ServerMember[] }>;
+
+  /** Join a server via an invite link/token. Throws on any rejection — see plan's I/O contract. */
+  joinServer(req: { agentId: AgentId; invite: string }): Promise<{ server: Server }>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -564,6 +579,8 @@ export interface AdminApi {
   createChannel(req: { server: ServerId; name: string; kind?: ChannelKind }): Promise<{ channel: Channel }>;
   /** Inject a message into a channel (as a human/agent), triggering delivery. */
   postMessage(req: { channel: ChannelRef; sender: string; text: string }): Promise<{ message: Message }>;
+  /** Provisioning/test surface: mint an invite token for `server join` to consume. */
+  createInvite(req: { server: ServerId; createdBy: UserId }): Promise<{ token: string }>;
   /**
    * Observability-only read of a channel's transcript, for test/provisioning
    * tooling (e.g. asserting what agents replied). This is NOT an agent action:
