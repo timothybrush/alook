@@ -38,10 +38,33 @@ type AuditAction = {
   changes?: string
 }
 
+/**
+ * `String(err)` on a `DrizzleQueryError` only prints "Failed query: ...
+ * params: ..." — the actual driver failure (e.g. a NOT NULL/FOREIGN KEY/
+ * UNIQUE constraint message) lives on `.cause` (drizzle-orm 0.44+) and was
+ * getting silently dropped from `audit_write_failed` logs, making every
+ * past occurrence undiagnosable. Walk the chain so it's captured.
+ */
+function causeChain(err: unknown): string[] {
+  const messages: string[] = []
+  let current: unknown = err
+  for (let depth = 0; current && depth < 5; depth++) {
+    if (current instanceof Error) {
+      messages.push(current.message)
+      current = (current as Error & { cause?: unknown }).cause
+    } else {
+      messages.push(String(current))
+      break
+    }
+  }
+  return messages
+}
+
 export function logAudit(db: Database, action: AuditAction): void {
   queries.communityAuditLog.logAction(db, action).catch((err) => {
     log.warn("audit_write_failed", {
       err: String(err),
+      cause: causeChain(err).join(" <- "),
       action: action.action,
       serverId: action.serverId,
       targetType: action.targetType,

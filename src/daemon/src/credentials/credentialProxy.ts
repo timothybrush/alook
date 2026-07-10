@@ -240,6 +240,9 @@ export const DEFAULT_CAPABILITY_RESOLVER: CapabilityResolver = (_method, pathnam
   return undefined;
 };
 
+/** Default cap on how long a forwarded upstream request may stay open. */
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 20_000;
+
 export interface CredentialProxyOptions {
   /** Bind host (default loopback). Keep it loopback in production. */
   host?: string;
@@ -254,6 +257,17 @@ export interface CredentialProxyOptions {
    * regardless of whether the agent is an in-process stub or a real subprocess.
    */
   onInboxPullResponse?: (agentId: string, messages: Message[]) => void;
+  /**
+   * Max time (ms) a forwarded upstream request may stay open before the proxy
+   * gives up on it. Without this, a slow/hung upstream (or an agent that
+   * abandons its own request early) leaks the outbound connection FOREVER —
+   * there is nothing else in this handler that ever times it out. Enough of
+   * these piling up exhausts the daemon process's fds/sockets, at which point
+   * the proxy can't accept ANY new local connection — surfacing to every
+   * agent's CLI as a raw `fetch failed`, daemon-wide, until old leaked
+   * connections eventually get reclaimed. Default 20s.
+   */
+  upstreamTimeoutMs?: number;
 }
 
 export interface RunningProxy {
@@ -307,6 +321,17 @@ export async function startCredentialProxy(
     outHeaders[broker.headerNames.client.toLowerCase()] = broker.clientLabel;
     outHeaders[broker.headerNames.capabilities.toLowerCase()] = [...reg.capabilities].join(",");
 
+    // `responded` guards only against writing a second response to the
+    // DOWNSTREAM client (writeHead/end can't fire twice) — it does NOT gate
+    // upstream socket cleanup. Those are two separate concerns: headers can
+    // arrive from upstream (responded=true) while the body is still
+    // streaming, and a stall or client disconnect at that point is just as
+    // much of a leak as one before headers ever arrived. `upstreamRes` is
+    // tracked so close/timeout can destroy it too once it exists — an
+    // in-flight `.pipe(res)` doesn't end `res` on a non-graceful destroy.
+    let responded = false;
+    let upstreamRes: http.IncomingMessage | undefined;
+
     const upstreamReq = upstreamClient.request(
       {
         protocol: upstream.protocol,
@@ -316,14 +341,28 @@ export async function startCredentialProxy(
         path: joinPath(upstream.pathname, rewriteAgentPath(req.url ?? "/")),
         headers: outHeaders,
       },
-      (upstreamRes) => {
-        if (isInboxPull && upstreamRes.statusCode && upstreamRes.statusCode < 300) {
+      (res_) => {
+        responded = true;
+        upstreamRes = res_;
+        // `.pipe()` does NOT forward source errors to the destination, and a
+        // hard upstream reset/crash mid-body (unlike a mere stall) fires
+        // 'error'/'close' on `res_` immediately rather than waiting for the
+        // idle timer above — without this, `res` would hang forever on a
+        // reset exactly like it would on a stall. `res_.complete` is set by
+        // Node once `'end'` has actually fired, so this is a no-op on the
+        // normal successful-completion path.
+        const destroyResIfIncomplete = () => {
+          if (!res_.complete) res.destroy();
+        };
+        res_.on("error", destroyResIfIncomplete);
+        res_.on("close", destroyResIfIncomplete);
+        if (isInboxPull && res_.statusCode && res_.statusCode < 300) {
           // Buffer the inboxPull response to surface pulled messages to the daemon.
           const chunks: Buffer[] = [];
-          upstreamRes.on("data", (chunk: Buffer) => chunks.push(chunk));
-          upstreamRes.on("end", () => {
+          res_.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res_.on("end", () => {
             const body = Buffer.concat(chunks);
-            res.writeHead(upstreamRes.statusCode!, upstreamRes.headers);
+            res.writeHead(res_.statusCode!, res_.headers);
             res.end(body);
             try {
               const parsed = JSON.parse(body.toString()) as { messages?: Message[] };
@@ -331,14 +370,52 @@ export async function startCredentialProxy(
             } catch { /* best-effort */ }
           });
         } else {
-          res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
-          upstreamRes.pipe(res);
+          res.writeHead(res_.statusCode ?? 502, res_.headers);
+          res_.pipe(res);
         }
       },
     );
     upstreamReq.on("error", (err) => {
+      if (responded) return;
+      responded = true;
       res.writeHead(502, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: `upstream error: ${err.message}`, code: "upstream_error" }));
+    });
+    // Without a timeout, a slow/hung upstream (or one that stalls mid-body
+    // after headers) leaks this outbound connection forever — nothing else
+    // here ever destroys it. Enough of these pile up and the daemon can't
+    // accept ANY new local connection (see module doc comment) — this is the
+    // actual fix, not just cosmetic. `setTimeout` is a socket-idle timeout,
+    // so it keeps firing across the whole exchange, not just while waiting
+    // for headers — always destroy, but only write a 504 if we haven't
+    // already committed to a response.
+    const upstreamTimeoutMs = options.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
+    upstreamReq.setTimeout(upstreamTimeoutMs, () => {
+      upstreamReq.destroy();
+      upstreamRes?.destroy();
+      if (responded) {
+        // Headers already went out (e.g. `res_.pipe(res)` is mid-flight and
+        // stalled, or the inboxPull buffering never saw an `'end'`) — we
+        // can't writeHead/end a response that's already started, but `res`
+        // would otherwise hang on the destroyed source forever (destroying
+        // `upstreamReq`/`upstreamRes` does NOT auto-end a stream piped FROM
+        // them). `res.destroy()` is safe/idempotent, so unblock the agent's
+        // own client the same way a downstream disconnect would.
+        res.destroy();
+        return;
+      }
+      responded = true;
+      res.writeHead(504, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: `upstream request timed out after ${upstreamTimeoutMs}ms`, code: "upstream_timeout" }));
+    });
+    // If the agent gives up (its own fetch aborts/times out) at ANY point —
+    // before upstream responds, or mid-body after it started — stop pumping
+    // into/from a request nobody's waiting on anymore. `.destroy()` on an
+    // already-finished request/response is a safe no-op, so this can fire
+    // unconditionally on every close, including the normal success path.
+    res.on("close", () => {
+      upstreamReq.destroy();
+      upstreamRes?.destroy();
     });
     req.pipe(upstreamReq);
   });

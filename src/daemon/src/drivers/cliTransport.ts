@@ -172,6 +172,13 @@ export async function prepareCliTransport(
       "(see src/credentials) and pass { broker, proxyUrl }. There is no plaintext mode.",
     );
   }
+  // Revoke this agent's previous voucher(s) before minting a new one — an
+  // agent has at most one live launch at a time, so this bounds the broker's
+  // registration map to "one live entry per active agent" regardless of how
+  // many times it gets stopped and respawned. Without this, every respawn
+  // leaves the old registration behind forever (nothing else in production
+  // code ever calls revoke/revokeAgent) — an unbounded memory leak.
+  ctx.credentialProxy.broker.revokeAgent(ctx.agentId);
   const reg = ctx.credentialProxy.broker.mint(
     ctx.agentId,
     ctx.launchId ?? "default",

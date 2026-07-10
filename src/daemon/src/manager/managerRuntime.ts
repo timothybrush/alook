@@ -349,6 +349,12 @@ export class AgentProcessManager {
       prompt,
       standingPrompt,
       credentialProxy: base.credentialProxy ?? this.opts.credentialProxy,
+      // The latest agent:wake's launchId (tracked in `this.launchIds`) — falls
+      // back to whatever `baseContextFor` set, then undefined (cliTransport's
+      // own "default" fallback). Without this, every real spawn left it
+      // undefined, so every launch's voucher silently collided on the same
+      // "default" voucher path (see plans/fix-credential-proxy-connection-leak.md).
+      launchId: this.launchIds.get(agentId) ?? base.launchId,
       config,
     };
 

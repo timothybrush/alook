@@ -211,4 +211,223 @@ describe("startCredentialProxy (zero-trust end to end)", () => {
     const r = await post(proxy.url, reg.voucher, "/send");
     expect(r.status).toBe(401);
   });
+
+  it("surfaces the buffered inboxPull response AND fires onInboxPullResponse", async () => {
+    const upstream = await startUpstream();
+    upstreamClose = upstream.close;
+    const seen: Array<{ agentId: string; count: number }> = [];
+    const broker = new CredentialBroker({ upstreamBaseUrl: upstream.url });
+    proxy = await startCredentialProxy(broker, {
+      onInboxPullResponse: (agentId, messages) => seen.push({ agentId, count: messages.length }),
+    });
+    const reg = broker.mint("agent-1", "l", ["read"], REAL_KEY);
+
+    const r = await post(proxy.url, reg.voucher, "/api/inboxPull");
+    expect(r.status).toBe(200);
+    // `startUpstream()` always responds `{ ok: true }` — no `messages` field —
+    // so the callback should NOT fire for a response that isn't shaped like
+    // an inboxPull payload, but the response itself must still be forwarded.
+    expect(seen).toEqual([]);
+  });
+});
+
+/** A throwaway upstream that never responds — for timeout/leak tests below. */
+async function startHungUpstream(): Promise<{
+  url: string;
+  close: () => Promise<void>;
+  connectionsClosed: () => number;
+}> {
+  let connectionsClosed = 0;
+  const server = http.createServer(() => {
+    /* never respond */
+  });
+  server.on("connection", (socket) => {
+    socket.on("close", () => {
+      connectionsClosed++;
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((r) => server.close(() => r())),
+    connectionsClosed: () => connectionsClosed,
+  };
+}
+
+/** An upstream that sends headers + a partial body, then stalls forever without ending it. */
+async function startStallingBodyUpstream(): Promise<{
+  url: string;
+  close: () => Promise<void>;
+  connectionsClosed: () => number;
+}> {
+  let connectionsClosed = 0;
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.write("{"); // headers + partial body flushed, then never res.end()
+  });
+  server.on("connection", (socket) => {
+    socket.on("close", () => {
+      connectionsClosed++;
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((r) => server.close(() => r())),
+    connectionsClosed: () => connectionsClosed,
+  };
+}
+
+/** An upstream that sends headers + a partial body, then hard-resets the socket (not just idle). */
+async function startResettingBodyUpstream(): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.write("{");
+    // Destroy the raw socket (TCP-level reset), as opposed to merely going
+    // idle — this fires 'error'/'close' on the client's IncomingMessage
+    // immediately, unlike a stall which relies on the idle timer. The
+    // short delay gives the client a chance to actually receive/parse the
+    // headers first — this test targets the "headers already forwarded,
+    // THEN reset" case, not a same-tick connection failure.
+    setTimeout(() => res.socket?.destroy(), 50);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((r) => server.close(() => r())),
+  };
+}
+
+describe("startCredentialProxy — upstream timeout / connection-leak fix", () => {
+  let proxy: RunningProxy | undefined;
+  let upstreamClose: (() => Promise<void>) | undefined;
+  afterEach(async () => {
+    await proxy?.close();
+    await upstreamClose?.();
+    proxy = undefined;
+    upstreamClose = undefined;
+  });
+
+  it("returns 504 (not hanging forever) when the upstream never responds", async () => {
+    const hung = await startHungUpstream();
+    upstreamClose = hung.close;
+    const broker = new CredentialBroker({ upstreamBaseUrl: hung.url });
+    proxy = await startCredentialProxy(broker, { upstreamTimeoutMs: 100 });
+    const reg = broker.mint("a", "l", ["send"], REAL_KEY);
+
+    const start = Date.now();
+    const r = await post(proxy.url, reg.voucher, "/send");
+    expect(r.status).toBe(504);
+    expect(JSON.parse(r.body).code).toBe("upstream_timeout");
+    // Bounded by the timeout, not hanging indefinitely.
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  it("destroys the outbound connection on timeout instead of leaking it", async () => {
+    const hung = await startHungUpstream();
+    upstreamClose = hung.close;
+    const broker = new CredentialBroker({ upstreamBaseUrl: hung.url });
+    proxy = await startCredentialProxy(broker, { upstreamTimeoutMs: 100 });
+    const reg = broker.mint("a", "l", ["send"], REAL_KEY);
+
+    await post(proxy.url, reg.voucher, "/send");
+    // Give the destroyed socket a moment to actually finish closing.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(hung.connectionsClosed()).toBe(1);
+  });
+
+  it("destroys the upstream request when the downstream client disconnects early", async () => {
+    const hung = await startHungUpstream();
+    upstreamClose = hung.close;
+    const broker = new CredentialBroker({ upstreamBaseUrl: hung.url });
+    // Deliberately no upstreamTimeoutMs override (long default) — only the
+    // downstream-close handler should be what rescues this connection.
+    proxy = await startCredentialProxy(broker);
+    const reg = broker.mint("a", "l", ["send"], REAL_KEY);
+
+    const controller = new AbortController();
+    const pending = fetch(`${proxy.url}/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${reg.voucher}`, "content-type": "application/json" },
+      body: JSON.stringify({}),
+      signal: controller.signal,
+    }).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 100));
+    controller.abort();
+    await pending;
+
+    await new Promise((r) => setTimeout(r, 300));
+    expect(hung.connectionsClosed()).toBe(1);
+  });
+
+  it("bounds the downstream response too when upstream sends headers then stalls mid-body", async () => {
+    // Regression guard: once upstream headers arrive, `responded` flips
+    // true — the timeout handler must still destroy `res`, not just the
+    // upstream socket, or the agent's own client hangs forever reading a
+    // body that will never end (destroying the piped-FROM source does not
+    // itself end the piped-TO destination).
+    const stalling = await startStallingBodyUpstream();
+    upstreamClose = stalling.close;
+    const broker = new CredentialBroker({ upstreamBaseUrl: stalling.url });
+    proxy = await startCredentialProxy(broker, { upstreamTimeoutMs: 100 });
+    const reg = broker.mint("a", "l", ["send"], REAL_KEY);
+
+    const start = Date.now();
+    const res = await fetch(`${proxy.url}/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${reg.voucher}`, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    // Headers were already forwarded before the stall — that part of the
+    // response already committed and can't (and shouldn't) change.
+    expect(res.status).toBe(200);
+    // Reading the (otherwise never-ending) body must still be bounded.
+    await expect(res.text()).rejects.toThrow();
+    expect(Date.now() - start).toBeLessThan(1000);
+
+    await new Promise((r) => setTimeout(r, 300));
+    expect(stalling.connectionsClosed()).toBe(1);
+  });
+
+  it("bounds the downstream response when the upstream hard-resets mid-body (not just idles)", async () => {
+    // `.pipe()` doesn't forward source errors to the destination, and a hard
+    // reset fires 'error'/'close' immediately rather than waiting out the
+    // idle timer — a distinct failure mode from the stalling-body test above,
+    // and NOT covered by the `upstreamReq`-level timeout/close wiring alone.
+    const resetting = await startResettingBodyUpstream();
+    upstreamClose = resetting.close;
+    const broker = new CredentialBroker({ upstreamBaseUrl: resetting.url });
+    // Long timeout — only the upstream-response error/close listener, not
+    // the idle timer, should be what rescues this connection.
+    proxy = await startCredentialProxy(broker, { upstreamTimeoutMs: 5000 });
+    const reg = broker.mint("a", "l", ["send"], REAL_KEY);
+
+    const start = Date.now();
+    const res = await fetch(`${proxy.url}/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${reg.voucher}`, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    await expect(res.text()).rejects.toThrow();
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  it("a fast upstream response is unaffected by the timeout/close wiring", async () => {
+    const upstream = await startUpstream();
+    upstreamClose = upstream.close;
+    const broker = new CredentialBroker({ upstreamBaseUrl: upstream.url });
+    // A tight timeout that a real (fast) upstream should never come close to.
+    proxy = await startCredentialProxy(broker, { upstreamTimeoutMs: 2000 });
+    const reg = broker.mint("agent-1", "l", ["send"], REAL_KEY);
+
+    const r = await post(proxy.url, reg.voucher, "/send");
+    expect(r.status).toBe(200);
+  });
 });

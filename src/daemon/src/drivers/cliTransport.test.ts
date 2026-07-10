@@ -95,6 +95,60 @@ describe("prepareCliTransport — layered spawn env", () => {
     const link = path.join(stateDir, "bin", "alook");
     expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
   });
+
+  it("revokes the agent's previous voucher before minting a new one on respawn", async () => {
+    // Without this, every stop+respawn of the same agent leaves the OLD
+    // voucher registered forever — an unbounded leak in the broker's map,
+    // since revoke/revokeAgent is never called anywhere else in production
+    // code (see plans/fix-credential-proxy-connection-leak.md).
+    const cred = broker();
+    const first = await prepareCliTransport(
+      baseCtx(mkTmp(), { credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" } }),
+      {},
+      undefined,
+      "linux",
+    );
+    expect(cred.size).toBe(1);
+    const firstVoucher = fs.readFileSync(first.tokenFile, "utf8");
+    expect(cred.check(`Bearer ${firstVoucher}`).ok).toBe(true);
+
+    const second = await prepareCliTransport(
+      baseCtx(mkTmp(), { credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" } }),
+      {},
+      undefined,
+      "linux",
+    );
+
+    // Still exactly one live registration for this agent — the old one was
+    // revoked, not left dangling, regardless of how many times it respawns.
+    expect(cred.size).toBe(1);
+    expect(cred.check(`Bearer ${firstVoucher}`).ok).toBe(false);
+    const secondVoucher = fs.readFileSync(second.tokenFile, "utf8");
+    expect(cred.check(`Bearer ${secondVoucher}`).ok).toBe(true);
+  });
+
+  it("does not revoke a DIFFERENT agent's voucher on respawn", async () => {
+    const cred = broker();
+    await prepareCliTransport(
+      baseCtx(mkTmp(), {
+        agentId: "agent_1",
+        credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" },
+      }),
+      {},
+      undefined,
+      "linux",
+    );
+    await prepareCliTransport(
+      baseCtx(mkTmp(), {
+        agentId: "agent_2",
+        credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" },
+      }),
+      {},
+      undefined,
+      "linux",
+    );
+    expect(cred.size).toBe(2);
+  });
 });
 
 describe("prepareCliTransport — unified AGENTS.md packing", () => {

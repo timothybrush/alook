@@ -121,6 +121,34 @@ describe("POST /api/community/agent/send", () => {
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
   })
 
+  it("propagates a CAS 409 conflict from createCommunityMessage as blocked/unaligned with a freshly re-fetched latestSeq", async () => {
+    // Alignment gate passes (latestSeq=9, seen=9), but another agent's send
+    // wins the race between the gate and the CAS claim — by the time this
+    // request's claim runs, the counter has already moved to 10.
+    mockGetLatestSeqForScope.mockResolvedValueOnce(9).mockResolvedValueOnce(10)
+    mockGetReadState.mockResolvedValue({ lastReadSeq: 9 })
+    mockCreateCommunityMessage.mockResolvedValue({ ok: false, status: 409, error: "seq_conflict" })
+    const res = await POST(
+      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ state: "blocked", reason: "unaligned", unreadCount: 1, latestSeq: 10 })
+    expect(mockGetLatestSeqForScope).toHaveBeenCalledTimes(2)
+  })
+
+  it("happy path: createCommunityMessage is called with expectedSeq equal to the alignment-check's latestSeq (regression guard against drift)", async () => {
+    mockGetLatestSeqForScope.mockResolvedValue(5)
+    mockGetReadState.mockResolvedValue({ lastReadSeq: 5 })
+    mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 6, content: "hi" } })
+    const res = await POST(
+      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+    )
+    expect(res.status).toBe(200)
+    expect(mockCreateCommunityMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedSeq: 5 })
+    )
+  })
+
   it("an explicit seenUpToSeq overrides the bot's own tracked lastReadSeq for the alignment check", async () => {
     mockGetLatestSeqForScope.mockResolvedValue(10)
     mockGetReadState.mockResolvedValue({ lastReadSeq: 2 }) // would block if used

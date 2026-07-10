@@ -528,6 +528,125 @@ describe("createMessage — seq assignment", () => {
   });
 });
 
+describe("createMessage — CAS claim (expectedSeq, plans/fix-agent-send-race-condition.md)", () => {
+  /**
+   * Same shape as `createSeqSpyDbMock` above, but scripts the CAS
+   * `.returning()` call per-invocation from `seqResults`: a number resolves
+   * `[{ nextSeq }]` (claim won), `null` resolves `[]` — the real
+   * SQLite/Drizzle no-op shape when `onConflictDoUpdate`'s `setWhere`
+   * evaluates false (claim lost the race).
+   */
+  function createCasSpyDbMock(opts?: { messageId?: string; seqResults?: Array<number | null> }) {
+    const base = createCreateMessageDbMock(opts);
+    const seqCalls: Array<{ values: any; onConflict: any }> = [];
+    let seqIdx = 0;
+    const seqResults = opts?.seqResults;
+    const originalInsert = base.insert;
+    base.insert = vi.fn((table: unknown) => {
+      if (table === communityMessageSeq) {
+        const rec: { values: any; onConflict: any } = { values: undefined, onConflict: undefined };
+        seqCalls.push(rec);
+        return {
+          values: vi.fn((v: any) => {
+            rec.values = v;
+            return {
+              onConflictDoUpdate: vi.fn((cfg: any) => {
+                rec.onConflict = cfg;
+                return {
+                  returning: vi.fn(() => {
+                    const next = seqResults ? seqResults[seqIdx++] : 1;
+                    return Promise.resolve(next === null || next === undefined ? [] : [{ nextSeq: next }]);
+                  }),
+                };
+              }),
+            };
+          }),
+        };
+      }
+      return originalInsert(table);
+    });
+    base.__seqCalls = seqCalls;
+    return base;
+  }
+
+  it("expectedSeq matching the current counter succeeds and returns a row with the expected seq", async () => {
+    const db = createCasSpyDbMock({ seqResults: [20] });
+    const msg = await messageQueries.createMessage(db, {
+      authorId: "u_1",
+      content: "hi",
+      channelId: "ch_1",
+      expectedSeq: 19,
+    });
+    expect(msg).not.toBeNull();
+    expect(msg!.seq).toBe(20);
+    // The CAS variant carries a setWhere gate — the unconditional claim does not.
+    expect(db.__seqCalls[0].onConflict.setWhere).toBeDefined();
+  });
+
+  it("stale expectedSeq: CAS claim resolves [] → createMessage returns null, with ZERO message/channel/read-state writes", async () => {
+    const db = createCasSpyDbMock({ seqResults: [null] });
+    const result = await messageQueries.createMessage(db, {
+      authorId: "u_1",
+      content: "hi",
+      channelId: "ch_1",
+      expectedSeq: 19,
+    });
+    expect(result).toBeNull();
+    // No message insert, no read-state upsert, no channel lastMessageAt bump.
+    expect(db.__inserts).toHaveLength(0);
+    expect(db.__updates).toHaveLength(0);
+  });
+
+  it("two racers with the same expectedSeq: first wins the CAS, second loses it", async () => {
+    const db = createCasSpyDbMock({ seqResults: [20, null] });
+    const first = await messageQueries.createMessage(db, {
+      authorId: "u_1",
+      content: "hi",
+      channelId: "ch_1",
+      expectedSeq: 19,
+    });
+    const second = await messageQueries.createMessage(db, {
+      authorId: "u_2",
+      content: "hi again",
+      channelId: "ch_1",
+      expectedSeq: 19,
+    });
+    expect(first?.seq).toBe(20);
+    expect(second).toBeNull();
+    // Both racers hit the seq-claim exactly once each, with the SAME
+    // expectedSeq snapshot (they both read `latestSeq=19` before either claimed).
+    expect(db.__seqCalls).toHaveLength(2);
+    expect(db.__seqCalls[0].values).toEqual({ scopeKey: "channel:ch_1", nextSeq: 1 });
+    expect(db.__seqCalls[1].values).toEqual({ scopeKey: "channel:ch_1", nextSeq: 1 });
+    expect(db.__seqCalls[0].onConflict.setWhere).toBeDefined();
+    expect(db.__seqCalls[1].onConflict.setWhere).toBeDefined();
+  });
+
+  it("expectedSeq: 0 on a scope with no prior messages succeeds (first-message-ever INSERT branch, no conflict to gate)", async () => {
+    const db = createCasSpyDbMock({ seqResults: [1] });
+    const msg = await messageQueries.createMessage(db, {
+      authorId: "u_1",
+      content: "hi",
+      channelId: "ch_1",
+      expectedSeq: 0,
+    });
+    expect(msg).not.toBeNull();
+    expect(msg!.seq).toBe(1);
+  });
+
+  it("no expectedSeq behaves exactly as before (regression guard — web/human send path unaffected)", async () => {
+    const db = createCasSpyDbMock({ seqResults: [1] });
+    const msg = await messageQueries.createMessage(db, {
+      authorId: "u_1",
+      content: "hi",
+      channelId: "ch_1",
+    });
+    expect(msg.seq).toBe(1);
+    // The unconditional claim carries no setWhere gate.
+    expect(db.__seqCalls[0].onConflict.setWhere).toBeUndefined();
+  });
+});
+
 // ── getLatestMessage / getLatestMessagesByChannelIds ──────────────────────
 //
 // These feed the invariant unification (plan #4) — every mark-read path that

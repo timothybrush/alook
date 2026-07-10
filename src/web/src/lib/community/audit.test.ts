@@ -30,7 +30,7 @@ describe("logAudit", () => {
 
   it("returns void immediately without awaiting the write", () => {
     // Never resolves — asserts logAudit does not await.
-    mockLogAction.mockReturnValue(new Promise(() => {}))
+    mockLogAction.mockReturnValue(new Promise(() => { }))
     const result = logAudit({} as never, {
       serverId: "s1",
       actorId: "u1",
@@ -56,9 +56,37 @@ describe("logAudit", () => {
     expect(mockWarn).toHaveBeenCalledTimes(1)
     expect(mockWarn).toHaveBeenCalledWith("audit_write_failed", {
       err: expect.stringContaining("db offline"),
+      cause: "db offline",
       action: "member_kick",
       serverId: "s1",
       targetType: "member",
+      targetId: "m1",
+    })
+  })
+
+  it("surfaces the wrapped driver error via .cause (DrizzleQueryError shape)", async () => {
+    // Mirrors drizzle-orm 0.44+: String(err) on the outer error only shows
+    // "Failed query: ...", hiding the real SQLite failure on .cause.
+    const outer = new Error("Failed query: insert into community_audit_log ...")
+      ; (outer as Error & { cause?: unknown }).cause = new Error(
+        "NOT NULL constraint failed: community_audit_log.server_id"
+      )
+    mockLogAction.mockRejectedValue(outer)
+    logAudit({} as never, {
+      serverId: null,
+      actorId: "u1",
+      action: "message_authored_as_bot",
+      targetType: "message",
+      targetId: "m1",
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(mockWarn).toHaveBeenCalledWith("audit_write_failed", {
+      err: expect.stringContaining("Failed query"),
+      cause: "Failed query: insert into community_audit_log ... <- NOT NULL constraint failed: community_audit_log.server_id",
+      action: "message_authored_as_bot",
+      serverId: null,
+      targetType: "message",
       targetId: "m1",
     })
   })

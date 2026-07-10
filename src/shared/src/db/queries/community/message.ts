@@ -23,6 +23,13 @@ export function scopeKeyForTarget(target: { channelId?: string; dmConversationId
  * for uniqueness on its own, no CTE/transaction needed (see
  * plans/community-agent-cli-bridge.md design §3 for why the CTE-fusion
  * approach is not valid SQLite and was rejected).
+ *
+ * Unconditional claim: always advances the counter, no matter what the
+ * caller's stale view of the world was. Callers with an `expectedSeq` to
+ * verify against (the agent-send race, plans/fix-agent-send-race-condition.md)
+ * must use the CAS sibling `claimNextSeqIfAligned` below instead — this
+ * function alone cannot detect a stale-snapshot race, only guarantee
+ * uniqueness.
  */
 async function claimNextSeq(db: Database, scopeKey: string): Promise<number> {
   const rows = await db
@@ -34,6 +41,36 @@ async function claimNextSeq(db: Database, scopeKey: string): Promise<number> {
     })
     .returning({ nextSeq: communityMessageSeq.nextSeq });
   return rows[0]!.nextSeq;
+}
+
+/**
+ * Compare-and-swap claim: only advances `next_seq` if it currently equals
+ * `expectedSeq` — the value the caller observed during its own alignment
+ * check. Returns the newly claimed seq on success, or `null` if another
+ * writer already advanced the counter (the caller lost the race and MUST
+ * treat this as a no-op: no message row, no side effects of any kind).
+ *
+ * Safe for the very first message in a scope too: when no row exists yet,
+ * the INSERT branch fires unconditionally (no conflict to gate), but that
+ * branch can only ever be reached by the single first-ever writer for that
+ * scope_key — every subsequent racer hits the conflict branch and is
+ * correctly gated by `setWhere`.
+ */
+async function claimNextSeqIfAligned(
+  db: Database,
+  scopeKey: string,
+  expectedSeq: number
+): Promise<number | null> {
+  const rows = await db
+    .insert(communityMessageSeq)
+    .values({ scopeKey, nextSeq: 1 })
+    .onConflictDoUpdate({
+      target: communityMessageSeq.scopeKey,
+      set: { nextSeq: sql`${communityMessageSeq.nextSeq} + 1` },
+      setWhere: sql`${communityMessageSeq.nextSeq} = ${expectedSeq}`,
+    })
+    .returning({ nextSeq: communityMessageSeq.nextSeq });
+  return rows[0]?.nextSeq ?? null;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -55,21 +92,39 @@ function safeParseEmbeds(raw: string | null, messageId: string): unknown | undef
   }
 }
 
+export type CreateMessageData = {
+  authorId: string;
+  content: string;
+  channelId?: string;
+  dmConversationId?: string;
+  type?: string;
+  mentionType?: string;
+  replyToId?: string;
+  embeds?: string;
+};
+
+/**
+ * `createMessage` overloads (plans/fix-agent-send-race-condition.md design §2):
+ * callers that never pass `expectedSeq` keep today's non-nullable return
+ * type — no pointless null-checks forced onto the three direct callers
+ * (`channels/[id]/posts/route.ts`, `servers/[id]/bots/route.ts`,
+ * `friends/request/route.ts`) that never opt into the CAS guard. Only
+ * callers that explicitly pass a numeric `expectedSeq` (the agent-send race
+ * fix) see the nullable return — `null` means "lost the race, no row was
+ * written, treat as a complete no-op".
+ */
 export async function createMessage(
   db: Database,
-  data: {
-    authorId: string;
-    content: string;
-    channelId?: string;
-    dmConversationId?: string;
-    type?: string;
-    mentionType?: string;
-    replyToId?: string;
-    embeds?: string;
-  }
+  data: CreateMessageData & { expectedSeq?: undefined }
+): Promise<Awaited<ReturnType<typeof insertMessageRow>>>;
+export async function createMessage(
+  db: Database,
+  data: CreateMessageData & { expectedSeq: number }
+): Promise<Awaited<ReturnType<typeof insertMessageRow>> | null>;
+export async function createMessage(
+  db: Database,
+  data: CreateMessageData & { expectedSeq?: number }
 ) {
-  const now = new Date().toISOString();
-
   // Step 0: atomically claim this scope's next seq (own top-level statement —
   // see design §3 for why this can't be fused into the INSERT below via a
   // CTE). Accepted trade-off: if the INSERT below fails after this succeeds,
@@ -79,8 +134,28 @@ export async function createMessage(
   // doesn't support one that could express it. Kept outside the batch below
   // because D1 `batch()` cannot feed one statement's `.returning()` into a
   // later statement's values.
+  //
+  // When `expectedSeq` is present (plans/fix-agent-send-race-condition.md),
+  // the claim is a compare-and-swap gated on the caller's own alignment-check
+  // snapshot: `claimNextSeqIfAligned` returns `null` with ZERO rows written
+  // anywhere if another writer already advanced the counter past what this
+  // caller saw — return `null` immediately, before any insert/update below.
   const scopeKey = scopeKeyForTarget(data);
-  const seq = await claimNextSeq(db, scopeKey);
+  const seq =
+    data.expectedSeq !== undefined
+      ? await claimNextSeqIfAligned(db, scopeKey, data.expectedSeq)
+      : await claimNextSeq(db, scopeKey);
+  if (seq === null) return null;
+  return insertMessageRow(db, data, seq);
+}
+
+// Step 1+: everything after the seq claim above — message insert,
+// channel/DM `lastMessageAt` bump, author read-state watermark. Split out of
+// `createMessage` purely so the two overload signatures above can reference
+// its return type instead of duplicating a hand-written row type; behavior
+// is identical to having this inlined.
+async function insertMessageRow(db: Database, data: CreateMessageData, seq: number) {
+  const now = new Date().toISOString();
 
   // Pass `createdAt: now` explicitly so `msg.createdAt` matches the exact
   // string we write to `channel.lastMessageAt` / `dmConversation.lastMessageAt`

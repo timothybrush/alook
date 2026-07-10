@@ -260,6 +260,67 @@ describe("AgentProcessManager — logging", () => {
     expect((ended[0]![1][0] as any).reason).toBe("turn_end");
   });
 
+});
+
+describe("AgentProcessManager — launchId threading", () => {
+  // Regression test: `doSpawn` used to leave `ctx.launchId` as whatever
+  // `baseContextFor` returned (almost always undefined, since no host wires
+  // it there) instead of the launchId tracked from the latest agent:wake —
+  // every real spawn's voucher silently collided on cliTransport's "default"
+  // fallback path (see plans/fix-credential-proxy-connection-leak.md).
+  it("passes the latest agent:wake's launchId into the spawned driver's LaunchContext", () => {
+    let capturedCtx: LaunchContext | undefined;
+    const factory: SessionFactory = ({ ctx }) => {
+      capturedCtx = ctx;
+      return fakeSession();
+    };
+    const mgr = new AgentProcessManager({
+      driverFor: () => fakeDriver("codex"),
+      baseContextFor: () => ({
+        workingDirectory: "/tmp",
+        agentId: "a1",
+        standingPrompt: "",
+        config: {} as LaunchContext["config"],
+        credentialProxy: {} as LaunchContext["credentialProxy"],
+      }),
+      sessionFactory: factory,
+      onRuntimeSpawnFailed: vi.fn(),
+      onRuntimeSessionEstablished: vi.fn(),
+    });
+    mgr.register("a1", { launchId: "wake-launch-42" });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    expect(capturedCtx?.launchId).toBe("wake-launch-42");
+  });
+
+  it("falls back to baseContextFor's launchId when no wake launchId is tracked", () => {
+    let capturedCtx: LaunchContext | undefined;
+    const factory: SessionFactory = ({ ctx }) => {
+      capturedCtx = ctx;
+      return fakeSession();
+    };
+    const mgr = new AgentProcessManager({
+      driverFor: () => fakeDriver("codex"),
+      baseContextFor: () => ({
+        workingDirectory: "/tmp",
+        agentId: "a1",
+        launchId: "base-fallback",
+        standingPrompt: "",
+        config: {} as LaunchContext["config"],
+        credentialProxy: {} as LaunchContext["credentialProxy"],
+      }),
+      sessionFactory: factory,
+      onRuntimeSpawnFailed: vi.fn(),
+      onRuntimeSessionEstablished: vi.fn(),
+    });
+    mgr.register("a1"); // no launch metadata at all
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    expect(capturedCtx?.launchId).toBe("base-fallback");
+  });
+});
+
+describe("AgentProcessManager — session race conditions", () => {
   // Regression test: a `stop()`/`terminate_stalled` effect can race a
   // still-in-flight `session.start()` and win — its `exit` handler runs
   // first, deleting the session from the manager's map and dispatching

@@ -51,7 +51,7 @@ type FullMessageRow = NonNullable<
 
 type CreateMessageError = {
   ok: false
-  status: 400
+  status: 400 | 409
   error: string
 }
 
@@ -80,8 +80,16 @@ export async function createCommunityMessage(params: {
   body: IncomingMessageBody
   /** Provenance tag threaded into the bot-authored audit row's `changes` (plan §10). */
   source?: "cli" | "daemon-http" | "web"
+  /**
+   * CAS guard for the agent-send race fix
+   * (plans/fix-agent-send-race-condition.md). Only the agent `send` route
+   * passes this — it's the `latestSeq` snapshot that route's own alignment
+   * check already computed. Omitted by every other caller (web/human sends,
+   * thread posts), which keep the unconditional, always-succeeds claim.
+   */
+  expectedSeq?: number
 }): Promise<CreateMessageResult> {
-  const { db, authorId, target, body, source } = params
+  const { db, authorId, target, body, source, expectedSeq } = params
 
   const content = typeof body.content === "string" ? body.content : ""
   if (content.length > MAX_MESSAGE_CONTENT_LENGTH) {
@@ -120,14 +128,29 @@ export async function createCommunityMessage(params: {
       ? body.mentionType
       : undefined
 
-  const created = await queries.communityMessage.createMessage(db, {
+  const baseMessageData = {
     authorId,
     content,
     channelId: target.kind === "dm" ? undefined : target.channelId,
     dmConversationId: target.kind === "dm" ? target.dmId : undefined,
     replyToId,
     mentionType,
-  })
+  }
+  // `createMessage`'s overloads key off whether the `expectedSeq` property
+  // is present at all, not just its runtime value — a `number | undefined`
+  // typed property doesn't cleanly resolve against either overload, so the
+  // pass-through branches explicitly instead of spreading `expectedSeq` in.
+  const created =
+    expectedSeq !== undefined
+      ? await queries.communityMessage.createMessage(db, { ...baseMessageData, expectedSeq })
+      : await queries.communityMessage.createMessage(db, baseMessageData)
+
+  // Lost the CAS race (plans/fix-agent-send-race-condition.md) — zero rows
+  // were written anywhere (no message, no channel/DM bump, no read-state
+  // watermark). Return immediately, before attachments/mentions/fan-out/audit.
+  if (created === null) {
+    return { ok: false, status: 409, error: "seq_conflict" }
+  }
 
   const attachments: CreatedAttachment[] = incomingAttachments?.length
     ? await Promise.all(

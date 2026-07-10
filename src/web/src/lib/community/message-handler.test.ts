@@ -180,6 +180,73 @@ describe("createCommunityMessage — audit relocation (plan §10)", () => {
   })
 })
 
+describe("createCommunityMessage — CAS race (plans/fix-agent-send-race-condition.md)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockFanOutToChannel.mockResolvedValue(undefined)
+    mockFanOutToDM.mockResolvedValue(undefined)
+    mockBroadcastToUser.mockResolvedValue(undefined)
+  })
+
+  it("expectedSeq mismatch (createMessage returns null) → { ok: false, status: 409, error: 'seq_conflict' }, no side effects", async () => {
+    mockCreateMessage.mockResolvedValue(null)
+
+    const result = await createCommunityMessage({
+      db: {} as never,
+      authorId: "author_1",
+      target: { kind: "channel", channelId: "c1", serverId: "srv_1" },
+      body: { content: "hello" },
+      source: "cli",
+      expectedSeq: 19,
+    })
+
+    expect(result).toEqual({ ok: false, status: 409, error: "seq_conflict" })
+    // Lost the race — none of the downstream pipeline steps should fire.
+    expect(mockGetMessage).not.toHaveBeenCalled()
+    expect(mockCreateAttachment).not.toHaveBeenCalled()
+    expect(mockCreateMentions).not.toHaveBeenCalled()
+    expect(mockFanOutToChannel).not.toHaveBeenCalled()
+    expect(mockFanOutToDM).not.toHaveBeenCalled()
+    expect(mockLogAudit).not.toHaveBeenCalled()
+  })
+
+  it("passes expectedSeq through to createMessage when provided", async () => {
+    mockCreateMessage.mockResolvedValue({ id: "msg_1" })
+    mockGetMessage.mockResolvedValue(messageRow())
+    mockGetUserInternal.mockResolvedValue({ id: "author_1", isBot: false, deletedAt: null })
+
+    await createCommunityMessage({
+      db: {} as never,
+      authorId: "author_1",
+      target: { kind: "channel", channelId: "c1", serverId: "srv_1" },
+      body: { content: "hello" },
+      source: "cli",
+      expectedSeq: 19,
+    })
+
+    expect(mockCreateMessage).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ expectedSeq: 19 }),
+    )
+  })
+
+  it("omits expectedSeq entirely from the createMessage call when not provided (regression — web/human sends unaffected)", async () => {
+    mockCreateMessage.mockResolvedValue({ id: "msg_1" })
+    mockGetMessage.mockResolvedValue(messageRow())
+    mockGetUserInternal.mockResolvedValue({ id: "author_1", isBot: false, deletedAt: null })
+
+    await createCommunityMessage({
+      db: {} as never,
+      authorId: "author_1",
+      target: { kind: "channel", channelId: "c1", serverId: "srv_1" },
+      body: { content: "hello" },
+    })
+
+    const callArgs = mockCreateMessage.mock.calls[0]![1]
+    expect("expectedSeq" in callArgs).toBe(false)
+  })
+})
+
 describe("createCommunityMessage — @Name#0042 mention disambiguation", () => {
   beforeEach(() => {
     vi.clearAllMocks()

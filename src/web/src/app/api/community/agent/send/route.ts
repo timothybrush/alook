@@ -81,14 +81,31 @@ export const POST = withAgentRunnerAuth(async (req: NextRequest, ctx) => {
       : { kind: "channel", channelId: channel.id, serverId: channel.serverId }
   }
 
+  // `expectedSeq: latestSeq` reuses the exact snapshot the alignment gate
+  // above already fetched — no new query. If another agent's `send` wins
+  // the race between that snapshot and this claim, `createCommunityMessage`
+  // returns a 409 and we translate it into the SAME `blocked`/`unaligned`
+  // shape the gate above returns, with a freshly re-fetched `latestSeq` (the
+  // stale one is now off-by-at-least-one). The daemon's existing "blocked →
+  // inbox pull → retry" handling needs no changes for this (plan §4).
   const result = await createCommunityMessage({
     db,
     authorId: ctx.botUserId,
     target,
     body: { content: body.content.text },
     source: "cli",
+    expectedSeq: latestSeq,
   })
   if (!result.ok) {
+    if (result.status === 409) {
+      const freshLatestSeq = await queries.communityAgentInbox.getLatestSeqForScope(db, scopeKey)
+      return NextResponse.json({
+        state: "blocked",
+        reason: "unaligned",
+        unreadCount: Math.max(0, freshLatestSeq - seen),
+        latestSeq: freshLatestSeq,
+      })
+    }
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
 
