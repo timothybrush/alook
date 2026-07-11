@@ -39,6 +39,8 @@ export const GET = withAuth(async (_req, ctx) => {
       avatar: f.friendImage ?? avatarInitial(f.friendName),
       status: "offline" as const,
       sub: "",
+      statusEmoji: f.statusEmoji ?? null,
+      statusText: f.statusText ?? "",
     }))
 
   return writeJSON({ friends })

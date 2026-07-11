@@ -31,5 +31,7 @@ export const GET = withAuth(async (_req, ctx) => {
     aboutMe: profile?.aboutMe ?? "",
     bannerColor: profile?.bannerColor ?? null,
     mutualServers,
+    statusEmoji: profile?.statusEmoji ?? null,
+    statusText: profile?.statusText ?? "",
   })
 })

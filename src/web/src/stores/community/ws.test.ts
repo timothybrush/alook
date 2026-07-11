@@ -119,4 +119,53 @@ describe("useCommunityWsStore", () => {
     expect(useCommunityWsStore.getState().onlineUserIds.size).toBe(0)
     expect(useCommunityWsStore.getState().seenMessageIds.size).toBe(0)
   })
+
+  it("starts with an empty userStatuses map", () => {
+    expect(useCommunityWsStore.getState().userStatuses.size).toBe(0)
+  })
+
+  it("setUserStatus stores per-user and overwrites on repeat calls", () => {
+    useCommunityWsStore.getState().setUserStatus("u1", "🎧", "Vibing")
+    expect(useCommunityWsStore.getState().userStatuses.get("u1")).toEqual({
+      emoji: "🎧",
+      text: "Vibing",
+    })
+
+    useCommunityWsStore.getState().setUserStatus("u1", null, null)
+    expect(useCommunityWsStore.getState().userStatuses.get("u1")).toEqual({
+      emoji: null,
+      text: null,
+    })
+  })
+
+  it("setUserStatus swaps the Map reference so React selectors re-run", () => {
+    const before = useCommunityWsStore.getState().userStatuses
+    useCommunityWsStore.getState().setUserStatus("u1", "🎧", "Vibing")
+    const after = useCommunityWsStore.getState().userStatuses
+    expect(after).not.toBe(before)
+  })
+
+  it("resetUserStatuses clears the map without touching presence/seen state", () => {
+    useCommunityWsStore.getState().setUserStatus("u1", "🎧", "Vibing")
+    useCommunityWsStore.getState().setPresence("u2", true)
+    useCommunityWsStore.getState().markSeenMessage("m1")
+
+    useCommunityWsStore.getState().resetUserStatuses()
+
+    expect(useCommunityWsStore.getState().userStatuses.size).toBe(0)
+    expect(useCommunityWsStore.getState().onlineUserIds.has("u2")).toBe(true)
+    expect(useCommunityWsStore.getState().seenMessageIds.has("m1")).toBe(true)
+  })
+
+  it("resetUserStatuses is a no-op (no reference swap) when already empty", () => {
+    const before = useCommunityWsStore.getState().userStatuses
+    useCommunityWsStore.getState().resetUserStatuses()
+    expect(useCommunityWsStore.getState().userStatuses).toBe(before)
+  })
+
+  it("reset also clears userStatuses", () => {
+    useCommunityWsStore.getState().setUserStatus("u1", "🎧", "Vibing")
+    useCommunityWsStore.getState().reset()
+    expect(useCommunityWsStore.getState().userStatuses.size).toBe(0)
+  })
 })

@@ -90,6 +90,9 @@ export default function CommunityPreview() {
     return init
   })
   const [myAboutMe, setMyAboutMe] = useState("Building Alook. Coffee, agents, and warm gray UIs.")
+  // In-memory-only status save for the preview scaffold — mirrors myAboutMe's
+  // pattern above; no real persistence/WS fan-out here (see plans/profile-card.md).
+  const [myStatus, setMyStatus] = useState<{ emoji: string | null; text: string | null }>({ emoji: "🎧", text: "Vibing" })
   const [editingProfile, setEditingProfile] = useState(false)
   // when set, the message area shows the "New Thread" creation panel
   const [creatingThread, setCreatingThread] = useState(false)
@@ -136,9 +139,14 @@ export default function CommunityPreview() {
       role: "member",
       about: member && "sub" in member && member.sub ? member.sub : "No bio yet.",
       mutual: 1,
-      tags: [],
     }
-    if (name === "Gener") data = { ...data, about: myAboutMe }
+    // Merge presence onto the FINAL data regardless of source (curated
+    // PROFILES lookup or the fallback literal above) — both mock arrays
+    // already carry real mixed online/offline values, so this is what
+    // makes the online/offline manual QA cases testable without two live
+    // logged-in sessions (see plans/profile-card.md).
+    data = { ...data, presence: member?.status, statusEmoji: member?.statusEmoji ?? data.statusEmoji, statusText: member?.statusText ?? data.statusText }
+    if (name === "Gener") data = { ...data, about: myAboutMe, statusEmoji: myStatus.emoji, statusText: myStatus.text }
     setProfile({ data, x: e.clientX, y: e.clientY })
   }
   const profileProps = { onOpenProfile: openProfile }
@@ -524,7 +532,25 @@ export default function CommunityPreview() {
       <NewThreadDialog channel={activeChannel} open={creatingThread} onClose={() => setCreatingThread(false)} onCreate={(name, firstMessage) => createThread(name, { firstMessage })} />
       <Dialog open={editingProfile} onOpenChange={(o) => { if (!o) setEditingProfile(false) }}>
         <DialogContent className="flex h-[calc(100vh-4rem)] w-[calc(100vw-4rem)] sm:max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0" showCloseButton={false}>
-          <UserSettings onClose={() => setEditingProfile(false)} userId={null} userName="Preview User" aboutMe={myAboutMe} avatar="Preview User" onSave={(data) => { if (data.aboutMe !== undefined) setMyAboutMe(data.aboutMe) }} onLogout={() => toast("Logged out")} />
+          <UserSettings
+            onClose={() => setEditingProfile(false)}
+            userId={null}
+            userName="Preview User"
+            aboutMe={myAboutMe}
+            avatar="Preview User"
+            statusEmoji={myStatus.emoji}
+            statusText={myStatus.text}
+            onSave={(data) => {
+              if (data.aboutMe !== undefined) setMyAboutMe(data.aboutMe)
+              if (data.statusEmoji !== undefined || data.statusText !== undefined) {
+                setMyStatus((s) => ({
+                  emoji: data.statusEmoji !== undefined ? data.statusEmoji : s.emoji,
+                  text: data.statusText !== undefined ? data.statusText : s.text,
+                }))
+              }
+            }}
+            onLogout={() => toast("Logged out")}
+          />
         </DialogContent>
       </Dialog>
       <Dialog open={view === "settings"} onOpenChange={(o) => { if (!o) goServer() }}>
@@ -564,7 +590,7 @@ export default function CommunityPreview() {
             {...profileProps}
           />
         )}
-        {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === "Gener"} />}
+        {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === "Gener"} onUpdateStatus={(emoji, text) => { setMyStatus({ emoji, text }); setProfile((p) => p ? { ...p, data: { ...p.data, statusEmoji: emoji, statusText: text } } : p) }} />}
         {preview && <ImageLightbox src={preview} onClose={() => setPreview(null)} />}
         {dialogs}
       </Shell>
@@ -601,7 +627,7 @@ export default function CommunityPreview() {
           {...profileProps}
         />
       )}
-      {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === "Gener"} />}
+      {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === "Gener"} onUpdateStatus={(emoji, text) => { setMyStatus({ emoji, text }); setProfile((p) => p ? { ...p, data: { ...p.data, statusEmoji: emoji, statusText: text } } : p) }} />}
       {preview && <ImageLightbox src={preview} onClose={() => setPreview(null)} />}
       {dialogs}
     </Shell>

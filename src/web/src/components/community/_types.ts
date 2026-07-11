@@ -152,6 +152,9 @@ export type Member = {
   status: Presence
   sub: string
   role: Role
+  // Custom status (emoji + short term) — see `Profile.statusEmoji`/`statusText`.
+  statusEmoji?: string | null
+  statusText?: string | null
 }
 
 export type Friend = {
@@ -164,6 +167,9 @@ export type Friend = {
   avatar: string
   status: Presence
   sub: string
+  // Custom status (emoji + short term) — see `Profile.statusEmoji`/`statusText`.
+  statusEmoji?: string | null
+  statusText?: string | null
 }
 
 export type PendingRequest = {
@@ -200,7 +206,15 @@ export type Profile = {
   role: string
   about: string
   mutual: number
-  tags: string[]
+  // Live online/offline dot on the card's avatar — undefined when no
+  // member/friend match could be resolved (e.g. a stale mention). See
+  // `resolveProfilePresence` in shell-frame.tsx.
+  presence?: Presence
+  // Custom status (emoji + short term), e.g. "🎧 Vibing". Both undefined/null
+  // means "no status set" — use `hasStatus()` from status-presets.ts, not a
+  // truthiness check on either field alone.
+  statusEmoji?: string | null
+  statusText?: string | null
 }
 
 // ── Settings rows ──────────────────────────────────────────────────────────

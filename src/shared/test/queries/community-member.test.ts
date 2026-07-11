@@ -10,6 +10,7 @@ function createSelectMock(rows: any[]) {
   chain.select = vi.fn(() => chain);
   chain.from = vi.fn(() => chain);
   chain.innerJoin = vi.fn(() => chain);
+  chain.leftJoin = vi.fn(() => chain);
   chain.where = vi.fn(() => chain);
   chain.orderBy = vi.fn(() => chain);
   chain.limit = vi.fn(() => Promise.resolve(rows));
@@ -171,6 +172,17 @@ describe("listMembersPaginated", () => {
     const result = await memberQueries.listMembersPaginated(db, "srv_1", { limit: 5 });
     expect(result.members.map((r) => r.discriminator)).toEqual(["0001", "0002"]);
   });
+
+  it("leftJoins communityUserProfile and passes through statusEmoji/statusText, including a user with no profile row", async () => {
+    const db = createSelectMock([
+      { ...buildMember(1), statusEmoji: "🎧", statusText: "Vibing" },
+      { ...buildMember(2), statusEmoji: null, statusText: null },
+    ]);
+    const result = await memberQueries.listMembersPaginated(db, "srv_1", { limit: 5 });
+    expect(db.leftJoin).toHaveBeenCalledTimes(1);
+    expect(result.members[0]).toMatchObject({ statusEmoji: "🎧", statusText: "Vibing" });
+    expect(result.members[1]).toMatchObject({ statusEmoji: null, statusText: null });
+  });
 });
 
 describe("searchMembers", () => {
@@ -179,6 +191,7 @@ describe("searchMembers", () => {
     chain.select = vi.fn(() => chain);
     chain.from = vi.fn(() => chain);
     chain.innerJoin = vi.fn(() => chain);
+    chain.leftJoin = vi.fn(() => chain);
     chain.where = vi.fn(() => chain);
     chain.orderBy = vi.fn(() => chain);
     chain.limit = vi.fn(() => Promise.resolve(rows));
@@ -228,6 +241,15 @@ describe("searchMembers", () => {
     const db = createSearchMock([]);
     await memberQueries.searchMembers(db, "srv_1", "A");
     expect(db.limit).toHaveBeenCalledWith(MAX_MEMBERS_PAGE_SIZE);
+  });
+
+  it("leftJoins communityUserProfile and passes through statusEmoji/statusText", async () => {
+    const db = createSearchMock([
+      { id: "m1", userName: "Alice", statusEmoji: "🎮", statusText: "Gaming" },
+    ]);
+    const res = await memberQueries.searchMembers(db, "srv_1", "Ali");
+    expect(db.leftJoin).toHaveBeenCalledTimes(1);
+    expect(res[0]).toMatchObject({ statusEmoji: "🎮", statusText: "Gaming" });
   });
 
   it("escapes % and _ wildcards in the query string (LIKE escape)", async () => {

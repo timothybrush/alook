@@ -11,6 +11,7 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, C
 import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar } from "./avatar"
 import { EmptyState } from "./empty-state"
+import { hasStatus } from "./status-presets"
 import type { Friend, PendingRequest, BlockedUser, OpenProfile } from "./_types"
 import { isSelfBotFriendship } from "@alook/shared"
 
@@ -107,7 +108,9 @@ export function FriendsPage({
                 </span>
               )}
             </div>
-            <div className="truncate text-xs text-muted-foreground">{f.sub}</div>
+            {hasStatus(f.statusEmoji, f.statusText) && (
+              <div className="truncate text-xs text-muted-foreground">{f.statusEmoji} {f.statusText}</div>
+            )}
           </div>
           <span className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground"><MessagesSquare className="size-4" /></span>
         </ContextMenuTrigger>

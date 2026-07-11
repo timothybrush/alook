@@ -17,6 +17,8 @@ export type UserProfile = {
   aboutMe: string
   bannerColor: string | null
   mutualServers: number
+  statusEmoji: string | null
+  statusText: string | null
 }
 
 export const userProfileQueryFn = (userId: string) => () =>

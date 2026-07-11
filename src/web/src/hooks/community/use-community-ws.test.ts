@@ -15,6 +15,7 @@ import type {
   CommunityMachineCreated,
   CommunityMachineStatus,
   CommunityPresenceUpdate,
+  CommunityStatusUpdate,
   CommunityMentionCreate,
   CommunityDmNewMessage,
   CommunityServerUpdate,
@@ -674,6 +675,27 @@ describe("useCommunityWs — presence → Zustand store, no cache", () => {
     capturedOnMessage!(event)
     const { useCommunityWsStore } = await import("@/stores/community/ws")
     expect(useCommunityWsStore.getState().onlineUserIds.has("u_pres")).toBe(true)
+    // No cache touched.
+    expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe("useCommunityWs — status.update → Zustand store, no cache", () => {
+  it("status.update writes to useCommunityWsStore only", async () => {
+    await mountHook()
+    const spy = vi.spyOn(capturedQueryClient, "invalidateQueries")
+    const event: CommunityStatusUpdate = {
+      type: "community:status.update",
+      userId: "u_status",
+      statusEmoji: "🎧",
+      statusText: "Vibing",
+    }
+    capturedOnMessage!(event)
+    const { useCommunityWsStore } = await import("@/stores/community/ws")
+    expect(useCommunityWsStore.getState().userStatuses.get("u_status")).toEqual({
+      emoji: "🎧",
+      text: "Vibing",
+    })
     // No cache touched.
     expect(spy).not.toHaveBeenCalled()
   })

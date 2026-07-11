@@ -27,6 +27,8 @@ import { create } from "zustand"
 export const SEEN_MESSAGE_MAX = 500
 export const SEEN_MESSAGE_TRIM_TO = 400
 
+export type UserStatus = { emoji: string | null; text: string | null }
+
 export type CommunityWsStoreState = {
   /**
    * Everyone online right now — human or bot. The server pushes
@@ -37,6 +39,14 @@ export type CommunityWsStoreState = {
    */
   onlineUserIds: Set<string>
   seenMessageIds: Set<string>
+  /**
+   * Live status deltas learned via `community:status.update` after the
+   * initial member/friend fetch — see plans/profile-card.md's "overlay
+   * pattern, not cache-patching" section. Only ever holds users who changed
+   * status since page load; everyone else's status comes straight off the
+   * fetched row.
+   */
+  userStatuses: Map<string, UserStatus>
 
   setPresence: (userId: string, online: boolean) => void
   /** Atomic bulk seed — one notification for N users. Use on server switch. */
@@ -44,15 +54,18 @@ export type CommunityWsStoreState = {
   resetPresence: () => void
   hasSeenMessage: (id: string) => boolean
   markSeenMessage: (id: string) => void
+  setUserStatus: (userId: string, emoji: string | null, text: string | null) => void
+  resetUserStatuses: () => void
   reset: () => void
 }
 
 const initialState = (): Pick<
   CommunityWsStoreState,
-  "onlineUserIds" | "seenMessageIds"
+  "onlineUserIds" | "seenMessageIds" | "userStatuses"
 > => ({
   onlineUserIds: new Set(),
   seenMessageIds: new Set(),
+  userStatuses: new Map(),
 })
 
 export const useCommunityWsStore = create<CommunityWsStoreState>((set, get) => ({
@@ -95,6 +108,17 @@ export const useCommunityWsStore = create<CommunityWsStoreState>((set, get) => (
       return
     }
     set({ seenMessageIds: next })
+  },
+
+  setUserStatus: (userId, emoji, text) => {
+    const next = new Map(get().userStatuses)
+    next.set(userId, { emoji, text })
+    set({ userStatuses: next })
+  },
+
+  resetUserStatuses: () => {
+    if (get().userStatuses.size === 0) return
+    set({ userStatuses: new Map() })
   },
 
   reset: () => set(initialState()),

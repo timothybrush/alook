@@ -1,5 +1,5 @@
 import { eq, and, ne, inArray, count, asc, or, gt, like, isNull, sql } from "drizzle-orm";
-import { communityServerMember, communityChannel, communityDmConversation } from "../../community-schema";
+import { communityServerMember, communityChannel, communityDmConversation, communityUserProfile } from "../../community-schema";
 import { user } from "../../schema";
 import type { Database } from "../../index";
 import {
@@ -149,6 +149,8 @@ export async function listMembersPaginated(
     userIsBot: boolean;
     userOwnerUserId: string | null;
     discriminator: string | null;
+    statusEmoji: string | null;
+    statusText: string | null;
   }>;
   hasMore: boolean;
   cursor: { joinedAt: string; id: string } | undefined;
@@ -188,9 +190,12 @@ export async function listMembersPaginated(
       userIsBot: user.isBot,
       userOwnerUserId: user.ownerUserId,
       discriminator: user.discriminator,
+      statusEmoji: communityUserProfile.statusEmoji,
+      statusText: communityUserProfile.statusText,
     })
     .from(communityServerMember)
     .innerJoin(user, eq(communityServerMember.userId, user.id))
+    .leftJoin(communityUserProfile, eq(communityUserProfile.userId, user.id))
     .where(and(...conditions))
     .orderBy(asc(communityServerMember.joinedAt), asc(communityServerMember.id))
     .limit(limit + 1);
@@ -236,9 +241,12 @@ export async function searchMembers(
       userEmail: user.email,
       userImage: user.image,
       discriminator: user.discriminator,
+      statusEmoji: communityUserProfile.statusEmoji,
+      statusText: communityUserProfile.statusText,
     })
     .from(communityServerMember)
     .innerJoin(user, eq(communityServerMember.userId, user.id))
+    .leftJoin(communityUserProfile, eq(communityUserProfile.userId, user.id))
     .where(
       and(
         eq(communityServerMember.serverId, serverId),

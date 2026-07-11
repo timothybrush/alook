@@ -756,6 +756,13 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
           return
         }
 
+        // ── Status — no cache; write to WS store (same overlay pattern as
+        // presence above, see plans/profile-card.md) ────────────────────
+        case "community:status.update": {
+          useCommunityWsStore.getState().setUserStatus(event.userId, event.statusEmoji, event.statusText)
+          return
+        }
+
         // ── Mentions ────────────────────────────────────────────────────
         case "community:mention.create": {
           void queryClient.invalidateQueries({ queryKey: communityKeys.inbox() })

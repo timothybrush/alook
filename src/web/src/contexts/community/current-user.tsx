@@ -24,6 +24,11 @@ export type CurrentUser = {
   // 4-digit discriminator (`"0042"`). Hydrated alongside `aboutMe` from
   // /api/community/users/me/profile — see CommunityBootstrap.
   discriminator?: string
+  // Custom status (emoji + short term), hydrated alongside `aboutMe`/
+  // `discriminator`. See `hasStatus()` in status-presets.ts for the "is a
+  // status set" check — don't test either field's truthiness alone.
+  statusEmoji?: string | null
+  statusText?: string | null
 }
 
 type CurrentUserContextValue = {

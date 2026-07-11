@@ -129,6 +129,48 @@ function maybeEnqueueWakes(
 
 
 /**
+ * Resolves the audience for a self-authored profile change: co-members
+ * (every server the user shares with someone) union friends. Mirrors
+ * `ws-durable.ts`'s `getPresenceAudience` — that function lives in the
+ * separate `ws-do` worker and isn't reachable from `src/web`'s API routes,
+ * but it's built from the same two shared query functions used here.
+ */
+async function getProfileAudience(db: Database, userId: string): Promise<string[]> {
+  const [coMembers, friends] = await Promise.all([
+    queries.communityMember.getCoMemberUserIds(db, userId),
+    queries.communityFriendship.getFriendUserIds(db, userId),
+  ])
+  return [...new Set([...coMembers, ...friends])]
+}
+
+/**
+ * Fan out a status change to everyone who can currently see the user
+ * (server co-members + friends). Self is intentionally excluded from their
+ * own audience — the caller updates the local WS store directly on save
+ * success instead (see `setUserStatus` call sites in `shell-frame.tsx` /
+ * `edit-profile-dialog.tsx`).
+ */
+export async function fanOutStatusUpdate(
+  userId: string,
+  statusEmoji: string | null,
+  statusText: string | null,
+): Promise<void> {
+  try {
+    const { env } = getCloudflareContext()
+    const db = getDb((env as Env).DB)
+    const audience = await getProfileAudience(db, userId)
+    await broadcastToRecipients(audience, {
+      type: WS_EVENTS.STATUS_UPDATE,
+      userId,
+      statusEmoji,
+      statusText,
+    })
+  } catch (err) {
+    log.warn("fanout_status_update_failed", { userId, err: String(err) })
+  }
+}
+
+/**
  * Fan out an event to all members of a server.
  */
 export async function fanOutToServerMembers(

@@ -14,7 +14,7 @@ import {
   useCurrentChannelId,
   useUiHandlers,
 } from "@/stores/community"
-import { useOnlineUserIds } from "@/stores/community/ws"
+import { useOnlineUserIds, useCommunityWsStore } from "@/stores/community/ws"
 import { useDms } from "@/hooks/community/use-dms"
 import { useFriends } from "@/hooks/community/use-friends"
 import { useDmMessages } from "@/hooks/community/use-messages"
@@ -53,17 +53,23 @@ function DmView() {
   const { dms, isLoading: dmsLoading } = useDms()
   const { friends: rawFriends, blocked } = useFriends()
   const onlineUserIds = useOnlineUserIds()
+  const userStatuses = useCommunityWsStore((s) => s.userStatuses)
   // Enrich with presence — the Composer @-picker uses `f.status` to render
   // the avatar presence dot; without this enrichment every avatar shows offline.
   const friends = useMemo(
     () =>
-      rawFriends.map((f) => ({
-        ...f,
-        status: onlineUserIds.has(f.userId ?? f.id)
-          ? ("online" as const)
-          : ("offline" as const),
-      })),
-    [rawFriends, onlineUserIds],
+      rawFriends.map((f) => {
+        const liveStatus = userStatuses.get(f.userId ?? f.id)
+        return {
+          ...f,
+          status: onlineUserIds.has(f.userId ?? f.id)
+            ? ("online" as const)
+            : ("offline" as const),
+          statusEmoji: liveStatus ? liveStatus.emoji : f.statusEmoji,
+          statusText: liveStatus ? liveStatus.text : f.statusText,
+        }
+      }),
+    [rawFriends, onlineUserIds, userStatuses],
   )
   // Frozen-once snapshot of the viewer's DM read pointer — the anchor for
   // the "New" divider AND the initial-page mode. Mirrors the channel-view

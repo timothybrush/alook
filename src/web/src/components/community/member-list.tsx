@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { Avatar } from "./avatar"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { hasStatus } from "./status-presets"
 import type { Member, Role, OpenProfile } from "./_types"
 import { canManageServer } from "./_types"
 
@@ -234,8 +235,8 @@ function MemberRow({
         <Avatar label={mem.avatar} size={32} presence={mem.status} dim={mem.status === "offline"} />
         <div className="min-w-0 flex-1 text-left">
           <div className={`truncate text-sm leading-tight ${mem.status === "offline" ? "text-muted-foreground" : ""}`}>{mem.name}</div>
-          {mem.sub && (
-            <div className="truncate text-xs leading-tight text-muted-foreground">{mem.sub}</div>
+          {hasStatus(mem.statusEmoji, mem.statusText) && (
+            <div className="truncate text-xs leading-tight text-muted-foreground">{mem.statusEmoji} {mem.statusText}</div>
           )}
         </div>
       </ContextMenuTrigger>

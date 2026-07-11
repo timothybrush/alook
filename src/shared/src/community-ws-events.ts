@@ -333,6 +333,13 @@ export type CommunityPresenceUpdate = {
   online: boolean
 }
 
+export type CommunityStatusUpdate = {
+  type: "community:status.update"
+  userId: string
+  statusEmoji: string | null
+  statusText: string | null
+}
+
 // ── Machine events ────────────────────────────────────────────────────────────
 
 /**
@@ -456,6 +463,7 @@ export type CommunityWsEvent =
   | CommunityDmNewMessage
   | CommunityDmTyping
   | CommunityPresenceUpdate
+  | CommunityStatusUpdate
   | CommunityMentionCreate
   | CommunityMachineCreated
   | CommunityMachineStatus
@@ -500,6 +508,7 @@ export const WS_EVENTS = {
   INVITE_CREATE: "community:invite.create",
   MENTION_CREATE: "community:mention.create",
   PRESENCE_UPDATE: "community:presence.update",
+  STATUS_UPDATE: "community:status.update",
   MACHINE_CREATED: "community:machine.created",
   MACHINE_STATUS: "community:machine.status",
   MACHINE_UPDATED: "community:machine.updated",

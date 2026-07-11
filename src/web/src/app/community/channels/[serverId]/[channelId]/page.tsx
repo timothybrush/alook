@@ -33,7 +33,7 @@ import {
   usePins,
 } from "@/hooks/community/use-channel-panels"
 import { useNotificationSettings } from "@/hooks/community/use-notification-settings"
-import { useOnlineUserIds } from "@/stores/community/ws"
+import { useOnlineUserIds, useCommunityWsStore } from "@/stores/community/ws"
 import {
   useSendMessage,
   useToggleReactionApi,
@@ -81,17 +81,23 @@ function ChannelView() {
   const { server: currentServer } = useServer(serverId)
   const membersHook = useServerMembers(serverId)
   const onlineUserIds = useOnlineUserIds()
+  const userStatuses = useCommunityWsStore((s) => s.userStatuses)
   // Members enriched with presence — used by the message list's typingUsers
   // resolution and the panel roster to render the correct dot.
   const members = useMemo(
     () =>
-      membersHook.members.map((m) => ({
-        ...m,
-        status: m.userId === currentUser.id || onlineUserIds.has(m.userId)
-          ? ("online" as const)
-          : ("offline" as const),
-      })),
-    [membersHook.members, onlineUserIds, currentUser.id],
+      membersHook.members.map((m) => {
+        const liveStatus = userStatuses.get(m.userId)
+        return {
+          ...m,
+          status: m.userId === currentUser.id || onlineUserIds.has(m.userId)
+            ? ("online" as const)
+            : ("offline" as const),
+          statusEmoji: liveStatus ? liveStatus.emoji : m.statusEmoji,
+          statusText: liveStatus ? liveStatus.text : m.statusText,
+        }
+      }),
+    [membersHook.members, onlineUserIds, currentUser.id, userStatuses],
   )
   // Roster passed to the @-mention popover — filters the viewer out.
   // `members` (above) still includes the viewer for the roster / typing lookup;

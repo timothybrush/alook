@@ -238,20 +238,20 @@ export const FORUM_TAGS = ["All", "question", "bug", "showcase", "email", "billi
 // display groups (hoisted role groups, then Online/Offline) from this. Gener is the
 // Owner (server creator) — there is exactly one, and it can't be reassigned via the UI.
 export const MEMBERS: Member[] = [
-  { id: "m_gener", userId: "u_gener", name: "Gener", avatar: "G", status: "online", sub: "", role: "owner" },
+  { id: "m_gener", userId: "u_gener", name: "Gener", avatar: "G", status: "online", sub: "", role: "owner", statusEmoji: "🎧", statusText: "Vibing" },
   { id: "m_gus", userId: "u_gus", name: "Gus", avatar: "Gu", status: "online", sub: "", role: "admin" },
-  { id: "m_lindsay", userId: "u_lindsay", name: "Lindsay", avatar: "L", status: "online", sub: "", role: "admin" },
+  { id: "m_lindsay", userId: "u_lindsay", name: "Lindsay", avatar: "L", status: "online", sub: "", role: "admin", statusEmoji: "🎮", statusText: "Gaming" },
   { id: "m_tomy", userId: "u_tomy", name: "lucky tomy", avatar: "t", status: "online", sub: "AI engineer", role: "member" },
-  { id: "m_jgtech", userId: "u_jgtech", name: "jgtech", avatar: "j", status: "online", sub: "", role: "member" },
+  { id: "m_jgtech", userId: "u_jgtech", name: "jgtech", avatar: "j", status: "online", sub: "", role: "member", statusEmoji: null, statusText: "Heads down" },
   { id: "m_azzo", userId: "u_azzo", name: "Azzo", avatar: "A", status: "offline", sub: "", role: "member" },
   { id: "m_distagon", userId: "u_distagon", name: "distagon", avatar: "d", status: "offline", sub: "", role: "member" },
   { id: "m_reece", userId: "u_reece", name: "Reece", avatar: "R", status: "offline", sub: "", role: "member" },
 ]
 
 export const FRIENDS: Friend[] = [
-  { id: "u_gus", name: "Gus", discriminator: "1337", avatar: "Gu", status: "online", sub: "Playing with agents" },
+  { id: "u_gus", name: "Gus", discriminator: "1337", avatar: "Gu", status: "online", sub: "Playing with agents", statusEmoji: "🦥", statusText: "Chillin'" },
   { id: "u_lindsay", name: "Lindsay", discriminator: "0007", avatar: "L", status: "online", sub: "Online" },
-  { id: "u_tomy", name: "lucky tomy", discriminator: "2718", avatar: "t", status: "online", sub: "AI engineer" },
+  { id: "u_tomy", name: "lucky tomy", discriminator: "2718", avatar: "t", status: "online", sub: "AI engineer", statusEmoji: "🍟", statusText: "Snack break" },
   { id: "u_azzo", name: "Azzo", discriminator: "4404", avatar: "A", status: "offline", sub: "Offline" },
   { id: "u_reece", name: "Reece", discriminator: "8080", avatar: "R", status: "offline", sub: "Offline" },
 ]
@@ -296,9 +296,9 @@ export const DM_MESSAGES: Record<string, Msg[]> = {
 }
 
 export const PROFILES: Record<string, Profile> = {
-  Gener: { name: "Gener", discriminator: "0042", avatar: "G", role: "Owner", about: "Building Alook. Coffee, agents, and warm gray UIs.", mutual: 3, tags: ["Owner"] },
-  Gus: { name: "Gus", discriminator: "1337", avatar: "Gu", role: "Admin", about: "Tinkering with email-driven workflows.", mutual: 2, tags: ["Admin"] },
-  Lindsay: { name: "Lindsay", discriminator: "0007", avatar: "L", role: "Admin", about: "Research lead. Ask me about presets.", mutual: 2, tags: ["Admin"] },
+  Gener: { name: "Gener", discriminator: "0042", avatar: "G", role: "Owner", about: "Building Alook. Coffee, agents, and warm gray UIs.", mutual: 3, statusEmoji: "🎧", statusText: "Vibing" },
+  Gus: { name: "Gus", discriminator: "1337", avatar: "Gu", role: "Admin", about: "Tinkering with email-driven workflows.", mutual: 2, statusEmoji: "🦥", statusText: "Chillin'" },
+  Lindsay: { name: "Lindsay", discriminator: "0007", avatar: "L", role: "Admin", about: "Research lead. Ask me about presets.", mutual: 2 },
 }
 
 export const INVITES: InviteRow[] = [

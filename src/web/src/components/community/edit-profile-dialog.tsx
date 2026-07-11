@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { clearPersistedCache } from "@/lib/query-persister"
 import { Avatar } from "./avatar"
 import { Field } from "./field"
+import { StatusEditor, hasStatus } from "./status-editor"
 
 const THEME_OPTIONS = [
   { value: "light", label: "Light", icon: Sun },
@@ -109,18 +110,21 @@ function AdvancedSettings({ userId }: { userId: string | null }) {
   )
 }
 
-export function UserSettings({ onClose, userId, userName, aboutMe, avatar, onSave, onLogout, onUploadAvatar }: {
+export function UserSettings({ onClose, userId, userName, aboutMe, avatar, statusEmoji, statusText, onSave, onLogout, onUploadAvatar }: {
   onClose: () => void
   userId: string | null
   userName: string
   aboutMe: string
   avatar: string
-  onSave: (data: { name?: string; aboutMe?: string }) => void
+  statusEmoji?: string | null
+  statusText?: string | null
+  onSave: (data: { name?: string; aboutMe?: string; statusEmoji?: string | null; statusText?: string | null }) => void
   onLogout?: () => void
   onUploadAvatar?: () => void
 }) {
   const [name, setName] = useState(userName)
   const [value, setValue] = useState(aboutMe)
+  const [status, setStatus] = useState({ emoji: statusEmoji ?? null, text: statusText ?? null })
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState("profile")
   const timerRef = useRef<NodeJS.Timeout | null>(null)
@@ -129,7 +133,7 @@ export function UserSettings({ onClose, userId, userName, aboutMe, avatar, onSav
     onSaveRef.current = onSave
   }, [onSave])
 
-  const debouncedSave = useCallback((data: { name?: string; aboutMe?: string }) => {
+  const debouncedSave = useCallback((data: { name?: string; aboutMe?: string; statusEmoji?: string | null; statusText?: string | null }) => {
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
       setSaving(true)
@@ -148,6 +152,11 @@ export function UserSettings({ onClose, userId, userName, aboutMe, avatar, onSav
   const handleNameChange = (text: string) => {
     setName(text)
     debouncedSave({ name: text.trim() })
+  }
+
+  const handleStatusChange = (emoji: string | null, text: string | null) => {
+    setStatus({ emoji, text })
+    debouncedSave({ statusEmoji: emoji, statusText: text })
   }
 
   return (
@@ -201,6 +210,17 @@ export function UserSettings({ onClose, userId, userName, aboutMe, avatar, onSav
               </Field>
               <Field label="About Me">
                 <Textarea className="h-24 resize-none" value={value} onChange={(e) => handleAboutMeChange(e.target.value)} />
+              </Field>
+              <Field label="Status">
+                <StatusEditor emoji={status.emoji} text={status.text} onChange={handleStatusChange}>
+                  <button className="flex h-9 w-full items-center rounded-md border border-input bg-transparent px-3 text-sm hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                    {hasStatus(status.emoji, status.text) ? (
+                      <span>{status.emoji} {status.text}</span>
+                    ) : (
+                      <span className="text-muted-foreground">Set a status</span>
+                    )}
+                  </button>
+                </StatusEditor>
               </Field>
             </div>
           </TabsContent>

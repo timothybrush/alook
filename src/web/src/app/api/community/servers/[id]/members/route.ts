@@ -56,6 +56,8 @@ export const GET = withAuth(async (req, ctx) => {
       status: (r.userId === ctx.userId ? "online" : "offline") as "online" | "offline",
       sub: "",
       role: r.role ?? "member",
+      statusEmoji: r.statusEmoji ?? null,
+      statusText: r.statusText ?? "",
       ...(isOwnBot ? { isBot: true as const, ownerUserId: r.userOwnerUserId! } : {}),
     }
   })

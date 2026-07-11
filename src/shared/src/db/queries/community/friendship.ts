@@ -1,5 +1,5 @@
 import { eq, and, or, isNull, inArray } from "drizzle-orm";
-import { communityFriendship } from "../../community-schema";
+import { communityFriendship, communityUserProfile } from "../../community-schema";
 import { user } from "../../schema";
 import type { Database } from "../../index";
 
@@ -250,9 +250,12 @@ export async function listFriends(db: Database, userId: string) {
       friendEmail: user.email,
       friendImage: user.image,
       friendDiscriminator: user.discriminator,
+      statusEmoji: communityUserProfile.statusEmoji,
+      statusText: communityUserProfile.statusText,
     })
     .from(communityFriendship)
     .innerJoin(user, eq(user.id, communityFriendship.addresseeId))
+    .leftJoin(communityUserProfile, eq(communityUserProfile.userId, user.id))
     .where(
       and(
         eq(communityFriendship.requesterId, userId),
@@ -269,9 +272,12 @@ export async function listFriends(db: Database, userId: string) {
       friendEmail: user.email,
       friendImage: user.image,
       friendDiscriminator: user.discriminator,
+      statusEmoji: communityUserProfile.statusEmoji,
+      statusText: communityUserProfile.statusText,
     })
     .from(communityFriendship)
     .innerJoin(user, eq(user.id, communityFriendship.requesterId))
+    .leftJoin(communityUserProfile, eq(communityUserProfile.userId, user.id))
     .where(
       and(
         eq(communityFriendship.addresseeId, userId),
@@ -292,8 +298,11 @@ export async function listFriends(db: Database, userId: string) {
       botEmail: user.email,
       botImage: user.image,
       botDiscriminator: user.discriminator,
+      statusEmoji: communityUserProfile.statusEmoji,
+      statusText: communityUserProfile.statusText,
     })
     .from(user)
+    .leftJoin(communityUserProfile, eq(communityUserProfile.userId, user.id))
     .where(
       and(
         eq(user.ownerUserId, userId),
@@ -308,6 +317,8 @@ export async function listFriends(db: Database, userId: string) {
     friendEmail: b.botEmail,
     friendImage: b.botImage,
     friendDiscriminator: b.botDiscriminator,
+    statusEmoji: b.statusEmoji,
+    statusText: b.statusText,
   }));
 
   return [...asRequester, ...asAddressee, ...ownBotRows];

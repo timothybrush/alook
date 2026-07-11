@@ -18,6 +18,8 @@ export const GET = withAuth(async (_req, ctx) => {
     avatar: f.friendImage ?? avatarInitial(f.friendName),
     status: "offline" as const,
     sub: "",
+    statusEmoji: f.statusEmoji ?? null,
+    statusText: f.statusText ?? "",
   }))
   const blocked = rawBlocked.map((b) => ({
     id: b.id,

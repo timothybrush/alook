@@ -20,11 +20,11 @@ import { ProfileCard } from "./profile-card"
 import { ImageLightbox } from "./image-lightbox"
 import { ImageCropDialog } from "./image-crop-dialog"
 import { validateIconSourceFile } from "@/lib/community/image-crop"
-import type { MobileZone, Profile, View } from "./_types"
+import type { MobileZone, Presence, Profile, View } from "./_types"
 import { signOut } from "@/lib/auth-client"
 import { clearPersistedCache } from "@/lib/query-persister"
 import { useCommunityStore } from "@/stores/community"
-import { useCommunityWsStore } from "@/stores/community/ws"
+import { useCommunityWsStore, useOnlineUserIds } from "@/stores/community/ws"
 import { useCurrentUser, useSetCurrentUser } from "@/contexts/community/current-user"
 import { useServers } from "@/hooks/community/use-servers"
 import { useFolders } from "@/hooks/community/use-folders"
@@ -48,6 +48,27 @@ import {
   useSendDmMessage,
   useUploadUserAvatar,
 } from "@/hooks/community/mutations"
+
+/**
+ * Resolves the live online/offline presence for a `ProfileCard` target.
+ *
+ * `member.status` / `friend.status` are NOT live presence — both API routes
+ * hardcode them at fetch time (see plans/profile-card.md's "Presence
+ * resolution" note). Real presence only exists by overlaying
+ * `useOnlineUserIds()` on top of the raw row, same as every other call site
+ * that renders a member/friend row.
+ *
+ * Pure function (no React) so it's unit-testable without a render harness.
+ */
+export function resolveProfilePresence(
+  isSelf: boolean,
+  targetUserId: string | undefined,
+  onlineUserIds: ReadonlySet<string>,
+): Presence | undefined {
+  if (isSelf) return "online"
+  if (!targetUserId) return undefined
+  return onlineUserIds.has(targetUserId) ? "online" : "offline"
+}
 
 /**
  * Shared community shell — ServerRail on the left, sidebar column with the
@@ -87,6 +108,7 @@ export function ShellFrame({
   const queryClient = useQueryClient()
   const currentUser = useCurrentUser()
   const setCurrentUser = useSetCurrentUser()
+  const onlineUserIds = useOnlineUserIds()
 
   // Server list + folders drive the rail. Members + friends feed the profile
   // popover's mutual-server count when the user opens a member card.
@@ -297,7 +319,9 @@ export function ShellFrame({
           role: "You",
           about: currentUser.aboutMe ?? "",
           mutual: 0,
-          tags: [],
+          presence: resolveProfilePresence(true, undefined, onlineUserIds),
+          statusEmoji: currentUser.statusEmoji ?? null,
+          statusText: currentUser.statusText ?? "",
         }
         setProfile({ data, x: e.clientX, y: e.clientY })
         return
@@ -314,6 +338,10 @@ export function ShellFrame({
       const role: string = member && "role" in member ? (member as { role: string }).role : "member"
       const about: string = member && "sub" in member && (member as { sub: string }).sub ? (member as { sub: string }).sub : ""
       const displayRole = role.charAt(0).toUpperCase() + role.slice(1)
+      // Hoisted above `data` (was previously computed after `setProfile`,
+      // only for the async fetch below) so the same value can also feed
+      // `resolveProfilePresence`.
+      const userId = member && "userId" in member ? (member as { userId: string }).userId : member?.id
       const data: Profile = {
         name,
         // discriminator is undefined until the /profile fetch below hydrates it.
@@ -321,10 +349,11 @@ export function ShellFrame({
         role: displayRole,
         about,
         mutual: 0,
-        tags: role !== "member" ? [displayRole] : [],
+        presence: resolveProfilePresence(false, userId, onlineUserIds),
+        statusEmoji: member?.statusEmoji ?? null,
+        statusText: member?.statusText ?? "",
       }
       setProfile({ data, x: e.clientX, y: e.clientY })
-      const userId = member && "userId" in member ? (member as { userId: string }).userId : member?.id
       if (userId) {
         // Cached under `communityKeys.profile(userId)` — a re-click on the
         // same person within `PROFILE_STALE_TIME_MS` resolves from memory
@@ -345,6 +374,8 @@ export function ShellFrame({
                     about: p.aboutMe ?? prev.data.about,
                     mutual: p.mutualServers ?? 0,
                     discriminator: p.discriminator ?? prev.data.discriminator,
+                    statusEmoji: p.statusEmoji ?? null,
+                    statusText: p.statusText ?? "",
                   },
                 }
                 : prev,
@@ -353,7 +384,7 @@ export function ShellFrame({
           .catch(() => { })
       }
     },
-    [currentUser, members, friends, queryClient],
+    [currentUser, members, friends, queryClient, onlineUserIds],
   )
 
   const previewImage = useCallback((url: string) => setPreview(url), [])
@@ -365,6 +396,23 @@ export function ShellFrame({
       goBackMobile,
     })
   }, [previewImage, openProfile, goBackMobile])
+
+  // Inline self-status save from the `ProfileCard` header (see status-editor.tsx).
+  // Mirrors `userSettingsDialog`'s onSave status branch exactly — both save
+  // paths must independently apply the same local WS-store write, since self
+  // isn't in their own fan-out audience (see plans/profile-card.md).
+  const updateOwnStatus = async (statusEmoji: string | null, statusText: string | null) => {
+    try {
+      await updateProfile.mutateAsync({ statusEmoji, statusText })
+      setCurrentUser((u) => ({ ...u, statusEmoji, statusText }))
+      useCommunityWsStore.getState().setUserStatus(currentUser.id, statusEmoji, statusText)
+      setProfile((prev) =>
+        prev ? { ...prev, data: { ...prev.data, statusEmoji, statusText } } : prev,
+      )
+    } catch {
+      toast("Failed to update status")
+    }
+  }
 
   const profileMessage = async (name: string, text: string) => {
     setProfile(null)
@@ -466,6 +514,8 @@ export function ShellFrame({
           userName={currentUser.name}
           aboutMe={currentUser.aboutMe ?? ""}
           avatar={currentUser.avatar}
+          statusEmoji={currentUser.statusEmoji}
+          statusText={currentUser.statusText}
           onUploadAvatar={() => {
             const input = document.createElement("input")
             input.type = "file"
@@ -489,7 +539,19 @@ export function ShellFrame({
                 ...u,
                 ...(data.name ? { name: data.name } : {}),
                 ...(data.aboutMe !== undefined ? { aboutMe: data.aboutMe } : {}),
+                ...(data.statusEmoji !== undefined ? { statusEmoji: data.statusEmoji } : {}),
+                ...(data.statusText !== undefined ? { statusText: data.statusText } : {}),
               }))
+              // Self is not in their own WS fan-out audience (co-members/friends
+              // means *other* people) — apply the same store write locally so
+              // the viewer's own rows (member list, UserBar) update immediately.
+              if (data.statusEmoji !== undefined || data.statusText !== undefined) {
+                useCommunityWsStore.getState().setUserStatus(
+                  currentUser.id,
+                  data.statusEmoji ?? null,
+                  data.statusText ?? null,
+                )
+              }
             } catch { toast("Failed to save profile") }
           }}
           onLogout={async () => {
@@ -567,7 +629,7 @@ export function ShellFrame({
             <UserBar user={{ name: currentUser.name, avatar: currentUser.avatar }} onOpenProfile={openProfile} onEditProfile={() => setEditingProfile(true)} inbox={inboxElement} hasUnread={inboxHasUnread} />
           </div>
         </div>
-        {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === currentUser.name} />}
+        {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === currentUser.name} onUpdateStatus={updateOwnStatus} />}
         {preview && <ImageLightbox src={preview} onClose={() => setPreview(null)} />}
         {userSettingsDialog}
         {avatarCropDialog}
@@ -592,7 +654,7 @@ export function ShellFrame({
           {children}
         </div>
       )}
-      {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === currentUser.name} />}
+      {profile && <ProfileCard data={profile.data} x={profile.x} y={profile.y} bp={bp} onClose={() => setProfile(null)} onMessage={profileMessage} isSelf={profile.data.name === currentUser.name} onUpdateStatus={updateOwnStatus} />}
       {preview && <ImageLightbox src={preview} onClose={() => setPreview(null)} />}
       {userSettingsDialog}
       {avatarCropDialog}

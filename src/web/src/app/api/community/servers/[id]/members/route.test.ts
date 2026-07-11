@@ -173,6 +173,20 @@ describe("GET /api/community/servers/[id]/members — cursor envelope", () => {
     expect(body.members.map((m) => m.discriminator)).toEqual(["0001", "0002"])
   })
 
+  it("includes statusEmoji/statusText sourced from the joined profile row, and defaults for a user with no profile row", async () => {
+    const rows = [
+      { ...buildRow(1), statusEmoji: "🎧", statusText: "Vibing" },
+      { ...buildRow(2), statusEmoji: null, statusText: null },
+    ]
+    mockListMembersPaginated.mockResolvedValue({ members: rows, hasMore: false, cursor: undefined })
+    mockCountMembers.mockResolvedValue(2)
+
+    const res = await GET(getReq(), ctx)
+    const body = await res.json() as { members: Array<{ statusEmoji: string | null; statusText: string }> }
+    expect(body.members[0]).toMatchObject({ statusEmoji: "🎧", statusText: "Vibing" })
+    expect(body.members[1]).toMatchObject({ statusEmoji: null, statusText: "" })
+  })
+
   it("returns 403 for non-members (permission check ahead of the query)", async () => {
     mockGetMember.mockResolvedValue(null)
     const res = await GET(getReq(), ctx)

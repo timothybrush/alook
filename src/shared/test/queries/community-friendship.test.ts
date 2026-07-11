@@ -158,3 +158,81 @@ describe("getFriendUserIds", () => {
     expect(result).toEqual(["bot-1"]);
   });
 });
+
+/**
+ * `listFriends` runs three sequential sub-queries (asRequester, asAddressee,
+ * ownBots) — each `leftJoin`s `communityUserProfile` to pick up
+ * statusEmoji/statusText. Route each call's resolved rows in call order
+ * rather than by table, since the mock chain doesn't distinguish tables.
+ */
+function createListFriendsDb(opts: {
+  asRequesterRows?: unknown[];
+  asAddresseeRows?: unknown[];
+  ownBotRows?: unknown[];
+} = {}) {
+  const callRows = [opts.asRequesterRows ?? [], opts.asAddresseeRows ?? [], opts.ownBotRows ?? []];
+  let call = 0;
+  const leftJoinCalls: unknown[] = [];
+  const db: any = {
+    select: vi.fn(() => {
+      const chain: any = {};
+      chain.from = vi.fn(() => chain);
+      chain.innerJoin = vi.fn(() => chain);
+      chain.leftJoin = vi.fn((...args: unknown[]) => {
+        leftJoinCalls.push(args);
+        return chain;
+      });
+      chain.where = vi.fn(() => Promise.resolve(callRows[call++]));
+      return chain;
+    }),
+  };
+  db.__leftJoinCalls = leftJoinCalls;
+  return db;
+}
+
+describe("listFriends", () => {
+  it("leftJoins communityUserProfile on all three sub-queries (asRequester, asAddressee, ownBots)", async () => {
+    const db = createListFriendsDb();
+    await q.listFriends(db, "u_me");
+    expect(db.__leftJoinCalls).toHaveLength(3);
+  });
+
+  it("passes through statusEmoji/statusText for asRequester and asAddressee rows", async () => {
+    const db = createListFriendsDb({
+      asRequesterRows: [{ id: "f1", friendUserId: "u_1", statusEmoji: "🎧", statusText: "Vibing" }],
+      asAddresseeRows: [{ id: "f2", friendUserId: "u_2", statusEmoji: null, statusText: null }],
+    });
+    const result = await q.listFriends(db, "u_me");
+    expect(result).toEqual([
+      { id: "f1", friendUserId: "u_1", statusEmoji: "🎧", statusText: "Vibing" },
+      { id: "f2", friendUserId: "u_2", statusEmoji: null, statusText: null },
+    ]);
+  });
+
+  it("defaults to null (no crash) for a friend with no communityUserProfile row via the leftJoin", async () => {
+    const db = createListFriendsDb({
+      asRequesterRows: [{ id: "f1", friendUserId: "u_1", statusEmoji: null, statusText: null }],
+    });
+    const result = await q.listFriends(db, "u_me");
+    expect(result[0]).toMatchObject({ statusEmoji: null, statusText: null });
+  });
+
+  it("carries statusEmoji/statusText through the ownBots mapping onto the self-bot friendship rows", async () => {
+    const db = createListFriendsDb({
+      ownBotRows: [{ botUserId: "bot-1", botName: "Zoe", statusEmoji: "🎮", statusText: "Gaming" }],
+    });
+    const result = await q.listFriends(db, "u_me");
+    expect(result).toEqual([
+      {
+        id: q.SELF_BOT_FRIENDSHIP_PREFIX + "bot-1",
+        friendUserId: "bot-1",
+        friendName: "Zoe",
+        friendEmail: undefined,
+        friendImage: undefined,
+        friendDiscriminator: undefined,
+        statusEmoji: "🎮",
+        statusText: "Gaming",
+      },
+    ]);
+  });
+});

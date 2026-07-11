@@ -21,12 +21,16 @@ vi.mock("@alook/shared", async () => {
       communityMember: {
         listMembers: (...a: unknown[]) => mockListMembers(...a),
         listMemberUserIds: (...a: unknown[]) => mockListMemberUserIds(...a),
+        getCoMemberUserIds: (...a: unknown[]) => mockGetCoMemberUserIds(...a),
       },
       communityChannel: {
         getChannel: (...a: unknown[]) => mockGetChannel(...a),
       },
       communityDm: {
         getDM: (...a: unknown[]) => mockGetDM(...a),
+      },
+      communityFriendship: {
+        getFriendUserIds: (...a: unknown[]) => mockGetFriendUserIds(...a),
       },
     },
   }
@@ -50,11 +54,14 @@ const mockListMembers = vi.fn()
 const mockListMemberUserIds = vi.fn()
 const mockGetChannel = vi.fn()
 const mockGetDM = vi.fn()
+const mockGetCoMemberUserIds = vi.fn()
+const mockGetFriendUserIds = vi.fn()
 
 import {
   fanOutToServerMembers,
   fanOutToChannel,
   fanOutToDM,
+  fanOutStatusUpdate,
   broadcastToUserSafe,
 } from "./fanout"
 import { WS_EVENTS } from "@alook/shared"
@@ -115,6 +122,55 @@ describe("fanOutToServerMembers", () => {
     expect(mockListMemberUserIds).toHaveBeenCalledTimes(1)
     expect(mockListMembers).not.toHaveBeenCalled()
     expect(mockBroadcastToUser).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("fanOutStatusUpdate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetCloudflareContext.mockImplementation(() => ({ env: { DB: {} } }))
+    mockBroadcastToUser.mockResolvedValue(undefined)
+  })
+
+  it("broadcasts to the deduped union of co-members and friends", async () => {
+    mockGetCoMemberUserIds.mockResolvedValue(["u1", "u2"])
+    mockGetFriendUserIds.mockResolvedValue(["u2", "u3"])
+
+    await fanOutStatusUpdate("self1", "🎧", "Vibing")
+
+    expect(mockGetCoMemberUserIds).toHaveBeenCalledWith(expect.anything(), "self1")
+    expect(mockGetFriendUserIds).toHaveBeenCalledWith(expect.anything(), "self1")
+    expect(mockBroadcastToUser).toHaveBeenCalledTimes(3)
+    const targets = mockBroadcastToUser.mock.calls.map((c) => c[0]).sort()
+    expect(targets).toEqual(["u1", "u2", "u3"])
+    for (const call of mockBroadcastToUser.mock.calls) {
+      expect(call[1]).toEqual({
+        type: "community:status.update",
+        userId: "self1",
+        statusEmoji: "🎧",
+        statusText: "Vibing",
+      })
+    }
+  })
+
+  it("does not broadcast when the audience is empty", async () => {
+    mockGetCoMemberUserIds.mockResolvedValue([])
+    mockGetFriendUserIds.mockResolvedValue([])
+
+    await fanOutStatusUpdate("self1", null, null)
+
+    expect(mockBroadcastToUser).not.toHaveBeenCalled()
+  })
+
+  it("never throws — absorbs a DB error and logs a warning", async () => {
+    mockGetCoMemberUserIds.mockRejectedValue(new Error("db down"))
+
+    await expect(fanOutStatusUpdate("self1", "🎧", "Vibing")).resolves.toBeUndefined()
+
+    expect(mockWarn).toHaveBeenCalledWith(
+      "fanout_status_update_failed",
+      expect.objectContaining({ userId: "self1", err: expect.stringContaining("db down") }),
+    )
   })
 })
 

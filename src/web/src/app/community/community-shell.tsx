@@ -10,6 +10,7 @@ import {
   type CurrentUser,
 } from "@/contexts/community/current-user"
 import { useCommunityWs } from "@/hooks/community/use-community-ws"
+import { useCommunityWsStore } from "@/stores/community/ws"
 
 /**
  * Client wrapper that provides the QueryClient, CurrentUser, and the
@@ -56,20 +57,31 @@ function CommunityBootstrap({ children }: { children: ReactNode }) {
   // flag stuck at false for the viewer's own reactions.
   useCommunityWs({ viewerUserId: currentUser.id })
 
-  // Hydrate `aboutMe` — the community identity holds email/name/avatar from
-  // the session, but the free-text "about me" lives on the community profile
-  // row. Fetch it once so the settings dialog opens pre-filled.
+  // Hydrate `aboutMe`/status — the community identity holds email/name/avatar
+  // from the session, but the free-text "about me" and custom status live on
+  // the community profile row. Fetch it once so the settings dialog and
+  // UserBar/ProfileCard open pre-filled instead of blank until the next save
+  // or WS event (see plans/profile-card.md).
+  const currentUserId = currentUser.id
   useEffect(() => {
-    apiFetch<{ aboutMe: string; discriminator: string }>("/api/community/users/me/profile")
-      .then((data) =>
+    apiFetch<{ aboutMe: string; discriminator: string; statusEmoji: string | null; statusText: string }>(
+      "/api/community/users/me/profile",
+    )
+      .then((data) => {
         setCurrentUser((u) => ({
           ...u,
           aboutMe: data.aboutMe,
           discriminator: data.discriminator,
-        })),
-      )
+          statusEmoji: data.statusEmoji,
+          statusText: data.statusText,
+        }))
+        // Member/friend-list surfaces read status from the WS store overlay
+        // (see e.g. channels/layout.tsx), not from CurrentUser — seed it here
+        // too so the viewer's own rows in those lists match on first load.
+        useCommunityWsStore.getState().setUserStatus(currentUserId, data.statusEmoji, data.statusText)
+      })
       .catch(() => { })
-  }, [setCurrentUser])
+  }, [setCurrentUser, currentUserId])
 
   return <>{children}</>
 }

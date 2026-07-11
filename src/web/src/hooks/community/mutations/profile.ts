@@ -6,6 +6,8 @@ import { apiFetch } from "@/lib/api/client"
 export type UpdateProfileArgs = {
   name?: string
   aboutMe?: string
+  statusEmoji?: string | null
+  statusText?: string | null
 }
 
 /**

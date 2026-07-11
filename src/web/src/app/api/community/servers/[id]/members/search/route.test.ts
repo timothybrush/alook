@@ -84,6 +84,17 @@ describe("GET /api/community/servers/[id]/members/search", () => {
     expect(body.members.map((m) => m.discriminator)).toEqual(["0001", "0002"])
   })
 
+  it("includes statusEmoji/statusText, defaulting for a user with no profile row", async () => {
+    mockSearchMembers.mockResolvedValue([
+      { ...buildRow(1, "Alex"), statusEmoji: "🎮", statusText: "Gaming" },
+      { ...buildRow(2, "Alex"), statusEmoji: null, statusText: null },
+    ])
+    const res = await GET(getReq("?q=Alex"), ctx)
+    const body = await res.json() as { members: Array<{ statusEmoji: string | null; statusText: string }> }
+    expect(body.members[0]).toMatchObject({ statusEmoji: "🎮", statusText: "Gaming" })
+    expect(body.members[1]).toMatchObject({ statusEmoji: null, statusText: "" })
+  })
+
   it("rejects empty q with 400", async () => {
     const res = await GET(getReq(""), ctx)
     expect(res.status).toBe(400)

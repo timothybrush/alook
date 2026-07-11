@@ -67,15 +67,21 @@ export default function ServerLayout({ children }: { children: ReactNode }) {
   const { server: currentServer } = useServer(serverId)
   const membersHook = useServerMembers(serverId)
   const onlineUserIds = useOnlineUserIds()
+  const userStatuses = useCommunityWsStore((s) => s.userStatuses)
   const enrichedMembers = useMemo(
     () =>
-      membersHook.members.map((m) => ({
-        ...m,
-        status: (m.userId === currentUser.id || onlineUserIds.has(m.userId)
-          ? "online"
-          : "offline") as "online" | "offline",
-      })),
-    [membersHook.members, onlineUserIds, currentUser.id],
+      membersHook.members.map((m) => {
+        const liveStatus = userStatuses.get(m.userId)
+        return {
+          ...m,
+          status: (m.userId === currentUser.id || onlineUserIds.has(m.userId)
+            ? "online"
+            : "offline") as "online" | "offline",
+          statusEmoji: liveStatus ? liveStatus.emoji : m.statusEmoji,
+          statusText: liveStatus ? liveStatus.text : m.statusText,
+        }
+      }),
+    [membersHook.members, onlineUserIds, currentUser.id, userStatuses],
   )
   // Gate admin-only fetches on `isAdmin` so regular members don't fire
   // audit-log 403s and don't waste bandwidth on the invites feed they can't

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar } from "./avatar"
+import { hasStatus } from "./status-presets"
 import { useInvitableFriends } from "@/hooks/community/use-invitable-friends"
 import {
   useResolveOrCreateInvite,
@@ -183,11 +184,11 @@ export function InviteDialog({
                   key={f.id}
                   className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-accent/40"
                 >
-                  <Avatar label={f.avatar || f.name} size={32} presence={f.status} />
+                  <Avatar label={f.avatar || f.name} size={32} presence={f.status} ringColor="var(--popover)" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{f.name}</div>
-                    {f.sub && (
-                      <div className="truncate text-xs text-muted-foreground">{f.sub}</div>
+                    {hasStatus(f.statusEmoji, f.statusText) && (
+                      <div className="truncate text-xs text-muted-foreground">{f.statusEmoji} {f.statusText}</div>
                     )}
                   </div>
                   <Button

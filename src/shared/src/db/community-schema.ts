@@ -380,6 +380,10 @@ export const communityUserProfile = sqliteTable("community_user_profile", {
     .references(() => user.id, { onDelete: "cascade" }),
   aboutMe: text("about_me").default(""),
   bannerColor: text("banner_color"),
+  // Custom status (emoji + short term) — e.g. "🎧" + "Vibing". Both nullable:
+  // no row / null columns means "no status set". See migration 0056.
+  statusEmoji: text("status_emoji"),
+  statusText: text("status_text").default(""),
 });
 
 // 18. community_notification_setting

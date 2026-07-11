@@ -6,7 +6,7 @@ import { FriendsPage } from "@/components/community/friends-page"
 import { useMemo } from "react"
 import { useFriends } from "@/hooks/community/use-friends"
 import { useUiHandlers } from "@/stores/community"
-import { useOnlineUserIds } from "@/stores/community/ws"
+import { useOnlineUserIds, useCommunityWsStore } from "@/stores/community/ws"
 import {
   useSendFriendRequest,
   useAcceptFriendRequest,
@@ -24,15 +24,21 @@ export default function MeFriendsPage() {
   const { friends: rawFriends, pending, blocked, isLoading } = useFriends()
   const uiHandlers = useUiHandlers()
   const onlineUserIds = useOnlineUserIds()
+  const userStatuses = useCommunityWsStore((s) => s.userStatuses)
   const friends = useMemo(
     () =>
-      rawFriends.map((f) => ({
-        ...f,
-        status: onlineUserIds.has(f.userId ?? f.id)
-          ? ("online" as const)
-          : ("offline" as const),
-      })),
-    [rawFriends, onlineUserIds],
+      rawFriends.map((f) => {
+        const liveStatus = userStatuses.get(f.userId ?? f.id)
+        return {
+          ...f,
+          status: onlineUserIds.has(f.userId ?? f.id)
+            ? ("online" as const)
+            : ("offline" as const),
+          statusEmoji: liveStatus ? liveStatus.emoji : f.statusEmoji,
+          statusText: liveStatus ? liveStatus.text : f.statusText,
+        }
+      }),
+    [rawFriends, onlineUserIds, userStatuses],
   )
 
   const sendFriendRequest = useSendFriendRequest()

@@ -13,7 +13,12 @@ export async function getProfile(db: Database, userId: string) {
 export async function updateProfile(
   db: Database,
   userId: string,
-  data: { aboutMe?: string; bannerColor?: string | null }
+  data: {
+    aboutMe?: string;
+    bannerColor?: string | null;
+    statusEmoji?: string | null;
+    statusText?: string | null;
+  }
 ) {
   const [row] = await db
     .insert(communityUserProfile)
@@ -21,6 +26,8 @@ export async function updateProfile(
       userId,
       aboutMe: data.aboutMe ?? "",
       bannerColor: data.bannerColor ?? null,
+      statusEmoji: data.statusEmoji ?? null,
+      statusText: data.statusText ?? "",
     })
     .onConflictDoUpdate({
       target: communityUserProfile.userId,
@@ -28,6 +35,12 @@ export async function updateProfile(
         ...(data.aboutMe !== undefined ? { aboutMe: data.aboutMe } : {}),
         ...(data.bannerColor !== undefined
           ? { bannerColor: data.bannerColor }
+          : {}),
+        ...(data.statusEmoji !== undefined
+          ? { statusEmoji: data.statusEmoji }
+          : {}),
+        ...(data.statusText !== undefined
+          ? { statusText: data.statusText }
           : {}),
       },
     })
