@@ -159,7 +159,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
         <header className="flex h-12 items-center gap-1 border-b border-border/40 px-2">
           {serverName && onOpenSettings ? (
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+              <DropdownMenuTrigger className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
                 <span className="truncate text-lg font-semibold">{serverName}</span>
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
               </DropdownMenuTrigger>
