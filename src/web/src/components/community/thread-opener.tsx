@@ -3,6 +3,7 @@
 import { MessagesSquare, FileText, Download } from "lucide-react"
 import { Avatar } from "./avatar"
 import { MessageBody } from "./message-body"
+import { attachmentAspectRatio } from "./message"
 import { formatMessageTime } from "./format-time"
 import { Skeleton } from "@/components/ui/skeleton"
 import { NumberTicker } from "@/components/ui/number-ticker"
@@ -62,7 +63,7 @@ export function ThreadOpener({
 
       <div className="flex gap-3">
         <button
-          onClick={(e) => onOpenProfile?.(msg.authorName, e)}
+          onClick={(e) => onOpenProfile?.(msg.authorName, e, undefined, msg.authorId)}
           className="shrink-0 self-start"
         >
           <Avatar label={avatarLabel} size={32} />
@@ -70,7 +71,7 @@ export function ThreadOpener({
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <button
-              onClick={(e) => onOpenProfile?.(msg.authorName, e)}
+              onClick={(e) => onOpenProfile?.(msg.authorName, e, undefined, msg.authorId)}
               className="text-sm font-semibold hover:underline"
             >
               {msg.authorName}
@@ -91,7 +92,7 @@ export function ThreadOpener({
                     onClick={() => onPreviewImage?.(a.url)}
                     className="block w-fit max-w-70 overflow-hidden rounded-md border border-border transition-colors hover:border-primary/40"
                   >
-                    <img src={a.url} alt={a.name} className="max-h-40 max-w-70 rounded-md object-contain" />
+                    <img src={a.url} alt={a.name} className="max-h-40 max-w-70 rounded-md object-contain" style={{ aspectRatio: attachmentAspectRatio(a.width, a.height) }} />
                   </button>
                 ) : (
                   <button

@@ -7,7 +7,7 @@ import { useBreakpoint } from "@/hooks/use-mobile"
 import { DmHeader, DmHeaderSkeleton } from "@/components/community/dm-header"
 import { Avatar } from "@/components/community/avatar"
 import { MessageList } from "@/components/community/message-list"
-import { Composer, ComposerSkeleton } from "@/components/community/composer"
+import { Composer, ComposerSkeleton, type SendAttachment } from "@/components/community/composer"
 import type { OpenProfile } from "@/components/community/_types"
 import {
   useCommunityStore,
@@ -25,6 +25,7 @@ import {
   useSendDmMessage,
   useToggleReactionApi,
   useUploadFile,
+  zipUploadResultsWithDimensions,
 } from "@/hooks/community/mutations"
 import { useCurrentUser } from "@/contexts/community/current-user"
 import {
@@ -114,27 +115,37 @@ function DmView() {
   // runs of viewer-authored messages (the server advances the sender's
   // own watermark on POST, so anchoring above the viewer's own row would
   // never be "unread" from the sender's perspective).
-  const newDividerBefore = useMemo(() => {
-    if (!readSnapshot) return undefined
+  // `anchorFound` and `newDividerBefore` MUST be computed inside the same
+  // memo — mirrors the channel page's identical fix exactly (see its doc
+  // comment for the Playwright-verified repro of the mount-vs-Fix-3 race
+  // this closes: two independently-evaluated expressions reading the same
+  // inputs aren't guaranteed to agree on every commit).
+  const { newDividerBefore, anchorFound } = useMemo(() => {
+    if (!readSnapshot) return { newDividerBefore: undefined, anchorFound: false }
     const lastId = readSnapshot.lastReadMessageId
     // First-visit case: viewer never opened this DM (no read-state row
     // yet). The inbox surfaces the DM as unread, so the whole loaded
     // window is unread from the viewer's perspective — anchor the
     // divider on the first non-self message so the user lands centered
-    // on "here's what you missed" instead of the bottom.
+    // on "here's what you missed" instead of the bottom. No anchor id to
+    // find — trivially "in cache".
     if (!lastId) {
       for (const m of messages) {
-        if (m.authorId !== currentUser.id) return m.id
+        if (m.authorId !== currentUser.id) return { newDividerBefore: m.id, anchorFound: true }
       }
-      return undefined
+      return { newDividerBefore: undefined, anchorFound: true }
     }
     const idx = messages.findIndex((m) => m.id === lastId)
-    if (idx === -1) return undefined
+    if (idx === -1) return { newDividerBefore: undefined, anchorFound: false }
     for (let i = idx + 1; i < messages.length; i++) {
-      if (messages[i].authorId !== currentUser.id) return messages[i].id
+      if (messages[i].authorId !== currentUser.id) return { newDividerBefore: messages[i].id, anchorFound: true }
     }
-    return undefined
+    return { newDividerBefore: undefined, anchorFound: true }
   }, [messages, readSnapshot, currentUser.id])
+
+  // Gates `<MessageList>`'s mount-time scroll action until the anchor is
+  // actually present in the loaded `messages`.
+  const anchorInCache = anchorFound
 
   // Scroll root of the message list — needed so `useDmWatermark`'s
   // IntersectionObserver measures against the correct viewport rather
@@ -186,8 +197,8 @@ function DmView() {
     }
   }, [dms, dmId, onlineUserIds])
 
-  const openProfile: OpenProfile = (name, e) => {
-    uiHandlers.openProfile?.(name, e)
+  const openProfile: OpenProfile = (name, e, discriminator, userId) => {
+    uiHandlers.openProfile?.(name, e, discriminator, userId)
   }
 
   const resolveUserName = useCallback((userId: string) => {
@@ -235,17 +246,17 @@ function DmView() {
 
   // DM endpoint ignores mentionType. Replies are supported — the backend
   // persists replyToId for DMs too.
-  const sendDmMsg = async (markdown: string, attachments?: File[]) => {
+  const sendDmMsg = async (markdown: string, attachments?: SendAttachment[]) => {
     if (!markdown && !attachments?.length) return
     if (!dmId) return
-    let uploadedAttachments: { url: string; filename: string; contentType: string; size: number }[] = []
+    let uploadedAttachments: ReturnType<typeof zipUploadResultsWithDimensions> = []
     if (attachments?.length) {
       const results = await Promise.all(
-        attachments.map((f) =>
-          uploadFile.mutateAsync({ target: { dmId }, file: f }).catch(() => null),
+        attachments.map((a) =>
+          uploadFile.mutateAsync({ target: { dmId }, file: a.file }).catch(() => null),
         ),
       )
-      uploadedAttachments = results.filter(Boolean) as typeof uploadedAttachments
+      uploadedAttachments = zipUploadResultsWithDimensions(results, attachments)
     }
     sendDmMessage.mutate({
       dmId,
@@ -277,7 +288,11 @@ function DmView() {
       <>
         <DmHeaderSkeleton onBack={bp === "mobile" ? goBack : undefined} />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <MessageList channel="" messages={[]} loading={true} onOpenThread={() => {}} hero={<></>} />
+          {/* `key={dmId}` matches the real-content branch below — same
+              reconciliation fix as the channel page (see its equivalent
+              comment). `variant="dm"` now drives the skeleton shape
+              explicitly instead of the removed `dm={!!hero}` inference. */}
+          <MessageList key={dmId} channel="" messages={[]} loading={true} onOpenThread={() => {}} variant="dm" />
           <ComposerSkeleton />
         </main>
       </>
@@ -300,6 +315,7 @@ function DmView() {
       <main className="flex min-h-0 flex-1 flex-col">
         <MessageList
           key={dmId}
+          variant="dm"
           channel={dm.name}
           messages={messages}
           loading={messagesLoading}
@@ -324,10 +340,10 @@ function DmView() {
           resolveUserName={resolveUserName}
           onScrollRoot={setScrollRootEl}
           viewerUserId={currentUser.id}
-          // Delay initial scroll until the read-state snapshot resolves —
-          // otherwise the effect fires with `newDividerBefore` still
-          // undefined and snaps to bottom before the anchor is known.
-          initialScrollReady={!readSnapshotFetching}
+          // Delay initial scroll until the read-state snapshot resolves AND
+          // the anchor it names is actually present in `messages` — see
+          // `anchorInCache`'s doc comment above.
+          initialScrollReady={!readSnapshotFetching && anchorInCache}
           hasMore={hasMoreMessages}
           isFetchingOlder={isFetchingOlderMessages}
           onLoadOlder={fetchOlderMessages}

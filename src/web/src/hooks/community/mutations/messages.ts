@@ -121,12 +121,13 @@ function markFailedById(
 /**
  * Materialize the attachment view-model from the API attachment shape.
  * Mirrors the old context's conversion at `postWithOptimisticInsert`.
+ * Exported for direct unit testing — see `to-attachment-vm.test.ts`.
  */
-function toAttachmentVm(
-  a: { url: string; filename: string; contentType: string; size: number },
+export function toAttachmentVm(
+  a: { url: string; filename: string; contentType: string; size: number; width?: number; height?: number },
 ): Attachment {
   const isImage = a.contentType.startsWith("image/")
-  if (isImage) return { kind: "image", name: a.filename, url: a.url }
+  if (isImage) return { kind: "image", name: a.filename, url: a.url, width: a.width, height: a.height }
   return {
     kind: "file",
     name: a.filename,
@@ -148,7 +149,7 @@ export type SendMessageArgs = {
   content: string
   replyToId?: string
   mentionType?: MentionType
-  attachments?: { url: string; filename: string; contentType: string; size: number }[]
+  attachments?: { url: string; filename: string; contentType: string; size: number; width?: number; height?: number }[]
   author: { id: string; name: string; avatar: string }
 }
 
@@ -201,6 +202,7 @@ export function useSendMessage() {
       const optimisticAttachments = args.attachments?.map(toAttachmentVm)
       const msg: Msg = {
         id: tempId,
+        type: "chat",
         // #3: stamp the sender's userId onto optimistic rows so
         // `useChannelWatermark` recognizes them as self-authored (skip
         // client PUT — server-side write path already writes the sender's
@@ -244,7 +246,7 @@ export type SendDmMessageArgs = {
   dmId: string
   content: string
   replyToId?: string
-  attachments?: { url: string; filename: string; contentType: string; size: number }[]
+  attachments?: { url: string; filename: string; contentType: string; size: number; width?: number; height?: number }[]
   author: { id: string; name: string; avatar: string }
 }
 
@@ -272,6 +274,7 @@ export function useSendDmMessage() {
       const optimisticAttachments = args.attachments?.map(toAttachmentVm)
       const msg: Msg = {
         id: tempId,
+        type: "chat",
         // Mirror the channel path: stamp the sender's userId so the
         // self-send auto-scroll effect in <MessageList> (gated on
         // `tail.authorId === viewerUserId`) recognizes the optimistic row

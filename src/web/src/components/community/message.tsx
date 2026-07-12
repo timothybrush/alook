@@ -14,14 +14,24 @@ import { EmojiPickerPopover } from "./emoji-picker"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { MessageContextItems, MessageDropdownItems, hasMessageMenu } from "./message-menu"
 import { formatMessageTime } from "./format-time"
-import type { Msg, OpenProfile } from "./_types"
+import type { RenderMsg, OpenProfile } from "./_types"
+
+// Fallback ratio for an attachment image with no known dimensions
+// (pre-feature rows sent before width/height were tracked). A more neutral
+// default than the embed-image branch's "40/21" wide-banner ratio — plain
+// attachments are typically screenshots/photos, not link-preview banners.
+const ATTACHMENT_FALLBACK_ASPECT_RATIO = "4/3"
+
+export function attachmentAspectRatio(width: number | undefined, height: number | undefined): string {
+  return width && height ? `${width}/${height}` : ATTACHMENT_FALLBACK_ASPECT_RATIO
+}
 
 export function Message({
   m, compact, pinned, onOpenThread, onOpenProfile, onJumpReply,
   onToggleReaction, onReact, onReply, onPin, onCreateThread, onCopy, onRetry,
   onPreviewImage, onDownloadFile, highlighted, resolveUserName,
 }: {
-  m: Msg
+  m: RenderMsg
   compact?: boolean
   pinned?: boolean
   onOpenThread: (id: string) => void
@@ -63,7 +73,6 @@ export function Message({
   const interactive = !compact && showMenu
   const row = (
     <div
-      id={`dpv-${m.id}`}
       className={[
         "group relative -mx-2 flex gap-2 rounded px-2 transition-colors",
         m.grouped ? "py-0" : "mt-3 pt-1.5 pb-0",
@@ -116,7 +125,7 @@ export function Message({
         {m.grouped ? (
           <div className="w-10 shrink-0" />
         ) : (
-          <button onClick={(e) => onOpenProfile?.(m.authorName ?? "", e)} className="shrink-0 self-start">
+          <button onClick={(e) => onOpenProfile?.(m.authorName ?? "", e, undefined, m.authorId)} className="shrink-0 self-start">
             <Avatar label={m.authorAvatar ?? "?"} size={40} />
           </button>
         )}
@@ -124,7 +133,7 @@ export function Message({
           {!m.grouped && (
             <div className="flex items-baseline gap-2">
               <button
-                onClick={(e) => onOpenProfile?.(m.authorName ?? "", e)}
+                onClick={(e) => onOpenProfile?.(m.authorName ?? "", e, undefined, m.authorId)}
                 className="text-[15px] font-semibold hover:underline"
                 style={{ color: m.color ?? "var(--foreground)" }}
               >
@@ -146,7 +155,7 @@ export function Message({
                     onClick={() => onPreviewImage?.(a.url)}
                     className="block w-fit max-w-[320px] overflow-hidden rounded-md border border-border transition-colors hover:border-primary/40"
                   >
-                    <img src={a.url} alt={a.name} className="max-h-50 max-w-[320px] rounded-md object-contain" />
+                    <img src={a.url} alt={a.name} className="max-h-50 max-w-[320px] rounded-md object-contain" style={{ aspectRatio: attachmentAspectRatio(a.width, a.height) }} />
                   </button>
                 ) : (
                   <button
