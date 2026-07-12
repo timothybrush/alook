@@ -408,7 +408,6 @@ export function ShellFrame({
   }
 
   const profileMessage = async (name: string, text: string) => {
-    setProfile(null)
     const member = members.find((m) => m.name === name)
     const friend = friends.find((f) => f.name === name)
     const targetUserId = member?.userId ?? friend?.userId

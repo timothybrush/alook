@@ -36,14 +36,16 @@ export function ProfileCard({ data, x, y, bp, onClose, onMessage, isSelf, onUpda
   onUpdateStatus?: (emoji: string | null, text: string | null) => void
 }) {
   const [msg, setMsg] = useState("")
+  const [open, setOpen] = useState(true)
+  const mobile = bp === "mobile"
+  const close = () => setOpen(false)
   const send = () => {
     const text = msg.trim()
     if (!text) return
     onMessage?.(data.name, text)
     setMsg("")
-    onClose()
+    mobile ? onClose() : close()
   }
-  const mobile = bp === "mobile"
   const gradient = generateGradient(data.name)
   const card = (
     <>
@@ -186,7 +188,7 @@ export function ProfileCard({ data, x, y, bp, onClose, onMessage, isSelf, onUpda
 
   // desktop: shadcn Popover anchored to an invisible trigger at the click point
   return (
-    <Popover open onOpenChange={(o) => { if (!o) onClose() }}>
+    <Popover open={open} onOpenChange={setOpen} onOpenChangeComplete={(nowOpen) => { if (!nowOpen) onClose() }}>
       <PopoverTrigger
         aria-hidden
         tabIndex={-1}
