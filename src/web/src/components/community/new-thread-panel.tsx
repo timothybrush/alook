@@ -35,7 +35,7 @@ export function NewThreadDialog({ channel, open, onClose, onCreate }: {
         </DialogHeader>
         <div className="space-y-4 px-4 pb-5">
           <label className="block">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Thread Name</div>
+            <div className="mb-2 text-xs font-semibold text-muted-foreground">Thread Name</div>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -45,7 +45,7 @@ export function NewThreadDialog({ channel, open, onClose, onCreate }: {
             />
           </label>
           <label className="block">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">First Message</div>
+            <div className="mb-2 text-xs font-semibold text-muted-foreground">First Message</div>
             <div className="flex min-h-14 items-center gap-3 rounded-lg bg-secondary px-4 py-3">
               <input
                 value={message}

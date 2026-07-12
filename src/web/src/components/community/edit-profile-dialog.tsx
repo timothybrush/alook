@@ -28,7 +28,7 @@ function AppearanceSettings() {
   const active = mounted ? theme ?? "system" : undefined
 
   return (
-    <div className="max-w-xl space-y-4">
+    <div className="mx-auto max-w-xl space-y-4">
       <Field label="Theme">
         <div className="grid grid-cols-3 gap-2">
           {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
@@ -88,7 +88,7 @@ function AdvancedSettings({ userId }: { userId: string | null }) {
           }
         }}
       />
-      <div className="max-w-xl space-y-6">
+      <div className="mx-auto max-w-xl space-y-6">
         <div>
           <div className="text-sm font-medium">Clear local cache</div>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -167,7 +167,7 @@ export function UserSettings({ onClose, userId, userName, aboutMe, avatar, statu
       className="min-h-0 flex-1 flex-row gap-0"
     >
       <nav className="flex w-60 shrink-0 flex-col gap-2 overflow-y-auto thin-scrollbar border-r border-border p-3" style={{ background: "var(--d-rail)" }}>
-        <div className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">User Settings</div>
+        <div className="px-2 text-xs font-semibold text-muted-foreground">User Settings</div>
         <TabsList variant="line" className="h-auto w-full flex-col gap-1">
           <TabsTrigger value="profile" className="h-8 w-full justify-start gap-2">
             <User className="size-4" /> My Profile
@@ -196,7 +196,7 @@ export function UserSettings({ onClose, userId, userName, aboutMe, avatar, statu
         </header>
         <div className="flex-1 overflow-y-auto thin-scrollbar p-4">
           <TabsContent value="profile">
-            <div className="max-w-xl space-y-4">
+            <div className="mx-auto max-w-xl space-y-4">
               <div className="flex items-center gap-4">
                 <Avatar label={avatar} size={80} />
                 <div>

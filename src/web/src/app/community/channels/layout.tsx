@@ -376,7 +376,7 @@ export default function ServerLayout({ children }: { children: ReactNode }) {
 
   const serverSettingsDialog = (
     <Dialog open={serverSettingsOpen} onOpenChange={(o) => { if (!o) closeSettings() }}>
-      <DialogContent className="flex h-[calc(100vh-4rem)] w-[calc(100vw-4rem)] sm:max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0" showCloseButton={false}>
+      <DialogContent className="flex h-[calc(100vh-4rem)] max-h-180 w-[calc(100vw-4rem)] sm:max-w-4xl flex-col gap-0 overflow-hidden rounded-xl p-0" showCloseButton={false}>
         <ServerSettings
           section={settingsSection}
           setSection={setSettingsSection}

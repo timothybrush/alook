@@ -46,7 +46,7 @@ export function CreateChannelDialog({ category, initial, onClose, onCreate }: {
         <div className="space-y-4 px-4 pb-5">
           {!editing && (
             <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Channel Type</div>
+              <div className="mb-2 text-xs font-semibold text-muted-foreground">Channel Type</div>
               <div className="space-y-2">
                 {options.map((o) => (
                   <button
@@ -71,7 +71,7 @@ export function CreateChannelDialog({ category, initial, onClose, onCreate }: {
             </div>
           )}
           <label className="block">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Channel Name</div>
+            <div className="mb-2 text-xs font-semibold text-muted-foreground">Channel Name</div>
             <div className="relative">
               {type === "forum"
                 ? <ListChevronsUpDown className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

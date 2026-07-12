@@ -192,7 +192,7 @@ export function BotList({ onBack }: { onBack?: () => void } = {}) {
               >
                 <div className="flex items-center gap-2 px-1">
                   <Monitor className="size-3.5 text-muted-foreground" />
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <span className="text-xs font-semibold text-muted-foreground">
                     {machineName(machineId)}
                   </span>
                   <span

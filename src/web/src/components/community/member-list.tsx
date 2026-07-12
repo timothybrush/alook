@@ -198,7 +198,7 @@ export function MemberList({
                     }}
                   >
                     {item.kind === "header" ? (
-                      <h3 className="mb-2 px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <h3 className="mb-2 px-1 text-xs font-medium text-muted-foreground">
                         {item.label} — {item.count}
                       </h3>
                     ) : (

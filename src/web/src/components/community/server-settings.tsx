@@ -88,7 +88,7 @@ export function ServerSettings({
       >
         {/* settings nav */}
         <nav className="flex w-60 shrink-0 flex-col gap-2 overflow-y-auto thin-scrollbar border-r border-border p-4" style={{ background: "var(--d-rail)" }}>
-          <div className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{serverName}</div>
+          <div className="px-2 text-xs font-semibold text-muted-foreground">{serverName}</div>
           <TabsList variant="line" className="h-auto w-full flex-col gap-1">
             {nav.map((n) => (
               <TabsTrigger key={n.id} value={n.id} className="h-9 w-full justify-start gap-2">
@@ -137,7 +137,7 @@ function SettingsOverview({ serverName, serverDescription, serverIcon, onUploadI
     onUpdateServer?.(name, desc)
   }
   return (
-    <div className="max-w-xl space-y-4">
+    <div className="mx-auto max-w-xl space-y-4">
       <div className="flex items-center gap-4">
         {serverIcon ? (
           <img src={serverIcon} alt="Server icon" className="size-20 rounded-2xl object-cover" />
@@ -219,7 +219,7 @@ function SettingsMembers({ members, loading, loadingMore, hasMore, total, onLoad
   // server-wide count so we suffix "matches" for clarity.
   const shownCount = total ?? members.length
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="mx-auto flex h-full min-h-0 max-w-xl flex-col">
       {onSearch && (
         <div className="relative mb-3 shrink-0">
           <Search className="absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -304,7 +304,7 @@ function SettingsInvites({ invites, loading, onRevokeInvite, onCopyInvite }: {
   const [revokingCode, setRevokingCode] = useState<string | null>(null)
   if (loading && invites.length === 0) return <SettingsInvitesSkeleton />
   return (
-    <div className="space-y-2">
+    <div className="mx-auto max-w-xl space-y-2">
       {invites.length === 0 && (
         <p className="text-sm text-muted-foreground">No active invites — use the invite icon in the sidebar header to share this server.</p>
       )}
@@ -338,7 +338,7 @@ function SettingsNotifications({ level, onSetLevel }: { level: string; onSetLeve
     { value: "Nothing", label: "Muted", hint: "No notifications, no badges" },
   ]
   return (
-    <div className="max-w-md space-y-2">
+    <div className="mx-auto max-w-md space-y-2">
       <div className="mb-3 text-sm text-muted-foreground">Default notifications for this server</div>
       {levels.map((l) => (
         <button
@@ -362,7 +362,7 @@ function SettingsNotifications({ level, onSetLevel }: { level: string; onSetLeve
 function SettingsAudit({ auditLog, loading }: { auditLog: AuditEntry[]; loading?: boolean }) {
   if (loading && auditLog.length === 0) return <SettingsAuditSkeleton />
   return (
-    <div className="space-y-2">
+    <div className="mx-auto max-w-xl space-y-2">
       {auditLog.length === 0 && (
         <p className="text-sm text-muted-foreground">No audit log entries yet. Admin actions will be recorded here.</p>
       )}
@@ -385,7 +385,7 @@ function SettingsAudit({ auditLog, loading }: { auditLog: AuditEntry[]; loading?
 // so the body doesn't shift when data lands.
 function SettingsMembersSkeleton() {
   return (
-    <div className="space-y-2">
+    <div className="mx-auto max-w-xl space-y-2">
       <Skeleton className="mb-3 h-4 w-24 rounded" />
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-2">
@@ -404,7 +404,7 @@ function SettingsMembersSkeleton() {
 
 function SettingsInvitesSkeleton() {
   return (
-    <div className="space-y-2">
+    <div className="mx-auto max-w-xl space-y-2">
       {Array.from({ length: 3 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3">
           <Skeleton className="size-5 shrink-0 rounded" />
@@ -422,7 +422,7 @@ function SettingsInvitesSkeleton() {
 
 function SettingsAuditSkeleton() {
   return (
-    <div className="space-y-2">
+    <div className="mx-auto max-w-xl space-y-2">
       {Array.from({ length: 6 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 rounded-md px-2 py-2">
           <Skeleton className="size-4 shrink-0 rounded" />

@@ -532,7 +532,7 @@ export default function CommunityPreview() {
     <>
       <NewThreadDialog channel={activeChannel} open={creatingThread} onClose={() => setCreatingThread(false)} onCreate={(name, firstMessage) => createThread(name, { firstMessage })} />
       <Dialog open={editingProfile} onOpenChange={(o) => { if (!o) setEditingProfile(false) }}>
-        <DialogContent className="flex h-[calc(100vh-4rem)] w-[calc(100vw-4rem)] sm:max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0" showCloseButton={false}>
+        <DialogContent className="flex h-[calc(100vh-4rem)] max-h-180 w-[calc(100vw-4rem)] sm:max-w-4xl flex-col gap-0 overflow-hidden rounded-xl p-0" showCloseButton={false}>
           <UserSettings
             onClose={() => setEditingProfile(false)}
             userId={null}
@@ -555,7 +555,7 @@ export default function CommunityPreview() {
         </DialogContent>
       </Dialog>
       <Dialog open={view === "settings"} onOpenChange={(o) => { if (!o) goServer() }}>
-        <DialogContent className="flex h-[calc(100vh-4rem)] w-[calc(100vw-4rem)] sm:max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0" showCloseButton={false}>
+        <DialogContent className="flex h-[calc(100vh-4rem)] max-h-180 w-[calc(100vw-4rem)] sm:max-w-4xl flex-col gap-0 overflow-hidden rounded-xl p-0" showCloseButton={false}>
           <ServerSettings section={settingsSection} setSection={setSettingsSection} onClose={goServer} serverName={serverName} serverDescription="Your Personal Company — AI agents that collaborate, always on." members={memberList} invites={invites} auditLog={AUDIT_LOG} {...settingsActions} {...profileProps} />
         </DialogContent>
       </Dialog>

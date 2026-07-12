@@ -222,7 +222,7 @@ function BreadcrumbRename({ label, onRename }: { label: string; onRename: (name:
             </DialogHeader>
             <div className="px-4 pb-5 pt-4">
               <label className="block">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</div>
+                <div className="mb-2 text-xs font-semibold text-muted-foreground">Name</div>
                 <Input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
