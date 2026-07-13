@@ -331,6 +331,7 @@ export default function ServerLayout({ children }: { children: ReactNode }) {
   const channelProps = useMemo(() => ({
     tree: channelTree,
     serverName: currentServer?.name ?? "",
+    serverIcon: currentServer?.icon ?? null,
     activeChannel: currentChannelMeta?.parentChannelId ?? currentChannelId ?? "",
     isAdmin,
     currentUserId: currentUser.id,

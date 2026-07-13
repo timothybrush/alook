@@ -109,7 +109,10 @@ export function PairMachineSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right">
+      <SheetContent
+        side="right"
+        className="data-[side=right]:sm:inset-y-2 data-[side=right]:sm:right-2 data-[side=right]:sm:h-auto data-[side=right]:sm:rounded-xl data-[side=right]:sm:border"
+      >
         <SheetHeader>
           <SheetTitle>
             {isReconnect ? `Reconnect ${mode.hostname || "machine"}` : "Connect a machine"}
@@ -156,12 +159,12 @@ function Step1({
         and hit enter. Node 20+ is the only prerequisite.
       </p>
       {generating ? (
-        <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
           Preparing your command…
         </div>
       ) : (
-        <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 font-mono text-xs">
+        <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 font-mono text-xs">
           <code className="flex-1 break-all">{command}</code>
           <button
             onClick={onCopy}

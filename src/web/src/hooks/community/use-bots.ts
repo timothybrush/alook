@@ -35,10 +35,19 @@ export type CreateBotInput = {
 // Bot identity (name, image) is projected into friends() (self-bot rows) and
 // dms() (DM peer avatars). Invalidate all three whenever the owner mutates
 // a bot so open DM/friends pages re-render without a hard refresh.
-function invalidateBotSurfaces(qc: ReturnType<typeof useQueryClient>) {
+//
+// The profile card fetches/caches a bot's aboutMe separately under
+// communityKeys.profile(botId) with its own 5-minute staleTime
+// (use-user-profile.ts) — invalidate that too whenever the bot's id is
+// known, otherwise an already-opened profile card keeps showing the
+// pre-edit description until the cache naturally expires.
+export function invalidateBotSurfaces(qc: ReturnType<typeof useQueryClient>, botUserId?: string) {
   qc.invalidateQueries({ queryKey: communityKeys.bots() })
   qc.invalidateQueries({ queryKey: communityKeys.friends() })
   qc.invalidateQueries({ queryKey: communityKeys.dms() })
+  if (botUserId) {
+    qc.invalidateQueries({ queryKey: communityKeys.profile(botUserId) })
+  }
 }
 
 export function useCreateBot() {
@@ -50,7 +59,7 @@ export function useCreateBot() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       }),
-    onSuccess: () => invalidateBotSurfaces(qc),
+    onSuccess: (data) => invalidateBotSurfaces(qc, data.bot.id),
   })
 }
 
@@ -67,7 +76,7 @@ export function useUpdateBot() {
           image: input.image,
         }),
       }),
-    onSuccess: () => invalidateBotSurfaces(qc),
+    onSuccess: (data) => invalidateBotSurfaces(qc, data.bot.id),
   })
 }
 
@@ -76,7 +85,7 @@ export function useDeleteBot() {
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<void>(`/api/community/bots/${id}`, { method: "DELETE" }),
-    onSuccess: () => invalidateBotSurfaces(qc),
+    onSuccess: (_data, id) => invalidateBotSurfaces(qc, id),
   })
 }
 
@@ -97,6 +106,6 @@ export function useUploadBotAvatar() {
       if (!res.ok) throw new Error("Upload failed")
       return (await res.json()) as UploadBotAvatarResult
     },
-    onSuccess: () => invalidateBotSurfaces(qc),
+    onSuccess: (_data, variables) => invalidateBotSurfaces(qc, variables.botId),
   })
 }

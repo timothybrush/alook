@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { communityKeys } from "@/lib/query-keys"
 import { userProfileQueryFn, PROFILE_STALE_TIME_MS } from "@/hooks/community/use-user-profile"
+import { useDefaultLayout } from "react-resizable-panels"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { AppSurface } from "@/components/ui/app-surface"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
@@ -587,6 +588,12 @@ export function ShellFrame({
     />
   )
 
+  // `ShellFrame` mounts separately in `channels/layout.tsx` and `me/layout.tsx`
+  // — navigating server ↔ DMs unmounts one and mounts the other, which would
+  // otherwise reset the panel to `defaultSize` every time. A single shared
+  // `id` (not scoped to `view`/`activeServerId`) persists one width across
+  // both instances, in localStorage, so it also survives full page reloads.
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: "community-shell" })
   const sidebarPanelRef = useRef<HTMLDivElement>(null)
   const [sidebarW, setSidebarW] = useState(240)
   useEffect(() => {
@@ -604,14 +611,20 @@ export function ShellFrame({
         <ServerRail {...railProps} bottomInset={60} />
         <div className="relative flex-1 flex flex-col min-w-0 pt-2">
           <AppSurface className="rounded-tl-xl rounded-tr-none rounded-br-none rounded-bl-none ring-0 border-l border-t border-border/40 shadow-none">
-            <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-              <ResizablePanel defaultSize="24%" minSize={160} maxSize={360} className="flex flex-col pb-14 bg-sidebar">
+            <ResizablePanelGroup
+              id="community-shell"
+              orientation="horizontal"
+              className="min-h-0 flex-1"
+              defaultLayout={defaultLayout}
+              onLayoutChanged={onLayoutChanged}
+            >
+              <ResizablePanel id="sidebar" defaultSize="24%" minSize={160} maxSize={360} className="flex flex-col pb-14 bg-sidebar">
                 <div ref={sidebarPanelRef} className="flex min-h-0 flex-1 flex-col">
                   {sidebar()}
                 </div>
               </ResizablePanel>
               <ResizableHandle className="bg-transparent" />
-              <ResizablePanel defaultSize="76%" className="flex min-w-0 flex-col bg-background">
+              <ResizablePanel id="main" defaultSize="76%" className="flex min-w-0 flex-col bg-background">
                 {children}
               </ResizablePanel>
             </ResizablePanelGroup>

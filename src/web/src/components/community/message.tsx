@@ -153,15 +153,15 @@ export function Message({
                   <button
                     key={i}
                     onClick={() => onPreviewImage?.(a.url)}
-                    className="block w-fit max-w-[320px] overflow-hidden rounded-md border border-border transition-colors hover:border-primary/40"
+                    className="block w-fit max-w-[320px] overflow-hidden rounded-lg border border-border transition-colors hover:border-primary/40"
                   >
-                    <img src={a.url} alt={a.name} className="max-h-50 max-w-[320px] rounded-md object-contain" style={{ aspectRatio: attachmentAspectRatio(a.width, a.height) }} />
+                    <img src={a.url} alt={a.name} className="max-h-50 max-w-[320px] rounded-lg object-contain" style={{ aspectRatio: attachmentAspectRatio(a.width, a.height) }} />
                   </button>
                 ) : (
                   <button
                     key={i}
                     onClick={() => onDownloadFile?.(a.url)}
-                    className="flex w-full max-w-[320px] items-center gap-3 rounded-md border border-border bg-card p-2 text-left transition-colors hover:bg-accent"
+                    className="flex w-full max-w-[320px] items-center gap-3 rounded-lg border border-border bg-card p-2 text-left transition-colors hover:bg-accent"
                   >
                     <FileText className="size-7 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
@@ -180,9 +180,14 @@ export function Message({
               {m.embeds.map((embed, ei) => (
                 <article
                   key={ei}
-                  className="flex max-w-108 overflow-hidden rounded-md border-l-4 bg-card p-3"
-                  style={{ borderLeftColor: embed.color ?? "var(--border)" }}
+                  className="flex max-w-108 overflow-hidden rounded-lg border border-border bg-card p-3"
                 >
+                  {embed.color && (
+                    <span
+                      className="mt-1.5 mr-3 size-2 shrink-0 self-start rounded-full"
+                      style={{ backgroundColor: embed.color }}
+                    />
+                  )}
                   <div className="min-w-0 flex-1">
                     {embed.author && (
                       <div className="mb-2 flex items-center gap-2">
@@ -245,7 +250,7 @@ export function Message({
                   onClick={() => onToggleReaction?.(r.emoji)}
                   title={r.userIds?.length ? r.userIds.map((id) => resolveUserName?.(id) ?? id).join(", ") : undefined}
                   className={[
-                    "flex h-6 items-center gap-1 rounded-md px-2 text-sm",
+                    "flex h-6 items-center gap-1 rounded-full px-2 text-sm",
                     r.me ? "border border-primary/50 bg-accent" : "bg-secondary",
                   ].join(" ")}
                 >
@@ -254,7 +259,7 @@ export function Message({
                 </button>
               ))}
               <EmojiPickerPopover side="top" align="start" onPick={(e) => onReact?.(e)}>
-                <button className="grid h-6 w-7 place-items-center rounded-md bg-secondary text-muted-foreground hover:text-foreground" aria-label="Add reaction">
+                <button className="grid h-6 w-7 place-items-center rounded-full bg-secondary text-muted-foreground hover:text-foreground" aria-label="Add reaction">
                   <SmilePlus className="size-4" />
                 </button>
               </EmojiPickerPopover>
