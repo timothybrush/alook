@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { computeDuplicateNames } from "./member-list"
+import { computeDuplicateNames, hasMemberMenu } from "./member-list"
 import type { Member } from "./_types"
 
 const member = (id: string, name: string, discriminator?: string): Member => ({
@@ -45,5 +45,22 @@ describe("computeDuplicateNames", () => {
     ]
     const dupes = computeDuplicateNames(members)
     expect(dupes.has("alex")).toBe(true)
+  })
+})
+
+describe("hasMemberMenu", () => {
+  it("is false when the viewer can't manage — any role", () => {
+    expect(hasMemberMenu(false, "member")).toBe(false)
+    expect(hasMemberMenu(false, "admin")).toBe(false)
+    expect(hasMemberMenu(false, "owner")).toBe(false)
+  })
+
+  it("is false for the owner even when the viewer can manage", () => {
+    expect(hasMemberMenu(true, "owner")).toBe(false)
+  })
+
+  it("is true when the viewer can manage a non-owner", () => {
+    expect(hasMemberMenu(true, "member")).toBe(true)
+    expect(hasMemberMenu(true, "admin")).toBe(true)
   })
 })

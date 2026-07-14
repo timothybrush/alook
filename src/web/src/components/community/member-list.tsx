@@ -227,6 +227,13 @@ export function MemberList({
   )
 }
 
+// True when the row has at least one right-click action (role change / kick). Owners
+// can't be managed, so their row — and any row for a non-manager — skips the ContextMenu
+// wrapper rather than opening an empty popover strip.
+export function hasMemberMenu(canManage: boolean, role: Role) {
+  return canManage && role !== "owner"
+}
+
 function MemberRow({
   mem,
   canManage,
@@ -246,53 +253,49 @@ function MemberRow({
   onSetRole?: (name: string, role: Role) => void
   onKick: (name: string) => void
 }) {
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger
-        render={
-          <button
-            onClick={(e) => onOpenProfile?.(mem.name, e, undefined, mem.userId)}
-            className="flex w-full items-center gap-3 rounded-md px-2 py-2 hover:bg-accent"
-          />
-        }
-      >
-        <Avatar label={mem.avatar} seed={mem.userId} size={32} presence={mem.status} dim={mem.status === "offline"} />
-        <div className="min-w-0 flex-1 text-left">
-          <div className={`truncate text-sm leading-tight ${mem.status === "offline" ? "text-muted-foreground" : ""}`}>
-            {mem.name}
-            {showDiscriminator && mem.discriminator && (
-              <span className="text-muted-foreground">#{mem.discriminator}</span>
-            )}
-          </div>
-          {hasStatus(mem.statusEmoji, mem.statusText) && (
-            <div className="truncate text-xs leading-tight text-muted-foreground">{mem.statusEmoji} {mem.statusText}</div>
+  const button = (
+    <button
+      onClick={(e) => onOpenProfile?.(mem.name, e, undefined, mem.userId)}
+      className="flex w-full items-center gap-3 rounded-md px-2 py-2 select-none hover:bg-accent"
+    >
+      <Avatar label={mem.avatar} seed={mem.userId} size={32} presence={mem.status} dim={mem.status === "offline"} />
+      <div className="min-w-0 flex-1 text-left">
+        <div className={`truncate text-sm leading-tight ${mem.status === "offline" ? "text-muted-foreground" : ""}`}>
+          {mem.name}
+          {showDiscriminator && mem.discriminator && (
+            <span className="text-muted-foreground">#{mem.discriminator}</span>
           )}
         </div>
-      </ContextMenuTrigger>
+        {hasStatus(mem.statusEmoji, mem.statusText) && (
+          <div className="truncate text-xs leading-tight text-muted-foreground">{mem.statusEmoji} {mem.statusText}</div>
+        )}
+      </div>
+    </button>
+  )
+  if (!hasMemberMenu(canManage, mem.role)) return button
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={button} />
       <ContextMenuContent className="w-48">
         <div className="truncate px-2 py-1 text-xs font-semibold text-muted-foreground">{mem.name}</div>
-        {canManage && mem.role !== "owner" && (
-          <>
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <Shield className="size-4" />
-                Role
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent>
-                {SETTABLE_ROLES.map((r) => (
-                  <ContextMenuItem key={r} onClick={() => onSetRole?.(mem.name, r)}>
-                    <span className="flex-1">{capitalize(r)}</span>
-                    {mem.role === r && <Check className="size-4" />}
-                  </ContextMenuItem>
-                ))}
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-            <ContextMenuSeparator />
-            <ContextMenuItem onClick={() => onKick(mem.name)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
-              <UserMinus className="size-4" /> Kick {mem.name}
-            </ContextMenuItem>
-          </>
-        )}
+        <ContextMenuSub>
+          <ContextMenuSubTrigger>
+            <Shield className="size-4" />
+            Role
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            {SETTABLE_ROLES.map((r) => (
+              <ContextMenuItem key={r} onClick={() => onSetRole?.(mem.name, r)}>
+                <span className="flex-1">{capitalize(r)}</span>
+                {mem.role === r && <Check className="size-4" />}
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={() => onKick(mem.name)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
+          <UserMinus className="size-4" /> Kick {mem.name}
+        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   )

@@ -10,6 +10,12 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { DropLine } from "./drop-line"
 import type { Channel } from "./_types"
 
+// True when the row has at least one right-click action. With none, we skip the
+// ContextMenu wrapper entirely so a non-manager doesn't get an empty popover strip.
+export function hasChannelMenu(h: { onEdit?: () => void; onManageMembers?: () => void; onDelete?: () => void }) {
+  return !!(h.onEdit || h.onManageMembers || h.onDelete)
+}
+
 // A single drag-sortable channel row. The whole row is the drag surface (no handle);
 // a 5px activation distance keeps a tap = "switch channel" and a drag = reorder.
 // Right-click opens an edit/mute/delete menu.
@@ -35,7 +41,7 @@ export function SortableChannel({ ch, active, onClick, onEdit, onDelete, onManag
       {...attributes}
       {...listeners}
       className={[
-        "group relative flex h-8 w-full cursor-pointer touch-none items-center gap-2 rounded-md px-2 text-sm",
+        "group relative flex h-8 w-full cursor-pointer touch-none items-center gap-2 rounded-md px-2 text-sm select-none",
         canReorder ? "active:cursor-grabbing" : "",
         active
           ? "bg-sidebar-accent text-foreground"
@@ -58,6 +64,7 @@ export function SortableChannel({ ch, active, onClick, onEdit, onDelete, onManag
       ) : null}
     </div>
   )
+  if (!hasChannelMenu({ onEdit, onManageMembers, onDelete })) return row
   return (
     <>
       <ContextMenu>

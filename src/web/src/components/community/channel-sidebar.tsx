@@ -155,6 +155,70 @@ export const ChannelSidebar = memo(function ChannelSidebar({
     if (id) setActiveChannel(id)
   }
 
+  // one DndContext spans everything: categories sort among themselves, channels across categories
+  const channelTree = (
+    <DndContext id="d-channels" sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}>
+      {/* uncategorized channels (empty-name category) render bare at the top — no header */}
+      {noneCatId && order[noneCatId]?.length > 0 && (
+        <SortableContext items={order[noneCatId].map((c) => c.id)} strategy={verticalListSortingStrategy}>
+          <div className="mb-4 space-y-1">
+            {order[noneCatId].map((ch) => (
+              <SortableChannel
+                key={ch.id}
+                ch={withMute(ch)}
+                active={ch.id === activeChannel}
+                canReorder={isAdmin}
+                onClick={() => setActiveChannel(ch.id)}
+                onEdit={isAdmin ? () => setDialog({ kind: "edit-channel", id: ch.id, categoryId: noneCatId, name: ch.name, type: ch.type ?? "text" }) : undefined}
+                onDelete={isAdmin ? () => { removeChannel(ch.id); onDeleteChannel?.(ch.id) } : undefined}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      )}
+      <SortableContext items={catOrder.filter((id) => catNames[id] !== "").map((id) => catId(id))} strategy={verticalListSortingStrategy}>
+        {catOrder.filter((id) => catNames[id] !== "").map((id) => (
+          <SortableCategory
+            key={id}
+            id={catId(id)}
+            name={catNames[id] ?? id}
+            open={!collapsed.has(id)}
+            onToggle={() => toggleCat(id)}
+            onAddChannel={canCreateInCategory(id) ? () => requestCreateChannel(id) : undefined}
+            onSettings={isAdmin ? () => setDialog({ kind: "category-settings", categoryId: id }) : undefined}
+            onDelete={isAdmin ? () => { removeCategory(id); onDeleteCategory?.(id) } : undefined}
+            isPrivate={catPrivate[id]}
+            canReorder={isAdmin}
+          >
+            <SortableContext items={(order[id] ?? []).map((c) => c.id)} strategy={verticalListSortingStrategy}>
+              <div className="mt-1 min-h-2 space-y-1">
+                {(order[id] ?? []).map((ch) => {
+                  // Manage/edit rights:
+                  //   - admins everywhere
+                  //   - private category: the channel creator too
+                  // Public-category channels are admin-managed only.
+                  const canManageChannel = isAdmin || (!!catPrivate[id] && ch.creatorId === currentUserId)
+                  return (
+                    <SortableChannel
+                      key={ch.id}
+                      ch={withMute(ch)}
+                      active={ch.id === activeChannel}
+                      canReorder={isAdmin}
+                      onClick={() => setActiveChannel(ch.id)}
+                      onEdit={canManageChannel ? () => setDialog({ kind: "edit-channel", id: ch.id, categoryId: id, name: ch.name, type: ch.type ?? "text" }) : undefined}
+                      onDelete={canManageChannel ? () => { removeChannel(ch.id); onDeleteChannel?.(ch.id) } : undefined}
+                      onManageMembers={(catPrivate[id] && canManageChannel) ? () => setDialog({ kind: "manage-members", channelId: ch.id, channelName: ch.name }) : undefined}
+                    />
+                  )
+                })}
+              </div>
+            </SortableContext>
+          </SortableCategory>
+        ))}
+      </SortableContext>
+    </DndContext>
+  )
+
   return (
     <aside className="flex min-w-0 flex-1 flex-col">
       {!noHeader && (
@@ -200,82 +264,23 @@ export const ChannelSidebar = memo(function ChannelSidebar({
           )}
         </header>
       )}
-      {/* right-click anywhere in the list (incl. empty space) → create channel / category */}
+      {/* right-click anywhere in the list (incl. empty space) → create channel / category.
+          Non-admins have no actions, so the menu is skipped entirely (no empty popover). */}
+      {isAdmin ? (
       <ContextMenu>
         <ContextMenuTrigger
           render={<div className="flex-1 overflow-y-auto thin-scrollbar px-2 py-4" />}
         >
-          {/* one DndContext spans everything: categories sort among themselves, channels across categories */}
-          <DndContext id="d-channels" sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd}>
-            {/* uncategorized channels (empty-name category) render bare at the top — no header */}
-            {noneCatId && order[noneCatId]?.length > 0 && (
-              <SortableContext items={order[noneCatId].map((c) => c.id)} strategy={verticalListSortingStrategy}>
-                <div className="mb-4 space-y-1">
-                  {order[noneCatId].map((ch) => (
-                    <SortableChannel
-                      key={ch.id}
-                      ch={withMute(ch)}
-                      active={ch.id === activeChannel}
-                      canReorder={isAdmin}
-                      onClick={() => setActiveChannel(ch.id)}
-                      onEdit={isAdmin ? () => setDialog({ kind: "edit-channel", id: ch.id, categoryId: noneCatId, name: ch.name, type: ch.type ?? "text" }) : undefined}
-                      onDelete={isAdmin ? () => { removeChannel(ch.id); onDeleteChannel?.(ch.id) } : undefined}
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-            )}
-            <SortableContext items={catOrder.filter((id) => catNames[id] !== "").map((id) => catId(id))} strategy={verticalListSortingStrategy}>
-              {catOrder.filter((id) => catNames[id] !== "").map((id) => (
-                <SortableCategory
-                  key={id}
-                  id={catId(id)}
-                  name={catNames[id] ?? id}
-                  open={!collapsed.has(id)}
-                  onToggle={() => toggleCat(id)}
-                  onAddChannel={canCreateInCategory(id) ? () => requestCreateChannel(id) : undefined}
-                  onSettings={isAdmin ? () => setDialog({ kind: "category-settings", categoryId: id }) : undefined}
-                  onDelete={isAdmin ? () => { removeCategory(id); onDeleteCategory?.(id) } : undefined}
-                  isPrivate={catPrivate[id]}
-                  canReorder={isAdmin}
-                >
-                  <SortableContext items={(order[id] ?? []).map((c) => c.id)} strategy={verticalListSortingStrategy}>
-                    <div className="mt-1 min-h-2 space-y-1">
-                      {(order[id] ?? []).map((ch) => {
-                        // Manage/edit rights:
-                        //   - admins everywhere
-                        //   - private category: the channel creator too
-                        // Public-category channels are admin-managed only.
-                        const canManageChannel = isAdmin || (!!catPrivate[id] && ch.creatorId === currentUserId)
-                        return (
-                          <SortableChannel
-                            key={ch.id}
-                            ch={withMute(ch)}
-                            active={ch.id === activeChannel}
-                            canReorder={isAdmin}
-                            onClick={() => setActiveChannel(ch.id)}
-                            onEdit={canManageChannel ? () => setDialog({ kind: "edit-channel", id: ch.id, categoryId: id, name: ch.name, type: ch.type ?? "text" }) : undefined}
-                            onDelete={canManageChannel ? () => { removeChannel(ch.id); onDeleteChannel?.(ch.id) } : undefined}
-                            onManageMembers={(catPrivate[id] && canManageChannel) ? () => setDialog({ kind: "manage-members", channelId: ch.id, channelName: ch.name }) : undefined}
-                          />
-                        )
-                      })}
-                    </div>
-                  </SortableContext>
-                </SortableCategory>
-              ))}
-            </SortableContext>
-          </DndContext>
+          {channelTree}
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
-          {isAdmin && (
-            <>
-              <ContextMenuItem onClick={() => requestCreateChannel(noneCatId)}>Create channel</ContextMenuItem>
-              <ContextMenuItem onClick={() => setDialog({ kind: "create-category" })}>Create category</ContextMenuItem>
-            </>
-          )}
+          <ContextMenuItem onClick={() => requestCreateChannel(noneCatId)}>Create channel</ContextMenuItem>
+          <ContextMenuItem onClick={() => setDialog({ kind: "create-category" })}>Create category</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      ) : (
+        <div className="flex-1 overflow-y-auto thin-scrollbar px-2 py-4">{channelTree}</div>
+      )}
 
       {dialog?.kind === "create-channel" && (
         <CreateChannelDialog

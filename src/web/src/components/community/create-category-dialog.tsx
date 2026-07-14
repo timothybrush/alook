@@ -42,18 +42,18 @@ export function CreateCategoryDialog({ onClose, onCreate, canTogglePrivate = tru
             />
           </Field>
           {canTogglePrivate && (
-            <label className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
-              <Lock className="size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">Private category</div>
-                <div className="text-xs text-muted-foreground">
-                  {isPrivate
-                    ? "Members create their own channels here, visible only to invited members."
-                    : "Channels here are admin-managed and visible to everyone."}
-                </div>
-              </div>
-              <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
-            </label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+                <Lock className="size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1 text-sm font-medium">Private category</div>
+                <Switch checked={isPrivate} onCheckedChange={setIsPrivate} />
+              </label>
+              <p className="text-right text-xs text-muted-foreground">
+                {isPrivate
+                  ? "Members create their own channels here, visible only to invited members."
+                  : "Channels here are admin-managed and visible to everyone."}
+              </p>
+            </div>
           )}
         </div>
         <DialogFooter className="mx-0 mb-0 flex-row items-center justify-end gap-2 rounded-b-xl border-t border-border bg-card px-4 py-3">

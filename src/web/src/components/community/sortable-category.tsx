@@ -10,6 +10,12 @@ import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, C
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { DropLine } from "./drop-line"
 
+// True when the category header has at least one right-click action. With none, we skip
+// the ContextMenu wrapper so a non-admin doesn't get an empty popover strip.
+export function hasCategoryMenu(h: { onAddChannel?: () => void; onSettings?: () => void; onDelete?: () => void }) {
+  return !!(h.onAddChannel || h.onSettings || h.onDelete)
+}
+
 // A drag-sortable category. The whole header is the drag surface (no handle) — a 5px
 // activation distance distinguishes a click (collapse) from a drag. It is also a drop
 // target so channels can be dropped onto it (including its empty space). Right-click
@@ -32,43 +38,48 @@ export function SortableCategory({ id: catDndId, name, open, onToggle, onAddChan
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, zIndex: isDragging ? 10 : undefined }
   const showLine = isOver && !isDragging
   const lineSide: "top" | "bottom" = activeIndex !== -1 && activeIndex < index ? "bottom" : "top"
+  // The header div is the drag surface; it renders bare (no ContextMenu) when there are no
+  // actions, so share its props/children across both branches to avoid drift.
+  const headerProps = {
+    ...attributes,
+    ...listeners,
+    onClick: onToggle,
+    className: `group flex w-full touch-none items-center gap-1 rounded px-1 py-1 text-xs font-semibold text-muted-foreground/80 select-none hover:text-foreground ${canReorder ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`,
+  }
+  const headerInner = (
+    <>
+      {isPrivate && <Lock className="size-3 shrink-0" />}
+      <span className="flex-1 truncate text-left">{name}</span>
+      {onSettings && (
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onSettings() }}
+        className="grid size-4 place-items-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
+        aria-label={`Category settings for ${name}`}
+      >
+        <Settings className="size-3.5" />
+      </button>
+      )}
+      {onAddChannel && (
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onAddChannel() }}
+        className="grid size-4 place-items-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
+        aria-label={`Create channel in ${name}`}
+      >
+        <Plus className="size-3.5" />
+      </button>
+      )}
+      <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`} />
+    </>
+  )
   return (
     <div ref={setNodeRef} style={style} className="relative mb-4">
       {showLine && <DropLine side={lineSide} />}
+      {hasCategoryMenu({ onAddChannel, onSettings, onDelete }) ? (
       <ContextMenu>
-        <ContextMenuTrigger
-          render={
-            <div
-              {...attributes}
-              {...listeners}
-              onClick={onToggle}
-              className={`group flex w-full touch-none items-center gap-1 rounded px-1 py-1 text-xs font-semibold text-muted-foreground/80 hover:text-foreground ${canReorder ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
-            />
-          }
-        >
-          {isPrivate && <Lock className="size-3 shrink-0" />}
-          <span className="flex-1 truncate text-left">{name}</span>
-          {onSettings && (
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); onSettings() }}
-            className="grid size-4 place-items-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
-            aria-label={`Category settings for ${name}`}
-          >
-            <Settings className="size-3.5" />
-          </button>
-          )}
-          {onAddChannel && (
-          <button
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); onAddChannel() }}
-            className="grid size-4 place-items-center rounded opacity-0 hover:bg-accent group-hover:opacity-100"
-            aria-label={`Create channel in ${name}`}
-          >
-            <Plus className="size-3.5" />
-          </button>
-          )}
-          <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`} />
+        <ContextMenuTrigger render={<div {...headerProps} />}>
+          {headerInner}
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
           <div className="truncate px-2 py-2 text-xs font-semibold text-muted-foreground">{name}</div>
@@ -85,6 +96,9 @@ export function SortableCategory({ id: catDndId, name, open, onToggle, onAddChan
           )}
         </ContextMenuContent>
       </ContextMenu>
+      ) : (
+        <div {...headerProps}>{headerInner}</div>
+      )}
       {open && (
         <div ref={setDropRef} className={`rounded-md transition-colors ${isChannelOver ? "bg-accent/40" : ""}`}>
           {children}
