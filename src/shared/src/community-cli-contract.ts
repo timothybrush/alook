@@ -479,6 +479,25 @@ export interface HostReady {
 export type AgentActivityState = "idle" | "starting" | "running" | "stopping";
 
 /**
+ * Bot audit-log event kinds/payloads mirrored from the wire zod schema
+ * (`BotAuditEventSchema` in `./schemas.ts`). The daemon emits these upward
+ * through `HostControlChannel.reportBotAuditEvent`; ws-do stamps `createdAt`
+ * and appends to `community_bot_activity_event`.
+ */
+export type BotAuditEventPayload =
+  | { kind: "cli_invocation"; payload: { subcommand: string } }
+  | { kind: "tool_call"; payload: { name: string } }
+  | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } };
+
+export interface HostBotAuditEventFrame {
+  type: "bot_audit_event";
+  agentId: AgentId;
+  sessionId?: string | null;
+  launchId?: string | null;
+  event: BotAuditEventPayload;
+}
+
+/**
  * `session.error` frame — daemon → server. Currently used by the daemon's
  * agent router when a runtime isn't available on the host.
  */
@@ -540,6 +559,12 @@ export interface HostControlChannel {
    * local mock channel can omit it.
    */
   reportAgentActivity?(info: { agentId: AgentId; state: AgentActivityState }): Promise<void>;
+  /**
+   * Report a bot audit event (cli_invocation | tool_call | thinking) upward.
+   * Optional so LocalControlChannel can omit — matches `reportAgentActivity?`
+   * convention. ws-do stamps `createdAt` and enforces the 500-row retention.
+   */
+  reportBotAuditEvent?(frame: HostBotAuditEventFrame): Promise<void>;
   /**
    * Register a resync provider invoked on every (re)connect: it returns the
    * host's current `ready` snapshot + live agent sessions, which the channel

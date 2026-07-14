@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { AgentProcessManager, type ManagedSession, type SessionFactory } from "./managerRuntime.js";
+import { AgentProcessManager, truncateThinking, type ManagedSession, type SessionFactory } from "./managerRuntime.js";
 import { SdkRuntimeSession, type SdkSessionHandle } from "../runtime/sdkRuntimeSession.js";
 import type { Driver, LaunchContext, SdkDriverDeps } from "../types.js";
 import type { Logger } from "../logger.js";
@@ -73,7 +73,7 @@ function fakeSession(): FakeSession {
   return s;
 }
 
-function makeManager(opts: { logger?: Logger; tickIntervalMs?: number; idleTimeoutMs?: number; staleThresholdMs?: number; now?: () => number } = {}) {
+function makeManager(opts: { logger?: Logger; tickIntervalMs?: number; idleTimeoutMs?: number; staleThresholdMs?: number; now?: () => number; onBotAuditEvent?: (agentId: string, event: unknown, context: { sessionId: string | null; launchId: string | null }) => void } = {}) {
   const session = fakeSession();
   const factory: SessionFactory = () => session;
   const onRuntimeSpawnFailed = vi.fn();
@@ -90,6 +90,7 @@ function makeManager(opts: { logger?: Logger; tickIntervalMs?: number; idleTimeo
     sessionFactory: factory,
     onRuntimeSpawnFailed,
     onRuntimeSessionEstablished,
+    onBotAuditEvent: opts.onBotAuditEvent as never,
     ...opts,
   });
   mgr.register("a1");
@@ -734,5 +735,117 @@ describe("AgentProcessManager — in-process SDK driver dispatch (Driver.createS
     });
     mgr.register("a1");
     expect(() => mgr.deliver("a1", { seq: 1, text: "hello" })).not.toThrow();
+  });
+});
+
+describe("truncateThinking", () => {
+  it("returns text unchanged when under the byte budget", () => {
+    const { text, truncated, chars } = truncateThinking("short");
+    expect(text).toBe("short");
+    expect(truncated).toBe(false);
+    expect(chars).toBe(5);
+  });
+
+  it("truncates > 4KB text and reports the original char count", () => {
+    const long = "a".repeat(5000);
+    const { text, truncated, chars } = truncateThinking(long);
+    expect(truncated).toBe(true);
+    expect(chars).toBe(5000);
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(4096);
+  });
+
+  it("never splits a multi-byte UTF-8 sequence", () => {
+    // Build a string whose 4096-byte boundary lands inside a 4-byte emoji.
+    // Each 😀 is 4 bytes. 1023 emojis = 4092 bytes; add "a" to get to 4093;
+    // then more emojis to push past 4096 mid-glyph.
+    const emoji = "😀";
+    const prefix = "a".repeat(4093) + emoji + emoji + emoji;
+    const { text } = truncateThinking(prefix);
+    // The returned string must be decodable — i.e. no replacement chars
+    // introduced by a mid-codepoint cut. `Buffer.from(text, "utf8")` and
+    // reading it back should round-trip.
+    expect(text).toBe(Buffer.from(text, "utf8").toString("utf8"));
+  });
+});
+
+describe("AgentProcessManager — bot audit event emission", () => {
+  it("emits `thinking` with truncated+chars fields", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", { kind: "thinking", text: "think about it" });
+
+    expect(onBotAuditEvent).toHaveBeenCalledWith(
+      "a1",
+      expect.objectContaining({
+        kind: "thinking",
+        payload: expect.objectContaining({
+          text: "think about it",
+          truncated: false,
+          chars: 14,
+        }),
+      }),
+      expect.objectContaining({ sessionId: null, launchId: null })
+    );
+  });
+
+  it("emits `tool_call` with name only (strips input)", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: { path: "/etc/passwd" } });
+
+    expect(onBotAuditEvent).toHaveBeenCalledWith(
+      "a1",
+      { kind: "tool_call", payload: { name: "Read" } },
+      expect.objectContaining({ sessionId: null, launchId: null })
+    );
+  });
+
+  it("carries sessionId (populated after session_init) into the context arg", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    // Learn the runtime session id from the handshake.
+    session.fire("runtime_event", { kind: "session_init", sessionId: "s_abc" });
+    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: {} });
+
+    expect(onBotAuditEvent).toHaveBeenCalledWith(
+      "a1",
+      { kind: "tool_call", payload: { name: "Read" } },
+      { sessionId: "s_abc", launchId: null }
+    );
+  });
+
+  it("DROPS `tool_call { name: \"Bash\" }` regardless of proxy sightings (Bash suppression)", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: { command: "ls -la" } });
+
+    // No audit event should be emitted for a Bash tool_call — the
+    // credential-proxy sighting (Producer B) is the authoritative source
+    // for `alook <sub>` invocations. Non-audit-hook side effects (progress
+    // dispatch) are unaffected.
+    const bashCalls = onBotAuditEvent.mock.calls.filter(
+      ([, ev]) => (ev as { kind?: string })?.kind === "tool_call"
+    );
+    expect(bashCalls).toHaveLength(0);
+  });
+
+  it("does NOT emit for non-audit event kinds (session_init, text, turn_end)", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", { kind: "session_init", sessionId: "s1" });
+    session.fire("runtime_event", { kind: "text", text: "hi human" });
+    session.fire("runtime_event", { kind: "turn_end" });
+
+    expect(onBotAuditEvent).not.toHaveBeenCalled();
   });
 });

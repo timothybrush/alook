@@ -198,6 +198,37 @@ export async function getBotBinding(
 }
 
 /**
+ * Combined lookup: bot's machine binding + owner userId. Used by ws-do's audit
+ * event handler to (a) verify the frame originates from the machine that owns
+ * the bot, and (b) address the owner-only fan-out.
+ * Returns null if the bot is unknown, soft-deleted, or unbound.
+ */
+export async function getBotBindingWithOwner(
+  db: Database,
+  botId: string
+): Promise<{ machineId: string; runtime: string; ownerUserId: string } | null> {
+  const rows = await db
+    .select({
+      machineId: communityBotBinding.machineId,
+      runtime: communityBotBinding.runtime,
+      ownerUserId: user.ownerUserId,
+    })
+    .from(user)
+    .innerJoin(communityBotBinding, eq(communityBotBinding.userId, user.id))
+    .where(
+      and(
+        eq(user.id, botId),
+        eq(user.isBot, true),
+        isNull(user.deletedAt)
+      )
+    )
+    .limit(1);
+  const r = rows[0];
+  if (!r || !r.ownerUserId) return null;
+  return { machineId: r.machineId, runtime: r.runtime, ownerUserId: r.ownerUserId };
+}
+
+/**
  * Wake-dispatch candidate filter — one D1 hit. Given a message's `recipients`
  * (all fanout recipients, human + bot) and the scope it landed in (exactly
  * one of `channelId`/`dmConversationId`), returns only the bots among them

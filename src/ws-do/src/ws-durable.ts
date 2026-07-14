@@ -8,6 +8,7 @@ import {
   HostReadyMessageSchema,
   SessionErrorFrameSchema,
   AgentActivityMessageSchema,
+  HostBotAuditEventFrameSchema,
   pickBotActivityPreset,
   RUNNING_PRESETS,
 } from "@alook/shared"
@@ -705,6 +706,45 @@ export class WebSocketDurableObject extends DurableObject<Env> {
         statusEmoji: preset.emoji,
         statusText: preset.text,
       })
+      return
+    }
+
+    // `bot_audit_event` — daemon reports a bot activity event (cli_invocation,
+    // tool_call, or thinking). Insert + rolling-500 prune land atomically via
+    // `db.batch`; server stamps `createdAt` (never trust the daemon clock).
+    // Fan the resulting row out to the OWNER ONLY (never `broadcastToAudience`
+    // — that would leak per-bot activity to co-members + friends).
+    const auditParse = HostBotAuditEventFrameSchema.safeParse(parsed)
+    if (auditParse.success) {
+      const frame = auditParse.data
+      const db = createDb(this.env.DB)
+      const binding = await queries.communityBot.getBotBindingWithOwner(db, frame.agentId)
+      if (!binding || binding.machineId !== identity.machineId) {
+        log.warn("bot_audit_event frame for a bot not bound to this machine — dropped", {
+          agentId: frame.agentId,
+          machineId: identity.machineId,
+        })
+        return
+      }
+      const payload = JSON.stringify(frame.event.payload)
+      const inserted = await queries.communityBotAuditLog.insertBotActivityEventAndPrune(db, {
+        botId: frame.agentId,
+        sessionId: frame.sessionId ?? null,
+        launchId: frame.launchId ?? null,
+        kind: frame.event.kind,
+        payload,
+      })
+      if (!inserted) return
+      await this.notifyUserDO(binding.ownerUserId, {
+        type: "community:bot.audit_event",
+        botId: frame.agentId,
+        id: inserted.id,
+        kind: frame.event.kind,
+        payload: frame.event.payload,
+        sessionId: frame.sessionId ?? null,
+        launchId: frame.launchId ?? null,
+        createdAt: inserted.createdAt,
+      }).catch(() => { })
       return
     }
 

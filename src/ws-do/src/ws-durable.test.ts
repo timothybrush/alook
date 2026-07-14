@@ -85,6 +85,8 @@ const mockListMembers = vi.fn()
 const mockListBotsForMachine = vi.fn<(db: unknown, machineId: string) => Promise<Array<{ id: string; name: string; discriminator: string; description: string }>>>().mockResolvedValue([])
 const mockIsBotOnline = vi.fn<(db: unknown, botUserId: string) => Promise<boolean>>().mockResolvedValue(false)
 const mockGetBotBinding = vi.fn<(db: unknown, botId: string) => Promise<{ machineId: string; runtime: string } | null>>().mockResolvedValue(null)
+const mockGetBotBindingWithOwner = vi.fn<(db: unknown, botId: string) => Promise<{ machineId: string; runtime: string; ownerUserId: string } | null>>().mockResolvedValue(null)
+const mockInsertBotActivityEventAndPrune = vi.fn<(db: unknown, data: unknown) => Promise<{ id: string; createdAt: string } | null>>().mockResolvedValue(null)
 const mockUpdateProfile = vi
   .fn<(db: unknown, userId: string, data: { statusEmoji?: string | null; statusText?: string | null }) => Promise<unknown>>()
   .mockResolvedValue({})
@@ -172,6 +174,34 @@ vi.mock("@alook/shared", () => {
       return { success: true as const, data: { type: "agent_activity" as const, agentId: m.agentId, state: m.state } }
     },
   }
+  const HostBotAuditEventFrameSchema = {
+    safeParse(v: unknown) {
+      const m = v as { type?: unknown; agentId?: unknown; sessionId?: unknown; launchId?: unknown; event?: unknown }
+      if (m?.type !== "bot_audit_event") return { success: false } as const
+      if (typeof m.agentId !== "string" || m.agentId.length === 0) return { success: false } as const
+      const ev = m.event as { kind?: unknown; payload?: unknown }
+      if (!ev || typeof ev !== "object") return { success: false } as const
+      const kind = ev.kind
+      const payload = ev.payload as Record<string, unknown> | undefined
+      if (!payload || typeof payload !== "object") return { success: false } as const
+      let ok = false
+      if (kind === "cli_invocation") ok = typeof payload.subcommand === "string"
+      else if (kind === "tool_call") ok = typeof payload.name === "string"
+      else if (kind === "thinking")
+        ok = typeof payload.text === "string" && typeof payload.truncated === "boolean" && typeof payload.chars === "number"
+      if (!ok) return { success: false } as const
+      return {
+        success: true as const,
+        data: {
+          type: "bot_audit_event" as const,
+          agentId: m.agentId,
+          sessionId: typeof m.sessionId === "string" ? m.sessionId : m.sessionId === null ? null : undefined,
+          launchId: typeof m.launchId === "string" ? m.launchId : m.launchId === null ? null : undefined,
+          event: { kind, payload },
+        },
+      }
+    },
+  }
   return {
     createDb: (d1: unknown) => mockCreateDb(d1),
     createLogger: () => noopLogger,
@@ -180,6 +210,7 @@ vi.mock("@alook/shared", () => {
     SessionErrorFrameSchema,
     HostReadyMessageSchema,
     AgentActivityMessageSchema,
+    HostBotAuditEventFrameSchema,
     // Deterministic preset picker so the assertion can pin exact
     // `statusEmoji`/`statusText` values regardless of the injected `seed`.
     pickBotActivityPreset: (state: string) => {
@@ -242,6 +273,10 @@ vi.mock("@alook/shared", () => {
       communityBot: {
         listBotsForMachine: (...a: [unknown, string]) => mockListBotsForMachine(...a),
         getBotBinding: (...a: [unknown, string]) => mockGetBotBinding(...a),
+        getBotBindingWithOwner: (...a: [unknown, string]) => mockGetBotBindingWithOwner(...a),
+      },
+      communityBotAuditLog: {
+        insertBotActivityEventAndPrune: (...a: any[]) => mockInsertBotActivityEventAndPrune(...a),
       },
       user: {
         getUserInternal: (...a: [unknown, string]) => mockGetUserInternal(...a),
@@ -1206,6 +1241,177 @@ describe("WebSocketDurableObject", () => {
       await durable.webSocketMessage(ws as any, frame)
 
       expect(mockUpdateProfile).not.toHaveBeenCalled()
+      expect(mockStubFetch).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("community-machine — bot_audit_event frame", () => {
+    beforeEach(() => {
+      mockGetBotBindingWithOwner.mockReset()
+      mockInsertBotActivityEventAndPrune.mockReset()
+      mockStubFetch.mockClear()
+    })
+
+    it("inserts + prunes atomically and notifies the OWNER only when the machine owns the bot", async () => {
+      const { durable, store } = createDO()
+      store.set("community-machine-identity", {
+        userId: "u_1",
+        machineId: "cm_1",
+        credentialHash: "0".repeat(64),
+      })
+      mockGetBotBindingWithOwner.mockResolvedValue({
+        machineId: "cm_1",
+        runtime: "codex",
+        ownerUserId: "owner_1",
+      })
+      mockInsertBotActivityEventAndPrune.mockResolvedValue({
+        id: "bae_abc",
+        createdAt: "2025-01-01T00:00:00.000Z",
+      })
+
+      const ws = createMockWebSocket()
+      ws.serializeAttachment({
+        type: "community-machine",
+        machineId: "cm_1",
+        userId: "u_1",
+        authenticated: true,
+      })
+
+      const frame = JSON.stringify({
+        type: "bot_audit_event",
+        agentId: "bot_1",
+        sessionId: "s_1",
+        launchId: "l_1",
+        event: { kind: "tool_call", payload: { name: "Read" } },
+      })
+      await durable.webSocketMessage(ws as any, frame)
+
+      // Insert was called with server-derived payload (not trust-the-daemon).
+      expect(mockInsertBotActivityEventAndPrune).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          botId: "bot_1",
+          sessionId: "s_1",
+          launchId: "l_1",
+          kind: "tool_call",
+          payload: JSON.stringify({ name: "Read" }),
+        }),
+      )
+      // Owner is notified via notifyUserDO — request goes to `user:owner_1`
+      // and the payload carries the full audit event including createdAt
+      // stamped server-side.
+      const call = mockStubFetch.mock.calls.find((c: any[]) => (c[0] as Request).url.endsWith("/broadcast"))
+      expect(call).toBeDefined()
+      const body = JSON.parse(await (call![0] as Request).clone().text()) as {
+        type: string
+        botId: string
+        id: string
+        kind: string
+        payload: unknown
+        createdAt: string
+      }
+      expect(body).toEqual({
+        type: "community:bot.audit_event",
+        botId: "bot_1",
+        id: "bae_abc",
+        kind: "tool_call",
+        payload: { name: "Read" },
+        sessionId: "s_1",
+        launchId: "l_1",
+        createdAt: "2025-01-01T00:00:00.000Z",
+      })
+    })
+
+    it("drops a frame naming a bot bound to a different machine — no insert, no fan-out", async () => {
+      const { durable, store } = createDO()
+      store.set("community-machine-identity", {
+        userId: "u_1",
+        machineId: "cm_1",
+        credentialHash: "0".repeat(64),
+      })
+      mockGetBotBindingWithOwner.mockResolvedValue({
+        machineId: "cm_OTHER",
+        runtime: "codex",
+        ownerUserId: "owner_1",
+      })
+
+      const ws = createMockWebSocket()
+      ws.serializeAttachment({
+        type: "community-machine",
+        machineId: "cm_1",
+        userId: "u_1",
+        authenticated: true,
+      })
+
+      const frame = JSON.stringify({
+        type: "bot_audit_event",
+        agentId: "bot_1",
+        event: { kind: "cli_invocation", payload: { subcommand: "send" } },
+      })
+      await durable.webSocketMessage(ws as any, frame)
+
+      expect(mockInsertBotActivityEventAndPrune).not.toHaveBeenCalled()
+      expect(mockStubFetch).not.toHaveBeenCalled()
+    })
+
+    it("drops a frame for a soft-deleted/unknown bot — no insert, no fan-out", async () => {
+      const { durable, store } = createDO()
+      store.set("community-machine-identity", {
+        userId: "u_1",
+        machineId: "cm_1",
+        credentialHash: "0".repeat(64),
+      })
+      mockGetBotBindingWithOwner.mockResolvedValue(null)
+
+      const ws = createMockWebSocket()
+      ws.serializeAttachment({
+        type: "community-machine",
+        machineId: "cm_1",
+        userId: "u_1",
+        authenticated: true,
+      })
+
+      const frame = JSON.stringify({
+        type: "bot_audit_event",
+        agentId: "ghost_bot",
+        event: { kind: "thinking", payload: { text: "hmm", truncated: false, chars: 3 } },
+      })
+      await durable.webSocketMessage(ws as any, frame)
+
+      expect(mockInsertBotActivityEventAndPrune).not.toHaveBeenCalled()
+      expect(mockStubFetch).not.toHaveBeenCalled()
+    })
+
+    it("does not fan out when the INSERT returns null (empty batch result)", async () => {
+      const { durable, store } = createDO()
+      store.set("community-machine-identity", {
+        userId: "u_1",
+        machineId: "cm_1",
+        credentialHash: "0".repeat(64),
+      })
+      mockGetBotBindingWithOwner.mockResolvedValue({
+        machineId: "cm_1",
+        runtime: "codex",
+        ownerUserId: "owner_1",
+      })
+      // Simulate the D1 batch returning no rows for the primary statement.
+      mockInsertBotActivityEventAndPrune.mockResolvedValue(null)
+
+      const ws = createMockWebSocket()
+      ws.serializeAttachment({
+        type: "community-machine",
+        machineId: "cm_1",
+        userId: "u_1",
+        authenticated: true,
+      })
+
+      const frame = JSON.stringify({
+        type: "bot_audit_event",
+        agentId: "bot_1",
+        event: { kind: "tool_call", payload: { name: "Read" } },
+      })
+      await durable.webSocketMessage(ws as any, frame)
+
       expect(mockStubFetch).not.toHaveBeenCalled()
     })
   })

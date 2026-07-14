@@ -268,6 +268,12 @@ export {
   CommunityAgentListChannelsRequestSchema,
   CommunityAgentListMembersRequestSchema,
   CommunityAgentJoinServerRequestSchema,
+  BotAuditEventSchema,
+  BotAuditEventKindSchema,
+  AuditLogCliInvocationPayloadSchema,
+  AuditLogToolCallPayloadSchema,
+  AuditLogThinkingPayloadSchema,
+  HostBotAuditEventFrameSchema,
 } from "./schemas";
 
 export type {
@@ -340,6 +346,8 @@ export type {
   CommunityAgentListChannelsRequest,
   CommunityAgentListMembersRequest,
   CommunityAgentJoinServerRequest,
+  BotAuditEvent,
+  BotAuditEventKind,
 } from "./schemas";
 
 // Community agent CLI bridge contract — lifted from `src/daemon/src/server/contract.ts`.
@@ -390,6 +398,8 @@ export type {
   AgentSessionReport,
   ParsedRef as CommunityCliParsedRef,
   AgentActivityState,
+  HostBotAuditEventFrame,
+  BotAuditEventPayload,
 } from "./community-cli-contract";
 export { DM_SERVER, parseRef, formatRef, parseSeq, formatSeq } from "./community-cli-contract";
 
@@ -459,6 +469,7 @@ export type {
   CommunityMachineStatus,
   CommunityMachineUpdated,
   CommunityMachineRemoved,
+  CommunityBotAuditEvent,
   CommunityWsEvent,
 } from "./community-ws-events";
 export { isCommunityEvent, WS_EVENTS } from "./community-ws-events";
@@ -468,7 +479,7 @@ export { createDb } from "./db/index";
 export type { Database } from "./db/index";
 export * as schema from "./db/schema";
 export * as queries from "./db/queries-index";
-export { communityServer, communityServerInvite, communityFriendship, communityServerMember, communityServerFolder, communityServerFolderItem } from "./db/community-schema";
+export { communityServer, communityServerInvite, communityFriendship, communityServerMember, communityServerFolder, communityServerFolderItem, communityBotActivityEvent } from "./db/community-schema";
 
 // Logger
 export { Logger, createLogger } from "./logger"

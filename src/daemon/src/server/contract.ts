@@ -51,6 +51,8 @@ export type {
   HostControlChannel,
   AgentSessionReport,
   AgentActivityState,
+  HostBotAuditEventFrame,
+  BotAuditEventPayload,
   WebSocketLike,
   WebSocketFactory,
   AdminApi,
