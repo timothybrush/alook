@@ -20,6 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useChannel } from "@/contexts/channel-context";
 import { cn } from "@/lib/utils";
+import { isImeConfirming } from "@/lib/ime";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -366,8 +367,9 @@ function CreateInput({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") handleSubmit();
-          if (e.key === "Escape") onCancel();
+          if (isImeConfirming(e)) return;
+          if (e.key === "Enter") { e.preventDefault(); handleSubmit(); }
+          else if (e.key === "Escape") onCancel();
         }}
         onBlur={() => { if (!savedRef.current) onCancel(); }}
         disabled={loading}
@@ -420,8 +422,9 @@ function RenameInput({
       value={value}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") handleSubmit();
-        if (e.key === "Escape") onCancel();
+        if (isImeConfirming(e)) return;
+        if (e.key === "Enter") { e.preventDefault(); handleSubmit(); }
+        else if (e.key === "Escape") onCancel();
       }}
       onBlur={() => { if (readyRef.current && !savedRef.current) onCancel(); }}
       disabled={loading}

@@ -9,6 +9,7 @@ import {
 import { user } from "../../schema";
 import type { Database } from "../../index";
 import { listParticipatingThreadIds } from "./thread";
+import { isThread } from "../../../utils/community-roles";
 
 export interface UnreadChannelRow {
   channelId: string;
@@ -123,14 +124,14 @@ export async function listUnreadChannels(
   // thread surfaces in the inbox only for its participants (muted=0), NOT for
   // every parent-channel member who can merely read it. Posts and channels flow
   // through the visibility path above unchanged. Only threads are re-filtered.
-  const threadIds = unread.filter((r) => r.type === "thread").map((r) => r.channelId);
+  const threadIds = unread.filter((r) => isThread(r.type)).map((r) => r.channelId);
   const participatingThreadIds =
     threadIds.length > 0
       ? new Set(await listParticipatingThreadIds(db, threadIds, userId))
       : new Set<string>();
 
   return unread
-    .filter((r) => r.type !== "thread" || participatingThreadIds.has(r.channelId))
+    .filter((r) => !isThread(r.type) || participatingThreadIds.has(r.channelId))
     .map((r) => ({
       channelId: r.channelId,
       channelName: r.channelName,

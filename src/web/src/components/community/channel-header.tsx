@@ -4,7 +4,9 @@ import { useEffect, useState } from "react"
 import type { LucideIcon } from "lucide-react"
 import { Bell, BellOff, Pin, Users, MessagesSquare, ChevronLeft, Check, Pencil, MoreHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { avatarInitial } from "@/lib/community/avatar"
 import { Input } from "@/components/ui/input"
+import { onEnterSubmit } from "@/lib/ime"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,7 +14,7 @@ import { ChannelIcon } from "./channel-icon"
 import { EntityIcon } from "./entity-icon"
 import { SlugHint } from "./slug-hint"
 import { previewSlug } from "@/lib/community/slug-preview"
-import { serverGradient } from "./server-gradient"
+import { gradientFromSeed } from "@/lib/community/gradient-from-seed"
 import type { RightPanel } from "./_types"
 
 // Skeleton header for the loading frame between route change and channel
@@ -167,12 +169,12 @@ export function ServerCrumb({ id, name, icon, size = 5, className = "" }: { id: 
       // No icon → the same deterministic gradient fallback used by the rail
       // (`sortable-server.tsx`) and folder rows, so a server reads as "the
       // same server" everywhere it shows up, not a flat generic tile here.
-      style={icon ? undefined : { background: serverGradient(id) }}
+      style={icon ? undefined : { background: gradientFromSeed(id) }}
       className={`grid shrink-0 place-items-center overflow-hidden rounded-md font-semibold ${icon ? "bg-secondary text-foreground" : "text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.35)]"} ${size === 7 ? "size-7 text-xs" : "size-5 text-[0.625rem]"} ${className}`}
       aria-label={name}
       title={name}
     >
-      {icon ? <img src={icon} alt="" className="size-full object-cover" /> : name.charAt(0).toUpperCase()}
+      {icon ? <img src={icon} alt="" className="size-full object-cover" /> : avatarInitial(name)}
     </span>
   )
 }
@@ -245,7 +247,7 @@ function BreadcrumbRename({ label, onRename }: { label: string; onRename: (name:
                 <Input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") save() }}
+                  onKeyDown={onEnterSubmit(save)}
                   placeholder="thread-name"
                   className="h-10"
                   autoFocus
