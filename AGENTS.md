@@ -39,6 +39,7 @@ This triggers:
 - **Auto-Tag & Release** — CI detects the `release: vX.Y.Z` commit message, creates the git tag, and creates a GitHub Release with generated changelog (`auto-tag-release.yml`)
 - **@alook/cli** → auto-published to npm via `publish-cli.yml` (watches `src/cli/package.json`)
 - **@alook/app** → auto-published to npm via `publish-app.yml` (watches `src/app/package.json`)
+- **@alook/daemon** → auto-published to npm via `publish-daemon.yml` (watches `src/daemon/package.json`)
 - **CF Workers** → each module redeploys when its own `package.json` changes
 
 ## Plan-driven Development

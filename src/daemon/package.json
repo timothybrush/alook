@@ -1,16 +1,33 @@
 {
   "name": "@alook/daemon",
-  "version": "0.1.0",
+  "version": "0.0.152",
   "description": "Alook agent daemon — host-side runtime backend, process manager, credential proxy, and control plane.",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/alookai/alook#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alookai/alook.git",
+    "directory": "src/daemon"
+  },
+  "bugs": {
+    "url": "https://github.com/alookai/alook/issues"
+  },
+  "keywords": [
+    "alook",
+    "daemon",
+    "ai",
+    "agent",
+    "email"
+  ],
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
   "bin": {
-    "alook": "dist/cli/index.js"
+    "alook-daemon": "dist/cli/index.js"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -19,7 +36,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/cli/index.js",
+    "build": "bun build src/index.ts --outdir dist --target node --format esm --external commander --external ws && bun build src/cli/index.ts --outdir dist/cli --target node --format esm --external commander --external ws && node scripts/prepare-dist.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -27,14 +44,12 @@
     "lint": "eslint .",
     "daemon": "tsx scripts/daemon.ts"
   },
-  "license": "Apache-2.0",
-  "private": true,
   "dependencies": {
-    "@alook/shared": "workspace:*",
     "commander": "^15.0.0",
     "ws": "^8.21.1"
   },
   "devDependencies": {
+    "@alook/shared": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.18.1",
     "eslint": "^9.39.5",
