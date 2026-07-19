@@ -155,6 +155,13 @@ export interface CredentialProxyHandoff {
    * authed by the machine key) before spawning the agent.
    */
   runnerKey: string;
+  /**
+   * Capability scope for this launch's voucher — the host owns the list and
+   * passes it in with the rest of the handoff so the driver doesn't carry a
+   * parallel default. Injected as `<PREFIX>_ACTIVE_CAPABILITIES` (comma-joined)
+   * and stamped into the voucher registration; the proxy enforces per-request.
+   */
+  capabilities: string[];
 }
 
 export interface LaunchConfig {

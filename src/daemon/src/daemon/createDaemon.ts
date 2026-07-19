@@ -411,7 +411,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
       return {
         agentId,
         workingDirectory: workdirFor(agentId),
-        credentialProxy: { broker, proxyUrl: proxy.url, runnerKey },
+        credentialProxy: { broker, proxyUrl: proxy.url, runnerKey, capabilities: opts.capabilities },
         agentCliPath: resolvedCliPath ?? opts.agentCliPath,
         config: {
           ...(botMeta?.name ? { agentName: botMeta.name } : {}),

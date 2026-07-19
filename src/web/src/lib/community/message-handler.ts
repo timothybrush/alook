@@ -261,74 +261,66 @@ export async function createCommunityMessage(params: {
     ...(messageType !== undefined ? { type: messageType } : {}),
   }
 
-  // Agent-attachment path (plan §Send). Pre-mint the message id BEFORE
-  // reserving pending attachments so the reservation UPDATE can point at it.
-  // Reservation-first guards against unsafe rollback of
-  // `insertMessageRow`'s side effects (scope counter bump, `lastMessageAt`,
-  // author read-state watermark, mention/fanout).
+  // Agent-attachment path (plan §Send). `communityAttachment.messageId` is a
+  // real FK to `communityMessage.id`, so the reserve UPDATE cannot precede
+  // the message insert — D1 enforces FK checks eagerly and would reject a
+  // reserve against a not-yet-inserted pre-minted id. Insert first, then
+  // reserve; compensate with `hardDeleteMessage` if the reserve fails or
+  // partially reserves. `insertMessageRow`'s side effects (scope counter,
+  // `lastMessageAt`, author read-state) drift by one row on that rare
+  // compensating path — accepted, none of it is visible externally because
+  // WS fanout only runs on the success branch below.
   const useAttachmentReservation =
     attachmentIds !== undefined && attachmentIds.length > 0
   const preMintedId = useAttachmentReservation ? nanoid() : undefined
-  const reservedAttachmentIds: string[] = []
+  if (preMintedId) baseMessageData.id = preMintedId
+
+  // `createMessage`'s overloads key off whether the `expectedSeq` property
+  // is present at all, not just its runtime value — a `number | undefined`
+  // typed property doesn't cleanly resolve against either overload, so the
+  // pass-through branches explicitly instead of spreading `expectedSeq` in.
+  const created: Awaited<ReturnType<typeof queries.communityMessage.createMessage>> =
+    expectedSeq !== undefined
+      ? await queries.communityMessage.createMessage(db, { ...baseMessageData, expectedSeq })
+      : await queries.communityMessage.createMessage(db, baseMessageData)
+
+  // Lost the CAS race (plans/fix-agent-send-race-condition.md) — zero rows
+  // were written anywhere (no message, no channel/DM bump, no read-state
+  // watermark). No attachments were reserved yet, so nothing to unreserve.
+  if (created === null) {
+    return { ok: false, status: 409, error: "seq_conflict" }
+  }
 
   if (useAttachmentReservation) {
-    const reserved = await queries.communityAttachment.reserveAttachmentsForMessage(db, {
-      ids: attachmentIds!,
-      messageId: preMintedId!,
-    })
+    let reserved: string[]
+    try {
+      reserved = await queries.communityAttachment.reserveAttachmentsForMessage(db, {
+        ids: attachmentIds!,
+        messageId: created.id,
+      })
+    } catch (err) {
+      // Reserve threw (transient D1 / constraint / etc.). The message row
+      // exists but has zero attachments reserved to it — hard-delete it so
+      // the caller can retry with the same attachment ids.
+      await queries.communityMessage.hardDeleteMessage(db, created.id)
+      throw err
+    }
     if (reserved.length !== attachmentIds!.length) {
-      // Partial-overlap race (S1={A,B}, S2={B,C}). Unreserve whatever THIS
-      // caller uniquely grabbed so rows aren't stuck with a message_id
-      // pointing at a message that will never exist.
+      // Partial-overlap race (S1={A,B}, S2={B,C}) or an id that no longer
+      // matches (uploader/kind/target/messageId-null). Unreserve whatever THIS
+      // caller uniquely grabbed, then hard-delete the message row so we
+      // don't leave an orphan with a partial attachment set.
       await queries.communityAttachment.unreserveAttachments(db, {
         ids: reserved,
-        messageId: preMintedId!,
+        messageId: created.id,
       })
+      await queries.communityMessage.hardDeleteMessage(db, created.id)
       return {
         ok: false,
         status: 400,
         error: "attachment not found or not attachable to this target",
       }
     }
-    reservedAttachmentIds.push(...reserved)
-    if (preMintedId) baseMessageData.id = preMintedId
-  }
-
-  // `createMessage`'s overloads key off whether the `expectedSeq` property
-  // is present at all, not just its runtime value — a `number | undefined`
-  // typed property doesn't cleanly resolve against either overload, so the
-  // pass-through branches explicitly instead of spreading `expectedSeq` in.
-  let created: Awaited<ReturnType<typeof queries.communityMessage.createMessage>>
-  try {
-    created =
-      expectedSeq !== undefined
-        ? await queries.communityMessage.createMessage(db, { ...baseMessageData, expectedSeq })
-        : await queries.communityMessage.createMessage(db, baseMessageData)
-  } catch (err) {
-    // D1 transient failure / batch error / FK violation: unreserve so the
-    // pending rows aren't leaked. `unreserveAttachments` is scoped by
-    // `messageId = preMintedId`, so it only touches rows we reserved.
-    if (useAttachmentReservation) {
-      await queries.communityAttachment.unreserveAttachments(db, {
-        ids: reservedAttachmentIds,
-        messageId: preMintedId!,
-      })
-    }
-    throw err
-  }
-
-  // Lost the CAS race (plans/fix-agent-send-race-condition.md) — zero rows
-  // were written anywhere (no message, no channel/DM bump, no read-state
-  // watermark). Unreserve any attachments we grabbed BEFORE returning so
-  // the bot can retry with the same ids.
-  if (created === null) {
-    if (useAttachmentReservation) {
-      await queries.communityAttachment.unreserveAttachments(db, {
-        ids: reservedAttachmentIds,
-        messageId: preMintedId!,
-      })
-    }
-    return { ok: false, status: 409, error: "seq_conflict" }
   }
 
   // Human-composer path: insert attachment rows now that the message exists.

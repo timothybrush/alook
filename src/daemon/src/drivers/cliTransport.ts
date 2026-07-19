@@ -88,27 +88,9 @@ export interface CliTransportConfig {
    * `cliName` won't resolve.
    */
   hostCliPath?: string;
-  /**
-   * Capabilities granted to this launch (the host can scope them per agent).
-   * Injected as `<PREFIX>_ACTIVE_CAPABILITIES` (comma-joined). Defaults to
-   * `DEFAULT_ACTIVE_CAPABILITIES`.
-   */
-  activeCapabilities?: string[];
   /** Extra static env vars the host wants every runtime to see. */
   extraEnv?: Record<string, string>;
 }
-
-/** Default capability set when a host doesn't scope one. */
-export const DEFAULT_ACTIVE_CAPABILITIES = [
-  "send",
-  "read",
-  "mentions",
-  "tasks",
-  "reactions",
-  "server",
-  "channels",
-  "knowledge",
-];
 
 /**
  * The default Alook CLI config template. No `hostCliPath` is wired — a real
@@ -150,7 +132,6 @@ export async function prepareCliTransport(
 ): Promise<PreparedCliTransport> {
   const E = cli.envPrefix;
   const stateHome = resolveStateHome(E);
-  const capabilities = cli.activeCapabilities ?? DEFAULT_ACTIVE_CAPABILITIES;
   const stateDir = path.join(ctx.workingDirectory, cli.stateDirName);
   await fs.promises.mkdir(stateDir, { recursive: true });
 
@@ -172,6 +153,7 @@ export async function prepareCliTransport(
       "(see src/credentials) and pass { broker, proxyUrl }. There is no plaintext mode.",
     );
   }
+  const capabilities = ctx.credentialProxy.capabilities;
   // Revoke this agent's previous voucher(s) before minting a new one — an
   // agent has at most one live launch at a time, so this bounds the broker's
   // registration map to "one live entry per active agent" regardless of how

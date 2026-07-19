@@ -31,7 +31,7 @@ function baseCtx(workingDirectory: string, overrides: Partial<LaunchContext> = {
     workingDirectory,
     standingPrompt: "",
     prompt: "",
-    credentialProxy: { broker: broker(), proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" },
+    credentialProxy: { broker: broker(), proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test", capabilities: ["send", "read"] },
     config: {},
     ...overrides,
   };
@@ -103,7 +103,7 @@ describe("prepareCliTransport — layered spawn env", () => {
     // code (see plans/fix-credential-proxy-connection-leak.md).
     const cred = broker();
     const first = await prepareCliTransport(
-      baseCtx(mkTmp(), { credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" } }),
+      baseCtx(mkTmp(), { credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test", capabilities: ["send", "read"] } }),
       {},
       undefined,
       "linux",
@@ -113,7 +113,7 @@ describe("prepareCliTransport — layered spawn env", () => {
     expect(cred.check(`Bearer ${firstVoucher}`).ok).toBe(true);
 
     const second = await prepareCliTransport(
-      baseCtx(mkTmp(), { credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" } }),
+      baseCtx(mkTmp(), { credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test", capabilities: ["send", "read"] } }),
       {},
       undefined,
       "linux",
@@ -127,12 +127,32 @@ describe("prepareCliTransport — layered spawn env", () => {
     expect(cred.check(`Bearer ${secondVoucher}`).ok).toBe(true);
   });
 
+  it("mints the voucher with the capability set from the handoff", async () => {
+    const cred = broker();
+    const { tokenFile } = await prepareCliTransport(
+      baseCtx(mkTmp(), {
+        credentialProxy: {
+          broker: cred,
+          proxyUrl: "http://127.0.0.1:9/proxy",
+          runnerKey: "sk_agent_test",
+          capabilities: ["attach"],
+        },
+      }),
+      {},
+      undefined,
+      "linux",
+    );
+    const voucher = fs.readFileSync(tokenFile, "utf8");
+    expect(cred.check(`Bearer ${voucher}`, "attach").ok).toBe(true);
+    expect(cred.check(`Bearer ${voucher}`, "send").ok).toBe(false);
+  });
+
   it("does not revoke a DIFFERENT agent's voucher on respawn", async () => {
     const cred = broker();
     await prepareCliTransport(
       baseCtx(mkTmp(), {
         agentId: "agent_1",
-        credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" },
+        credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test", capabilities: ["send", "read"] },
       }),
       {},
       undefined,
@@ -141,7 +161,7 @@ describe("prepareCliTransport — layered spawn env", () => {
     await prepareCliTransport(
       baseCtx(mkTmp(), {
         agentId: "agent_2",
-        credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test" },
+        credentialProxy: { broker: cred, proxyUrl: "http://127.0.0.1:9/proxy", runnerKey: "sk_agent_test", capabilities: ["send", "read"] },
       }),
       {},
       undefined,

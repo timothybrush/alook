@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const mockCreateMessage = vi.fn()
 const mockGetMessage = vi.fn()
 const mockGetMessageInScope = vi.fn()
+const mockHardDeleteMessage = vi.fn()
 const mockGetUserInternal = vi.fn()
 const mockCreateAttachment = vi.fn()
 const mockReserveAttachmentsForMessage = vi.fn()
@@ -26,6 +27,7 @@ vi.mock("@alook/shared", async () => {
         createMessage: (...a: unknown[]) => mockCreateMessage(...a),
         getMessage: (...a: unknown[]) => mockGetMessage(...a),
         getMessageInScope: (...a: unknown[]) => mockGetMessageInScope(...a),
+        hardDeleteMessage: (...a: unknown[]) => mockHardDeleteMessage(...a),
       },
       communityAttachment: {
         createAttachment: (...a: unknown[]) => mockCreateAttachment(...a),
@@ -591,7 +593,8 @@ describe("createCommunityMessage — attachment reservation-first flow (agent pa
     mockListByMessageIds.mockResolvedValue([])
   })
 
-  it("reservation-mismatch → unreserve, no message insert, generic 400", async () => {
+  it("reservation-mismatch → unreserve partial, hard-delete the orphan message, generic 400", async () => {
+    mockCreateMessage.mockResolvedValue({ id: "msg_preminted" })
     mockReserveAttachmentsForMessage.mockResolvedValue(["att_1"]) // only 1 of 2 reserved
 
     const res = await createCommunityMessage({
@@ -606,13 +609,13 @@ describe("createCommunityMessage — attachment reservation-first flow (agent pa
     if (res.ok) return
     expect(res.status).toBe(400)
     expect(res.error).toBe("attachment not found or not attachable to this target")
+    expect(mockCreateMessage).toHaveBeenCalledTimes(1)
     expect(mockUnreserveAttachments).toHaveBeenCalledWith({}, expect.objectContaining({ ids: ["att_1"] }))
-    expect(mockCreateMessage).not.toHaveBeenCalled()
+    expect(mockHardDeleteMessage).toHaveBeenCalledWith({}, "msg_preminted")
     expect(mockFanOutToChannel).not.toHaveBeenCalled()
   })
 
-  it("thrown insertMessageRow error → unreserve, then re-throw", async () => {
-    mockReserveAttachmentsForMessage.mockResolvedValue(["att_1", "att_2"])
+  it("thrown insertMessageRow error → nothing reserved yet, no unreserve, re-throw", async () => {
     mockCreateMessage.mockRejectedValue(new Error("d1_transient"))
 
     await expect(
@@ -625,14 +628,30 @@ describe("createCommunityMessage — attachment reservation-first flow (agent pa
       }),
     ).rejects.toThrow("d1_transient")
 
-    expect(mockUnreserveAttachments).toHaveBeenCalledTimes(1)
-    expect(mockUnreserveAttachments.mock.calls[0][1]).toEqual(
-      expect.objectContaining({ ids: ["att_1", "att_2"] }),
-    )
+    expect(mockReserveAttachmentsForMessage).not.toHaveBeenCalled()
+    expect(mockUnreserveAttachments).not.toHaveBeenCalled()
+    expect(mockHardDeleteMessage).not.toHaveBeenCalled()
   })
 
-  it("expectedSeq CAS-null → unreserve and return seq_conflict", async () => {
-    mockReserveAttachmentsForMessage.mockResolvedValue(["att_1"])
+  it("thrown reserve error → hard-delete the just-inserted message, re-throw", async () => {
+    mockCreateMessage.mockResolvedValue({ id: "msg_preminted" })
+    mockReserveAttachmentsForMessage.mockRejectedValue(new Error("d1_transient_reserve"))
+
+    await expect(
+      createCommunityMessage({
+        db: {} as never,
+        authorId: "author_1",
+        target: { kind: "channel", channelId: "c1", serverId: "srv_1" },
+        body: { content: "hi" },
+        attachmentIds: ["att_1"],
+      }),
+    ).rejects.toThrow("d1_transient_reserve")
+
+    expect(mockHardDeleteMessage).toHaveBeenCalledWith({}, "msg_preminted")
+    expect(mockUnreserveAttachments).not.toHaveBeenCalled()
+  })
+
+  it("expectedSeq CAS-null → no reserve, no unreserve, no hardDelete, returns seq_conflict", async () => {
     mockCreateMessage.mockResolvedValue(null) // CAS-null (returned, not thrown)
 
     const res = await createCommunityMessage({
@@ -648,7 +667,9 @@ describe("createCommunityMessage — attachment reservation-first flow (agent pa
     if (res.ok) return
     expect(res.status).toBe(409)
     expect(res.error).toBe("seq_conflict")
-    expect(mockUnreserveAttachments).toHaveBeenCalledWith({}, expect.objectContaining({ ids: ["att_1"] }))
+    expect(mockReserveAttachmentsForMessage).not.toHaveBeenCalled()
+    expect(mockUnreserveAttachments).not.toHaveBeenCalled()
+    expect(mockHardDeleteMessage).not.toHaveBeenCalled()
   })
 
   it("attachment-only bot send (empty text) is NOT rejected by the empty-body guard", async () => {

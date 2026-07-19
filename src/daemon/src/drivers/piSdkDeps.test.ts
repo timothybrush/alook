@@ -28,6 +28,7 @@ function baseCtx(overrides: Partial<LaunchContext> = {}): LaunchContext {
       broker: new CredentialBroker({ upstreamBaseUrl: "https://upstream.test", voucherDir: mkTmp() }),
       proxyUrl: "http://127.0.0.1:9/proxy",
       runnerKey: "sk_agent_test",
+      capabilities: ["send", "read"],
     },
     config: {},
     ...overrides,

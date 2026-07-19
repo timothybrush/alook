@@ -6,6 +6,7 @@ vi.mock("@opennextjs/cloudflare", () => ({
 }))
 vi.mock("@/lib/db", () => ({ getDb: vi.fn(() => ({})) }))
 
+const mockFindPendingAttachmentsForBot = vi.fn(async () => [] as unknown[])
 const mockFindActiveAgentRunnerKeyByBearer = vi.fn()
 const mockGetUserInternal = vi.fn()
 const mockGetUserByNameAndDiscriminator = vi.fn()
@@ -57,7 +58,7 @@ vi.mock("@alook/shared", async () => {
       },
       communityReadState: { getReadState: (...a: unknown[]) => mockGetReadState(...a) },
       communityAttachment: {
-        findPendingAttachmentsForBot: async () => [],
+        findPendingAttachmentsForBot: (...a: unknown[]) => mockFindPendingAttachmentsForBot(...a),
         listByMessageIds: async () => [],
       },
     },
@@ -263,6 +264,39 @@ describe("POST /api/community/agent/send", () => {
     )
     expect(res.status).toBe(400)
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
+  })
+
+  it("attachment-only DM send: passes attachmentIds through to createCommunityMessage", async () => {
+    // Regression: user reported {"error":"Unexpected end of JSON input"} when
+    // running `alook message send --attachment I-... --target /.dm/peer#0001`
+    // with no `--text`. The CLI sends `content: {text: ""}` + `attachments`.
+    mockFindPendingAttachmentsForBot.mockResolvedValueOnce([
+      { id: "I-abc", uploaderId: "bot_1", kind: "dm", targetId: "dm_new" },
+    ])
+    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
+    mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
+      Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null })
+    )
+    mockIsBlocked.mockResolvedValue(false)
+    mockCreateOrGetDM.mockResolvedValue({ id: "dm_new" })
+    mockGetDM.mockResolvedValue({ id: "dm_new", user1Id: "bot_1", user2Id: "peer_1", lastMessageAt: null, createdAt: "t" })
+    mockCreateCommunityMessage.mockResolvedValue({
+      ok: true,
+      row: { id: "m_dm", seq: 1, content: "" },
+      attachments: [{ id: "I-abc", filename: "AGENTS.md", contentType: "text/plain", size: 7990 }],
+    })
+    const res = await POST(
+      req(
+        { channel: "/.dm/peer#0001", content: { text: "" }, attachments: ["I-abc"] },
+        { Authorization: "Bearer crk_abc" },
+      ),
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.state).toBe("sent")
+    expect(mockCreateCommunityMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentIds: ["I-abc"] }),
+    )
   })
 
   it("sequential scenario: blocked/unaligned → pull+ack (simulated by an advancing lastReadSeq) → send succeeds → a new message arrives → send blocks again", async () => {
