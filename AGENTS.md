@@ -52,11 +52,18 @@ Playwright browser E2E for the web UI lives in `src/web/src/test/e2e-ui/` and ru
 - The `plans/` directory is gitignored — plans are kept locally and do not need to be committed or included in PRs.
 - Remember to update the dev plan after you finish coding.
 - When every task is completed, make sure you check the task checkbox in the corresponding plan.
-- A plan should at least contain `features`/`show case`, `designs overview`, `new deps`, `TODOS`, sections.
+- A plan should at least contain `features`/`show case`, `designs overview`, `new deps`, `TODOS`, `QA tests` sections.
   - always use the features/show case to present what you're going to build.
   - in `new deps` section, you must list all the new external dependencies that will be added.
   - use checklist in `TODOS` section, for each checkbox, you must have a clear description of what to do and list all the files that will be modified.
     - at the end of TODOS, you must include `test cases` sub section, use checklist format to list all the test cases that should be covered.
+  - `QA tests` section is REQUIRED. It must be a checklist of end-to-end user journeys the `alook-c-qa` agent will drive after implementation lands. For each journey: name it, list the routes/testids it exercises, and state the backend signal (D1 row, WS frame, worker log) that proves it worked. This section is the QA agent's brief — it will fail if the section is missing or vague.
+
+## QA after every new /c feature
+- After any change that touches `src/web` (especially the `/c` surface), `src/ws-do`, or `src/shared` community queries/schema, you MUST launch the `alook-c-qa` subagent to verify the feature end-to-end before reporting the task complete. Typecheck + unit tests are necessary but not sufficient — a green build with a broken user journey is still a broken feature.
+- The QA agent lives at `.claude/agents/alook-c-qa.md`. Invoke it via the Agent tool with `subagent_type: alook-c-qa` and hand it the `QA tests` checklist from the plan. It boots (or reuses) the local dev stack, drives the browser, correlates against D1 + WS + worker logs, and reports PASS/FAIL/BLOCKED with evidence.
+- If the QA agent returns FAIL or BLOCKED, treat that as an unfinished task — fix the defect and re-run the QA agent. Do not mark the plan checkbox complete on a failing journey. If a journey is genuinely out of scope for a change, say so in the report and skip it explicitly, don't silently drop it.
+- The QA agent is scoped to `/c` (community). For changes elsewhere in `src/web` (blog, marketing, calendar, etc.) it is not the right tool — run the relevant unit/E2E tests directly.
 
 ## Always WRITE/RUN TESTS!
 - never report to me about your code changes without running tests first.
