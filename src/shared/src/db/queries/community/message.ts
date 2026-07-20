@@ -93,13 +93,6 @@ function safeParseEmbeds(raw: string | null, messageId: string): unknown | undef
 }
 
 export type CreateMessageData = {
-  /**
-   * Optional pre-minted id — the agent-attachment path (plan
-   * agent-attachment-pipeline.md §Send) pre-mints this in application code so
-   * `reserveAttachmentsForMessage` can point at it BEFORE the message row is
-   * inserted. When absent, the schema's `$defaultFn` fires nanoid at insert
-   * time, matching the existing human-composer behavior.
-   */
   id?: string;
   authorId: string;
   content: string;
@@ -259,13 +252,115 @@ async function insertMessageRow(db: Database, data: CreateMessageData, seq: numb
 }
 
 /**
- * Hard-delete a message row by id. Reserved for rollback of a message that
- * was written moments before but its dependent row (approval-request, etc.)
- * failed to persist. Do NOT use this for user-facing message deletion — that
- * path should soft-delete or set a tombstone.
+ * Cascading rollback of a message row. Reserved for compensating a message
+ * that was written moments before but a follow-up dependency failed to
+ * persist (approval-request, attachment reserve, etc.). Do NOT use for
+ * user-facing message deletion — that path should soft-delete / tombstone.
+ *
+ * Reverts everything `insertMessageRow` wrote:
+ *   1. DELETE the message row itself.
+ *   2. Channel/DM lastMessageAt (recomputed via `MAX(createdAt)` subquery so
+ *      concurrent inserts keep their timestamps) + `messageCount -= 1` on
+ *      channel (DM has no counter).
+ *   3. Author's `communityReadState` row: if a prior message in scope exists,
+ *      revert the watermark to it (guarded by `lastReadMessageId = messageId`
+ *      so a concurrent same-author send that already advanced past our seq
+ *      keeps its newer state); if this was the first-ever message in scope,
+ *      DELETE the read-state row entirely so the schema's
+ *      "materialized ⇒ lastReadMessageId IS NOT NULL" invariant holds — the
+ *      next send re-inserts through `.onConflictDoUpdate`, and the DELETE
+ *      completes inside the same batch so no partial-UNIQUE-index collision.
+ *
+ * Idempotent — if the message is already gone (double-rollback race), the
+ * initial SELECT returns nothing and the whole cascade is skipped.
  */
 export async function hardDeleteMessage(db: Database, messageId: string) {
-  await db.delete(communityMessage).where(eq(communityMessage.id, messageId));
+  const msgRows = await db
+    .select({
+      id: communityMessage.id,
+      channelId: communityMessage.channelId,
+      dmConversationId: communityMessage.dmConversationId,
+      authorId: communityMessage.authorId,
+      seq: communityMessage.seq,
+      createdAt: communityMessage.createdAt,
+    })
+    .from(communityMessage)
+    .where(eq(communityMessage.id, messageId))
+    .limit(1);
+  const msg = msgRows[0];
+  if (!msg) return;
+
+  // Prior-in-scope message for the read-state revert. Pre-fetched because
+  // Drizzle's D1 batch driver serializes each statement independently and
+  // cannot pipe one statement's result into another. Safe: the read-state
+  // UPDATE in the batch is guarded by `lastReadMessageId = messageId`, so a
+  // concurrent same-author advance past our seq keeps its own newer state
+  // regardless of what this prior lookup returns.
+  const scopeMatch = msg.channelId
+    ? eq(communityMessage.channelId, msg.channelId)
+    : eq(communityMessage.dmConversationId, msg.dmConversationId!);
+  const priorRows = await db
+    .select({
+      id: communityMessage.id,
+      seq: communityMessage.seq,
+      createdAt: communityMessage.createdAt,
+    })
+    .from(communityMessage)
+    .where(and(scopeMatch, lt(communityMessage.seq, msg.seq)))
+    .orderBy(desc(communityMessage.seq))
+    .limit(1);
+  const prior = priorRows[0];
+
+  const deleteMsg = db.delete(communityMessage).where(eq(communityMessage.id, messageId));
+
+  // `lastMessageAt` is an INLINE `MAX(createdAt)` subquery — never pre-fetched.
+  // A concurrent writer inserting a newer message between our SELECT above and
+  // this UPDATE would otherwise get its timestamp clobbered. Same rule for
+  // `messageCount - 1`: a JS-side `oldCount - 1` would clobber any concurrent
+  // insert that landed between the pre-batch SELECT and this UPDATE.
+  const scopeUpdate = msg.channelId
+    ? db
+        .update(communityChannel)
+        .set({
+          messageCount: sql`${communityChannel.messageCount} - 1`,
+          lastMessageAt: sql<
+            string | null
+          >`(SELECT MAX(${communityMessage.createdAt}) FROM ${communityMessage} WHERE ${communityMessage.channelId} = ${msg.channelId} AND ${communityMessage.id} != ${messageId})`,
+        })
+        .where(eq(communityChannel.id, msg.channelId))
+    : db
+        .update(communityDmConversation)
+        .set({
+          lastMessageAt: sql<
+            string | null
+          >`(SELECT MAX(${communityMessage.createdAt}) FROM ${communityMessage} WHERE ${communityMessage.dmConversationId} = ${msg.dmConversationId} AND ${communityMessage.id} != ${messageId})`,
+        })
+        .where(eq(communityDmConversation.id, msg.dmConversationId!));
+
+  const readStateWhere = msg.channelId
+    ? and(
+        eq(communityReadState.userId, msg.authorId),
+        eq(communityReadState.channelId, msg.channelId),
+        eq(communityReadState.lastReadMessageId, messageId)
+      )
+    : and(
+        eq(communityReadState.userId, msg.authorId),
+        eq(communityReadState.dmConversationId, msg.dmConversationId!),
+        eq(communityReadState.lastReadMessageId, messageId)
+      );
+
+  const readStateStmt = prior
+    ? db
+        .update(communityReadState)
+        .set({
+          lastReadMessageId: prior.id,
+          lastReadSeq: prior.seq,
+          lastReadAt: prior.createdAt,
+        })
+        .where(readStateWhere)
+    : db.delete(communityReadState).where(readStateWhere);
+
+  await db.batch([deleteMsg, scopeUpdate, readStateStmt] as any);
 }
 
 // Shared select projection for the three list-messages paths (`listMessages`,

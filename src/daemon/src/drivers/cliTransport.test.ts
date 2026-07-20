@@ -44,6 +44,57 @@ describe("prepareCliTransport — layered spawn env", () => {
     await expect(prepareCliTransport(ctx, {}, undefined, "linux")).rejects.toThrow(/credentialProxy is required/);
   });
 
+  it("throws a legible error when credentialProxy.capabilities is undefined (wiring bug)", async () => {
+    const ctx = baseCtx(mkTmp(), {
+      credentialProxy: {
+        broker: broker(),
+        proxyUrl: "http://127.0.0.1:9/proxy",
+        runnerKey: "sk_agent_test",
+      } as unknown as LaunchContext["credentialProxy"],
+    });
+    await expect(prepareCliTransport(ctx, {}, undefined, "linux")).rejects.toThrow(
+      /credentialProxy\.capabilities is required/,
+    );
+  });
+
+  it("throws when a capability entry contains a comma (would silently widen scope)", async () => {
+    const ctx = baseCtx(mkTmp(), {
+      credentialProxy: {
+        broker: broker(),
+        proxyUrl: "http://127.0.0.1:9/proxy",
+        runnerKey: "sk_agent_test",
+        capabilities: ["send,read"],
+      },
+    });
+    await expect(prepareCliTransport(ctx, {}, undefined, "linux")).rejects.toThrow(
+      /contains a comma/,
+    );
+  });
+
+  it("accepts an empty capabilities array (legitimate zero-capability launch)", async () => {
+    const cred = broker();
+    const { spawnEnv, tokenFile } = await prepareCliTransport(
+      baseCtx(mkTmp(), {
+        credentialProxy: {
+          broker: cred,
+          proxyUrl: "http://127.0.0.1:9/proxy",
+          runnerKey: "sk_agent_test",
+          capabilities: [],
+        },
+      }),
+      {},
+      undefined,
+      "linux",
+    );
+    // capabilities.join(",") on an empty array = "" → the env var is present
+    // but empty, and the proxy reads that as "no capabilities granted".
+    expect(spawnEnv.ALOOK_ACTIVE_CAPABILITIES).toBe("");
+    // The minted voucher must reject every capability check (the Set is empty).
+    const voucher = fs.readFileSync(tokenFile, "utf8");
+    expect(cred.check(`Bearer ${voucher}`, "send").ok).toBe(false);
+    expect(cred.check(`Bearer ${voucher}`, "attach").ok).toBe(false);
+  });
+
   it("prepends the per-launch bin dir to PATH", async () => {
     const wd = mkTmp();
     const { spawnEnv, stateDir } = await prepareCliTransport(baseCtx(wd), {}, undefined, "linux");

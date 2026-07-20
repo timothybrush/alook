@@ -18,10 +18,17 @@ const mockGetPrivateChannelAudienceUserIds = vi.fn(() => [] as string[])
 const mockCreateChannelMember = vi.fn()
 const mockAddThreadParticipants = vi.fn()
 
+const mockLogError = vi.fn()
 vi.mock("@alook/shared", async () => {
   const actual = await vi.importActual<typeof import("@alook/shared")>("@alook/shared")
   return {
     ...actual,
+    createLogger: () => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+      error: (...a: unknown[]) => mockLogError(...a),
+    }),
     queries: {
       communityMessage: {
         createMessage: (...a: unknown[]) => mockCreateMessage(...a),
@@ -649,6 +656,76 @@ describe("createCommunityMessage — attachment reservation-first flow (agent pa
 
     expect(mockHardDeleteMessage).toHaveBeenCalledWith({}, "msg_preminted")
     expect(mockUnreserveAttachments).not.toHaveBeenCalled()
+  })
+
+  it("thrown reserve error + hardDelete ALSO throws → caller sees the ORIGINAL reserve error (not the rollback error)", async () => {
+    mockCreateMessage.mockResolvedValue({ id: "msg_preminted" })
+    mockReserveAttachmentsForMessage.mockRejectedValue(new Error("d1_transient_reserve"))
+    mockHardDeleteMessage.mockRejectedValue(new Error("d1_transient_rollback"))
+    mockLogError.mockClear()
+
+    await expect(
+      createCommunityMessage({
+        db: {} as never,
+        authorId: "author_1",
+        target: { kind: "channel", channelId: "c1", serverId: "srv_1" },
+        body: { content: "hi" },
+        attachmentIds: ["att_1"],
+      }),
+    ).rejects.toThrow("d1_transient_reserve")
+    // hardDelete WAS attempted; both errors are logged in one line.
+    expect(mockHardDeleteMessage).toHaveBeenCalledWith({}, "msg_preminted")
+    expect(mockLogError).toHaveBeenCalledWith(
+      "attachment_reserve_rollback_failed",
+      expect.objectContaining({
+        messageId: "msg_preminted",
+        insertErr: "d1_transient_reserve",
+        rollbackErr: "d1_transient_rollback",
+      }),
+    )
+  })
+
+  it("partial reserve + unreserve throws → hardDelete STILL fires (not skipped), caller gets 400", async () => {
+    mockCreateMessage.mockResolvedValue({ id: "msg_preminted" })
+    mockReserveAttachmentsForMessage.mockResolvedValue(["att_1"]) // 1 of 2
+    mockUnreserveAttachments.mockRejectedValueOnce(new Error("d1_transient_unreserve"))
+
+    const res = await createCommunityMessage({
+      db: {} as never,
+      authorId: "author_1",
+      target: { kind: "channel", channelId: "c1", serverId: "srv_1" },
+      body: { content: "hi" },
+      attachmentIds: ["att_1", "att_2"],
+    })
+
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.status).toBe(400)
+    expect(res.error).toBe("attachment not found or not attachable to this target")
+    expect(mockUnreserveAttachments).toHaveBeenCalledTimes(1)
+    // hardDelete must NOT be skipped just because unreserve threw first — the
+    // orphan message row still needs cleanup.
+    expect(mockHardDeleteMessage).toHaveBeenCalledWith({}, "msg_preminted")
+  })
+
+  it("partial reserve + unreserve AND hardDelete both throw → caller still gets 400 envelope (no rethrow)", async () => {
+    mockCreateMessage.mockResolvedValue({ id: "msg_preminted" })
+    mockReserveAttachmentsForMessage.mockResolvedValue(["att_1"]) // 1 of 2
+    mockUnreserveAttachments.mockRejectedValueOnce(new Error("d1_transient_unreserve"))
+    mockHardDeleteMessage.mockRejectedValue(new Error("d1_transient_rollback"))
+
+    const res = await createCommunityMessage({
+      db: {} as never,
+      authorId: "author_1",
+      target: { kind: "channel", channelId: "c1", serverId: "srv_1" },
+      body: { content: "hi" },
+      attachmentIds: ["att_1", "att_2"],
+    })
+
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.status).toBe(400)
+    expect(res.error).toBe("attachment not found or not attachable to this target")
   })
 
   it("expectedSeq CAS-null → no reserve, no unreserve, no hardDelete, returns seq_conflict", async () => {

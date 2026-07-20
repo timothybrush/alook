@@ -68,6 +68,46 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
   const fetchImpl = config.fetchImpl ?? fetch;
   const base = config.proxyUrl.replace(/\/+$/, "");
 
+  // Empty body + res.ok → undefined (204 / empty-200 like `ack`).
+  // Empty body + !res.ok → structured "upstream ... non-JSON body" (the empty-500 class).
+  // Non-empty non-JSON → same non-JSON message (truncated HTML 502 is "upstream broken", not client bug).
+  // JSON parse: res.ok → parsed T; !res.ok → Error with .code/.hint from the structured error body.
+  // res.text() throwing (RST after headers, TypeError: terminated) → surfaces as
+  // "upstream body read failed" so callers see a meaningful message instead of
+  // the bare TypeError.
+  async function parseJsonResponse<T>(res: Response, method: string): Promise<T> {
+    let text: string;
+    try {
+      text = await res.text();
+    } catch (err) {
+      const cause = err instanceof Error ? err.message : String(err);
+      throw new Error(`upstream body read failed from /api/${method} (${res.status}): ${cause}`);
+    }
+    if (text.length === 0) {
+      if (res.ok) return undefined as T;
+      throw new Error(`upstream returned ${res.status} with non-JSON body from /api/${method}`);
+    }
+    let json: (T & { error?: string; code?: string; hint?: string }) | undefined;
+    try {
+      json = JSON.parse(text) as T & { error?: string; code?: string; hint?: string };
+    } catch {
+      throw new Error(`upstream returned ${res.status} with non-JSON body from /api/${method}`);
+    }
+    if (!res.ok) {
+      const e = new Error(json?.error ?? `proxy api/${method} failed (${res.status})`);
+      // Only attach when present — assigning `undefined` would leave an own
+      // property that trips `"code" in err` / `hasOwnProperty` checks in
+      // callers that use those as feature-tests.
+      if (json?.code !== undefined) (e as { code?: string }).code = json.code;
+      // Copy `hint` onto the thrown Error the same way `.code` is copied —
+      // without this the owner-mismatch hint never leaves this file (see
+      // plan's "Hint propagation" note).
+      if (json?.hint !== undefined) (e as { hint?: string }).hint = json.hint;
+      throw e;
+    }
+    return json as T;
+  }
+
   async function call<T>(method: string, body: unknown): Promise<T> {
     // Strip any agentId from the wire body: identity travels ONLY as the voucher,
     // which the proxy turns into a trusted X-Agent-Id the bridge injects. Sending
@@ -82,17 +122,7 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
       },
       body: JSON.stringify(wire),
     });
-    const json = (await res.json()) as T & { error?: string; code?: string; hint?: string };
-    if (!res.ok) {
-      const e = new Error(json?.error ?? `proxy api/${method} failed (${res.status})`);
-      (e as { code?: string }).code = json?.code;
-      // Copy `hint` onto the thrown Error the same way `.code` is copied —
-      // without this the owner-mismatch hint never leaves this file (see
-      // plan's "Hint propagation" note).
-      (e as { hint?: string }).hint = json?.hint;
-      throw e;
-    }
-    return json;
+    return parseJsonResponse<T>(res, method);
   }
 
   async function callUpload(req: AttachmentUploadRequest): Promise<AgentAttachmentUploadResult> {
@@ -111,13 +141,7 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
       headers: { authorization: `Bearer ${config.voucher}` },
       body: form,
     });
-    const json = (await res.json()) as AgentAttachmentUploadResult & { error?: string; code?: string };
-    if (!res.ok) {
-      const e = new Error(json?.error ?? `proxy api/attachmentUpload failed (${res.status})`);
-      (e as { code?: string }).code = json?.code;
-      throw e;
-    }
-    return json;
+    return parseJsonResponse<AgentAttachmentUploadResult>(res, "attachmentUpload");
   }
 
   async function callDownload(req: AttachmentDownloadRequest): Promise<AgentAttachmentDownloadResult> {
@@ -131,10 +155,12 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
     });
     if (!res.ok) {
       // Error responses ARE JSON. Streaming success responses are binary.
-      const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-      const e = new Error(body?.error ?? `proxy api/attachmentDownload failed (${res.status})`);
-      (e as { code?: string }).code = body?.code;
-      throw e;
+      // Route through the shared helper so empty/HTML-502/read-fail all
+      // surface as the same "upstream ..." message the other calls use.
+      // parseJsonResponse ALWAYS throws when `!res.ok` (empty→non-JSON msg,
+      // parse-fail→non-JSON msg, structured JSON→Error carrying .code/.hint).
+      await parseJsonResponse<never>(res, "attachmentDownload");
+      throw new Error("unreachable: parseJsonResponse must throw on !res.ok");
     }
     const encoded = res.headers.get("x-alook-filename");
     const filename = encoded ? decodeURIComponent(encoded) : path.basename(req.destPath);

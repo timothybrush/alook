@@ -101,7 +101,12 @@ describe("POST /api/community/agent/attachmentDownload", () => {
       contentType: "image/png",
       size: 10,
     })
-    mockR2Get.mockResolvedValue({ body: new ReadableStream(), size: 10, httpMetadata: {} })
+    mockR2Get.mockResolvedValue({
+      body: new ReadableStream(),
+      size: 10,
+      httpMetadata: {},
+      arrayBuffer: async () => new ArrayBuffer(10),
+    })
     const res = await POST(req({ id: "att_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     expect(res.headers.get("Content-Type")).toBe("image/png")
@@ -120,7 +125,12 @@ describe("POST /api/community/agent/attachmentDownload", () => {
       contentType: "image/png",
       size: 5,
     })
-    mockR2Get.mockResolvedValue({ body: new ReadableStream(), size: 5, httpMetadata: {} })
+    mockR2Get.mockResolvedValue({
+      body: new ReadableStream(),
+      size: 5,
+      httpMetadata: {},
+      arrayBuffer: async () => new ArrayBuffer(5),
+    })
     const res = await POST(req({ id: "att_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const encoded = res.headers.get("X-Alook-Filename")
@@ -141,6 +151,52 @@ describe("POST /api/community/agent/attachmentDownload", () => {
     mockR2Get.mockResolvedValue(null)
     const res = await POST(req({ id: "att_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(502)
+  })
+
+  it("getAttachmentById throws → 500 JSON envelope (no binary body leak)", async () => {
+    mockGetAttachmentById.mockRejectedValueOnce(new Error("d1_transient"))
+    const res = await POST(req({ id: "att_1" }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "internal error", code: "internal" })
+  })
+
+  it("COMMUNITY_MEDIA.get throws → 500 JSON envelope", async () => {
+    mockGetAttachmentById.mockResolvedValue({
+      id: "att_1",
+      messageId: null,
+      uploaderId: "bot_1",
+      r2Key: "channel/c1/uuid/a.png",
+      filename: "a.png",
+      contentType: "image/png",
+      size: 10,
+    })
+    mockR2Get.mockRejectedValueOnce(new Error("r2_boom"))
+    const res = await POST(req({ id: "att_1" }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "internal error", code: "internal" })
+  })
+
+  it("obj.arrayBuffer() throws (R2 stream mid-read) → 500 JSON envelope, NOT a truncated 200", async () => {
+    mockGetAttachmentById.mockResolvedValue({
+      id: "att_1",
+      messageId: null,
+      uploaderId: "bot_1",
+      r2Key: "channel/c1/uuid/a.png",
+      filename: "a.png",
+      contentType: "image/png",
+      size: 10,
+    })
+    mockR2Get.mockResolvedValue({
+      body: new ReadableStream(),
+      size: 10,
+      httpMetadata: {},
+      arrayBuffer: async () => {
+        throw new Error("stream_error")
+      },
+    })
+    const res = await POST(req({ id: "att_1" }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "internal error", code: "internal" })
   })
 
   it("404 when a persisted row's channel-member gate fails — same shape as genuine 404", async () => {

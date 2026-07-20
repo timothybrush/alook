@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { NextRequest } from "next/server"
 
+const mockR2Delete = vi.fn(async () => undefined)
 vi.mock("@opennextjs/cloudflare", () => ({
-  getCloudflareContext: vi.fn(async () => ({ env: { DB: {}, COMMUNITY_MEDIA: { put: vi.fn() } } })),
+  getCloudflareContext: vi.fn(async () => ({
+    env: { DB: {}, COMMUNITY_MEDIA: { put: vi.fn(), delete: (...a: unknown[]) => mockR2Delete(...(a as [])) } },
+  })),
 }))
 vi.mock("@/lib/db", () => ({ getDb: vi.fn(() => ({})) }))
 
@@ -121,6 +124,44 @@ describe("POST /api/community/agent/attachmentUpload", () => {
       targetId: "c1",
       r2Key: "channel/c1/uuid/hi.png",
     }))
+  })
+
+  it("createPendingAttachment throws → 500 JSON envelope, R2 delete fired with r2Key", async () => {
+    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
+    mockResolveChannelByNameForMember.mockResolvedValue([
+      { id: "c1", serverId: "srv_1", parentChannelId: null },
+    ])
+    mockGetChannelForMember.mockResolvedValue({ id: "c1", serverId: "srv_1", parentChannelId: null })
+    mockCreatePendingAttachment.mockRejectedValueOnce(new Error("d1_transient"))
+
+    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(500)
+    const body = await res.json()
+    expect(body).toEqual({ error: "internal error", code: "internal" })
+    expect(mockR2Delete).toHaveBeenCalledWith("channel/c1/uuid/hi.png")
+  })
+
+  it("createPendingAttachment throws AND R2 delete also throws → still 500 JSON, no rethrow", async () => {
+    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
+    mockResolveChannelByNameForMember.mockResolvedValue([
+      { id: "c1", serverId: "srv_1", parentChannelId: null },
+    ])
+    mockGetChannelForMember.mockResolvedValue({ id: "c1", serverId: "srv_1", parentChannelId: null })
+    mockCreatePendingAttachment.mockRejectedValueOnce(new Error("d1_transient"))
+    mockR2Delete.mockRejectedValueOnce(new Error("r2_boom"))
+
+    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "internal error", code: "internal" })
+  })
+
+  it("pre-R2 throw (resolveTargetForMember errors) → 500 JSON, R2 delete NOT called", async () => {
+    mockResolveServerByNameForMember.mockRejectedValueOnce(new Error("d1_outage"))
+
+    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "internal error", code: "internal" })
+    expect(mockR2Delete).not.toHaveBeenCalled()
   })
 
   it("propagates handler failure response verbatim", async () => {

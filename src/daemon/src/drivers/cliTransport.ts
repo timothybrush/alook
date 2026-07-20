@@ -154,6 +154,29 @@ export async function prepareCliTransport(
     );
   }
   const capabilities = ctx.credentialProxy.capabilities;
+  // Guard: `capabilities` must be a real array. `undefined` is a caller wiring
+  // bug (typically `{} as CredentialProxyHandoff` in a test) — surface it at
+  // spawn time instead of crashing later inside `spawnEnv`'s `capabilities.join(",")`
+  // with an opaque "Cannot read properties of undefined (reading 'join')". An
+  // empty array IS allowed — that's a legitimate zero-capability launch.
+  if (!Array.isArray(capabilities)) {
+    throw new Error(
+      "prepareCliTransport: credentialProxy.capabilities is required " +
+      "(empty array is allowed for zero-capability launches; undefined is a wiring bug)",
+    );
+  }
+  // The proxy uses `,` as the sole separator between capabilities on the wire
+  // (`spawnEnv.ts` joins with "," and the proxy re-splits on ","). A capability
+  // entry containing a comma would silently widen the enforced scope — reject
+  // at wiring time so nobody smuggles in "send,attach" as a single token.
+  for (const c of capabilities) {
+    if (typeof c !== "string" || c.includes(",")) {
+      throw new Error(
+        `prepareCliTransport: capability entry ${JSON.stringify(c)} contains a comma ` +
+        `(each capability must be a single token; use ["send","read"] instead of ["send,read"])`,
+      );
+    }
+  }
   // Revoke this agent's previous voucher(s) before minting a new one — an
   // agent has at most one live launch at a time, so this bounds the broker's
   // registration map to "one live entry per active agent" regardless of how

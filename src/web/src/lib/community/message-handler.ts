@@ -5,8 +5,8 @@ import {
   MAX_MESSAGE_CONTENT_LENGTH,
   MAX_ATTACHMENTS_PER_MESSAGE,
   WS_EVENTS,
+  createLogger,
 } from "@alook/shared"
-import { nanoid } from "nanoid"
 import type { MentionType } from "@alook/shared"
 import type { Database } from "@alook/shared"
 import { fanOutToChannel, fanOutToDM } from "./fanout"
@@ -14,6 +14,8 @@ import { broadcastToUser } from "../broadcast"
 import { mapMessageForWs } from "./message-payload"
 import { mediaUrlFromKey } from "./storage"
 import { logAudit, COMMUNITY_AUDIT_ACTIONS } from "./audit"
+
+const log = createLogger({ service: "community-message-handler" })
 
 export type MessageTarget =
   | { kind: "channel"; channelId: string; serverId: string }
@@ -243,7 +245,6 @@ export async function createCommunityMessage(params: {
       : undefined
 
   const baseMessageData: {
-    id?: string;
     authorId: string;
     content: string;
     channelId: string | undefined;
@@ -261,19 +262,15 @@ export async function createCommunityMessage(params: {
     ...(messageType !== undefined ? { type: messageType } : {}),
   }
 
-  // Agent-attachment path (plan §Send). `communityAttachment.messageId` is a
-  // real FK to `communityMessage.id`, so the reserve UPDATE cannot precede
-  // the message insert — D1 enforces FK checks eagerly and would reject a
-  // reserve against a not-yet-inserted pre-minted id. Insert first, then
-  // reserve; compensate with `hardDeleteMessage` if the reserve fails or
-  // partially reserves. `insertMessageRow`'s side effects (scope counter,
-  // `lastMessageAt`, author read-state) drift by one row on that rare
-  // compensating path — accepted, none of it is visible externally because
-  // WS fanout only runs on the success branch below.
-  const useAttachmentReservation =
-    attachmentIds !== undefined && attachmentIds.length > 0
-  const preMintedId = useAttachmentReservation ? nanoid() : undefined
-  if (preMintedId) baseMessageData.id = preMintedId
+  // Insert first so `reserveAttachmentsForMessage`'s UPDATE can key off
+  // `created.id` (the FK enforces the message row exists); compensate with
+  // the cascading `hardDeleteMessage` on reserve failure or partial reserve.
+  // See plans/attachment-pipeline-empty-body-guardrails.md Layer 5-6 for the
+  // rollback contract.
+  //
+  // Narrow once here so downstream branches don't need `attachmentIds!`.
+  const reserveIds: string[] | null =
+    attachmentIds !== undefined && attachmentIds.length > 0 ? attachmentIds : null
 
   // `createMessage`'s overloads key off whether the `expectedSeq` property
   // is present at all, not just its runtime value — a `number | undefined`
@@ -291,30 +288,59 @@ export async function createCommunityMessage(params: {
     return { ok: false, status: 409, error: "seq_conflict" }
   }
 
-  if (useAttachmentReservation) {
+  if (reserveIds) {
     let reserved: string[]
     try {
       reserved = await queries.communityAttachment.reserveAttachmentsForMessage(db, {
-        ids: attachmentIds!,
+        ids: reserveIds,
         messageId: created.id,
       })
     } catch (err) {
       // Reserve threw (transient D1 / constraint / etc.). The message row
       // exists but has zero attachments reserved to it — hard-delete it so
-      // the caller can retry with the same attachment ids.
-      await queries.communityMessage.hardDeleteMessage(db, created.id)
+      // the caller can retry with the same attachment ids. If the
+      // compensating hardDelete ALSO throws (same D1 outage the reserve was
+      // recovering from), log both and re-throw the ORIGINAL reserve error —
+      // it's the one the caller cares about; matches bots/route.ts:139's shape.
+      try {
+        await queries.communityMessage.hardDeleteMessage(db, created.id)
+      } catch (rollbackErr) {
+        log.error("attachment_reserve_rollback_failed", {
+          messageId: created.id,
+          insertErr: err instanceof Error ? err.message : String(err),
+          rollbackErr: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+        })
+      }
       throw err
     }
-    if (reserved.length !== attachmentIds!.length) {
+    if (reserved.length !== reserveIds.length) {
       // Partial-overlap race (S1={A,B}, S2={B,C}) or an id that no longer
-      // matches (uploader/kind/target/messageId-null). Unreserve whatever THIS
-      // caller uniquely grabbed, then hard-delete the message row so we
-      // don't leave an orphan with a partial attachment set.
-      await queries.communityAttachment.unreserveAttachments(db, {
-        ids: reserved,
-        messageId: created.id,
-      })
-      await queries.communityMessage.hardDeleteMessage(db, created.id)
+      // matches (uploader/kind/target/messageId-null). Compensate:
+      // unreserve whatever THIS caller uniquely grabbed AND hard-delete the
+      // orphan message row. Both compensating writes are individually guarded:
+      // if unreserve throws we still try the hardDelete (else we'd leave a
+      // live message row alongside the stale partial-reserve); if either
+      // throws we log but still return the 400 envelope — the caller-facing
+      // shape doesn't depend on whether compensation succeeded.
+      try {
+        await queries.communityAttachment.unreserveAttachments(db, {
+          ids: reserved,
+          messageId: created.id,
+        })
+      } catch (unreserveErr) {
+        log.error("attachment_partial_reserve_unreserve_failed", {
+          messageId: created.id,
+          unreserveErr: unreserveErr instanceof Error ? unreserveErr.message : String(unreserveErr),
+        })
+      }
+      try {
+        await queries.communityMessage.hardDeleteMessage(db, created.id)
+      } catch (rollbackErr) {
+        log.error("attachment_partial_reserve_rollback_failed", {
+          messageId: created.id,
+          rollbackErr: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+        })
+      }
       return {
         ok: false,
         status: 400,
@@ -327,7 +353,7 @@ export async function createCommunityMessage(params: {
   // Agent path: rows were already reserved and pointed at `created.id` via
   // the pre-minted id, so no additional INSERT is needed here.
   let attachments: CreatedAttachment[] = []
-  if (useAttachmentReservation) {
+  if (reserveIds) {
     const rows = await queries.communityAttachment.listByMessageIds(db, [created.id])
     attachments = rows.map((r) => ({
       id: r.id,
