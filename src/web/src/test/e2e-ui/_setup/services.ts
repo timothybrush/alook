@@ -56,12 +56,22 @@ async function waitForHealth(url: string, name: string, timeoutMs = 90_000): Pro
 }
 
 export function resetDb(): void {
+  // `wrangler d1 migrations apply` prints the full migrations table (twice) on
+  // every run — noise in CI when it succeeds. DROP stdout entirely (that table
+  // is the noise) and capture only stderr so a real failure is still legible.
+  //
+  // Do NOT capture stdout into a buffer: it's ~600KB and blows spawnSync's 1MB
+  // default `maxBuffer`, which kills the child (status=null) and made this whole
+  // step falsely "fail" — crashing global-setup so CI never migrated and every
+  // query 500'd. `stdio: ["ignore","ignore","pipe"]` can't overflow.
   const res = spawnSync("pnpm", ["run", "db:reset"], {
     cwd: REPO_ROOT,
-    stdio: "inherit",
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "pipe"],
   })
   if (res.status !== 0) {
-    throw new Error(`db:reset failed (exit ${res.status})`)
+    if (res.stderr) process.stderr.write(res.stderr)
+    throw new Error(`db:reset failed (exit ${res.status}, signal ${res.signal})`)
   }
 }
 
@@ -105,11 +115,33 @@ function startService(name: string, filter: string, healthUrl: string): ManagedS
 // Starts web (:3000) + ws-do (:8789). Realtime journeys REQUIRE ws-do, so a
 // missing ws health check is a hard failure (fail fast), never a silent
 // degrade. Returns started services (empty when reusing an existing server).
+// `next dev` compiles each route lazily on first request, so a health check
+// (which only proves the process is up) doesn't mean `/c/channels/...` is
+// compiled. The first spec to hit a route then eats multi-second cold-compile
+// time and its `waitForURL` can time out. Pre-hit the hot routes so they're
+// warm before any spec runs. Best-effort: any response (even a redirect to
+// /sign-in) has already triggered compilation, so status is ignored.
+async function warmUpRoutes(): Promise<void> {
+  // Include the DYNAMIC route segments the first specs land on — `next dev`
+  // compiles per route *file*, not per id, so a placeholder id triggers the
+  // same compilation the real navigation needs. `/c/channels/x` (server root)
+  // and `/c/channels/x/y` (channel) are the ones create-server waits for; the
+  // server-root page also runs a data-gated redirect, so warming its chunk is
+  // what keeps that first `waitForURL` from eating cold-compile time.
+  const routes = ["/c", "/sign-in", "/c/me", "/c/channels/warmup", "/c/channels/warmup/warmup"]
+  await Promise.all(
+    routes.map((path) =>
+      fetch(`${WEB_URL}${path}`, { redirect: "manual" }).catch(() => {}),
+    ),
+  )
+}
+
 export async function startServices(): Promise<ManagedService[]> {
   const webHealth = `${WEB_URL}/api/health`
   const wsHealth = `${WS_URL}/health`
 
   if (REUSE_EXISTING && (await isUp(webHealth)) && (await isUp(wsHealth))) {
+    await warmUpRoutes()
     return []
   }
 
@@ -126,5 +158,6 @@ export async function startServices(): Promise<ManagedService[]> {
   ]
 
   await Promise.all(services.map((s) => waitForHealth(s.healthUrl, s.name)))
+  await warmUpRoutes()
   return services
 }
