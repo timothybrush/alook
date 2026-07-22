@@ -19,6 +19,16 @@ import type { ServerApi, Cursor, Message } from "../server/contract.js";
 import { proxyServerApiFromEnv } from "./proxyServerApi.js";
 import { daemonStart, daemonStop, daemonList } from "./daemonStart.js";
 import { parseInviteToken } from "@alook/shared/lib/invite-link";
+import { nowLocalISO, toLocalISO } from "../util/localTime.js";
+
+/**
+ * Rewrite every message's UTC `.time` (server-stamped) into local-tz ISO with
+ * offset, so the agent sees timestamps in its own timezone throughout the CLI
+ * envelope. Server truth stays untouched — we only reformat at the boundary.
+ */
+function messagesInLocalTime(messages: Message[]): Message[] {
+  return messages.map((m) => ({ ...m, time: toLocalISO(m.time) }));
+}
 
 /** The mandatory output envelope. Null/undefined fields are stripped on print. */
 interface Envelope {
@@ -217,6 +227,7 @@ async function cmdInboxPull(opts: Record<string, unknown>): Promise<unknown> {
   const agent = agentId(opts);
   const max = opts.max ? Number(opts.max) : undefined;
   const { messages, hasMore } = await api.inboxPull({ agentId: agent, max });
+  const pulledAt = nowLocalISO();
 
   let acked = 0;
   if (opts.ack !== false && messages.length > 0) {
@@ -230,7 +241,7 @@ async function cmdInboxPull(opts: Record<string, unknown>): Promise<unknown> {
     acked = latest.size;
   }
 
-  return { messages: messages as Message[], hasMore, acked };
+  return { messages: messagesInLocalTime(messages), hasMore, acked, pulledAt };
 }
 
 async function cmdServerList(opts: Record<string, unknown>): Promise<unknown> {
@@ -290,7 +301,7 @@ async function cmdChannelHistory(opts: Record<string, unknown>): Promise<unknown
     around: toSeq(opts.around),
     limit: toSeq(opts.limit),
   });
-  return { items, hasMore, ...(latestSeq !== undefined ? { latestSeq } : {}) };
+  return { items: messagesInLocalTime(items), hasMore, ...(latestSeq !== undefined ? { latestSeq } : {}) };
 }
 
 /* ------------------------------------------------------------------ */

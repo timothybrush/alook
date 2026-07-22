@@ -25,6 +25,7 @@ import type { RuntimeConfig } from "../runtimeConfig.js";
 import { createChildProcessRuntimeSession, type ChildProcessRuntimeSession } from "../runtime/runtimeSession.js";
 import { SdkManagedSession } from "../runtime/sdkManagedSession.js";
 import { createLogger, type Logger } from "../logger.js";
+import { nowLocalISO } from "../util/localTime.js";
 
 /**
  * Derived activity state reported up the control plane — NOT a raw passthrough
@@ -99,18 +100,20 @@ export interface ManagerRuntimeOpts {
    */
   onAgentActivity?: (info: { agentId: string; state: AgentActivityState }) => void;
   /**
-   * Notified whenever a runtime `thinking` or non-`Bash` `tool_call` event
-   * lands. Wired in `createDaemon` to send a `bot_audit_event` frame through
-   * the WS control channel. Not called for `Bash` tool_calls — see the
-   * "Bash suppression" branch inside `onRuntimeEvent`.
+   * Notified whenever a runtime `thinking` or `tool_call` event lands. Wired
+   * in `createDaemon` to send a `bot_audit_event` frame through the WS
+   * control channel. `Bash` tool_calls whose `input.command` starts with
+   * `alook ` are dropped inside `onRuntimeEvent` — the credential-proxy
+   * `cli_invocation` sighting is authoritative for those. Every other `Bash`
+   * call arrives here with a truncated `command` summary attached.
    *
-   * Kept minimal on purpose: no `input`, no output — the audit log records
-   * NAME only for tool_calls, and truncated `text` for thinking.
+   * `thinking` payloads carry truncated `text` + original `chars`; the audit
+   * log does not record raw tool input beyond the optional `command`.
    */
   onBotAuditEvent?: (
     agentId: string,
     event:
-      | { kind: "tool_call"; payload: { name: string } }
+      | { kind: "tool_call"; payload: { name: string; command?: string } }
       | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } },
     context: { sessionId: string | null; launchId: string | null }
   ) => void;
@@ -134,6 +137,16 @@ export interface ManagerRuntimeOpts {
    * one-shot instruction like "Use `alook inbox pull` to read your messages."
    */
   wakePromptFooter?: string;
+  /**
+   * When true, prepend a `[<local-tz ISO>]` timestamp to every prompt handed
+   * to the runtime driver (both spawn's initial prompt and mid-turn steer
+   * sends). Stamped inside `withFooter` — as close to "the moment the agent
+   * actually sees this text" as we can get — so the number reflects the real
+   * arrival wall-clock, not an earlier layer's timestamp. Off in tests so
+   * exact-string assertions on send/prompt stay stable; enabled in production
+   * via `createDaemon`.
+   */
+  stampWakePromptTime?: boolean;
   /**
    * Notified when a spawn fails BEFORE the runtime emits its handshake
    * `runtime_event` (pre-establishment error). Typically wired to
@@ -179,6 +192,62 @@ export interface TimelineRecorder {
 
 /** Max UTF-8 byte budget for `thinking` text in the audit log. */
 const THINKING_MAX_BYTES = 4096;
+
+/**
+ * Max UTF-16 code units for a `Bash` tool_call's `command` summary. The wire
+ * schema caps `command` at 240 chars (see `AuditLogToolCallPayloadSchema`) and
+ * Zod's `.max()` measures UTF-16 length — so we truncate on the same unit an
+ * astral character (emoji) counts as 2. Truncating on codepoints would let an
+ * emoji-heavy command exceed 240 UTF-16 units and get rejected at the wire.
+ */
+const BASH_COMMAND_SUMMARY_MAX_CHARS = 200;
+
+/**
+ * Extract a short command summary from a tool_call's `input`. Bash-family
+ * tools carry a `command` string in most drivers (claude, cursor, kimi,
+ * opencode) — codex wraps it inside `input.item.command` or a `type:
+ * "commandExecution"` variant. Best-effort extraction: return the first
+ * non-empty line trimmed and truncated to `BASH_COMMAND_SUMMARY_MAX_CHARS`
+ * UTF-16 code units (ellipsis if cut, walking back one unit if the boundary
+ * would split a surrogate pair). Returns `undefined` if no plausible command
+ * string is present.
+ */
+export function extractBashCommandSummary(input: unknown): string | undefined {
+  const raw = pickCommandString(input);
+  if (typeof raw !== "string") return undefined;
+  const firstLine = raw.split("\n").map((s) => s.trim()).find((s) => s.length > 0);
+  if (!firstLine) return undefined;
+  if (firstLine.length <= BASH_COMMAND_SUMMARY_MAX_CHARS) return firstLine;
+  let end = BASH_COMMAND_SUMMARY_MAX_CHARS - 1;
+  const cu = firstLine.charCodeAt(end - 1);
+  if (cu >= 0xd800 && cu <= 0xdbff) end -= 1;
+  return firstLine.slice(0, end) + "…";
+}
+
+function pickCommandString(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const rec = input as Record<string, unknown>;
+  if (typeof rec.command === "string") return rec.command;
+  // codex `commandExecution` shape: input.item.command (array or string)
+  const item = rec.item as Record<string, unknown> | undefined;
+  if (item) {
+    if (typeof item.command === "string") return item.command;
+    if (Array.isArray(item.command)) return item.command.filter((v) => typeof v === "string").join(" ");
+  }
+  return undefined;
+}
+
+/**
+ * A `Bash` tool_call is the daemon proxy's shadow when — and only when — the
+ * command is `alook` or `alook <sub …>`. In that case the credential proxy
+ * emits an authoritative `cli_invocation` audit row and the tool_call would
+ * duplicate it. Any other Bash command (rm, sed, git, pnpm, echo, …) is user
+ * intent and must surface.
+ */
+export function isAlookShellCommand(command: string | undefined): boolean {
+  if (!command) return false;
+  return /^alook(\s|$)/.test(command.trimStart());
+}
 
 /**
  * Truncate a `thinking` string to at most `THINKING_MAX_BYTES` UTF-8 bytes
@@ -276,6 +345,7 @@ export class AgentProcessManager {
       tickIntervalMs: 5_000,
       staleThresholdMs: 120_000,
       idleTimeoutMs: 300_000,
+      stampWakePromptTime: false,
       ...opts,
     };
     this.now = opts.now ?? (() => Date.now());
@@ -402,14 +472,35 @@ export class AgentProcessManager {
     return this.opts.wakePromptFooter ? `${text}\n\n${this.opts.wakePromptFooter}` : text;
   }
 
+  /**
+   * Prepend the local-tz wall-clock the moment BEFORE the text is handed to
+   * the runtime driver. Called at the very last mile — inside `doSpawn` right
+   * before `session.start(...)`, and inside `applyEffect`'s `send` branch
+   * right before `session.send(...)` — so the timestamp reflects "when the
+   * agent actually sees this text", not when the effect was scheduled. Gated
+   * by an opt-in flag so tests that assert on exact prompt strings stay
+   * stable; enabled in production via `createDaemon`.
+   */
+  private stampNow(text: string): string {
+    return this.opts.stampWakePromptTime ? `[${nowLocalISO()}] ${text}` : text;
+  }
+
   private applyEffect(effect: ManagerEffect): void {
     switch (effect.type) {
       case "spawn":
+        // Timestamp is applied inside doSpawn just before session.start — the
+        // spawn path adds workdir resolution + system-prompt assembly + child
+        // wiring latency between here and there, which can be tens to hundreds
+        // of ms on cold start. Stamping now would lock in a moment that lags
+        // reality by the whole spawn setup window.
         this.doSpawn(effect.agentId, this.withFooter(effect.prompt), effect.resumeSessionId);
         break;
       case "send": {
         const session = this.sessions.get(effect.agentId);
-        session?.send({ text: this.withFooter(effect.text), mode: effect.mode });
+        // Stamp at the moment the text hits `session.send`, not earlier —
+        // between effect creation and this call the event loop can drain other
+        // dispatches, and we want the timestamp to match the agent's arrival.
+        session?.send({ text: this.stampNow(this.withFooter(effect.text)), mode: effect.mode });
         this.log.info("steering message sent to running agent", { agentId: effect.agentId, mode: effect.mode });
         break;
       }
@@ -579,7 +670,14 @@ export class AgentProcessManager {
       this.dispatch({ type: "exit", agentId });
     });
 
-    void Promise.resolve(session.start({ text: prompt, sessionId: ctx.config.sessionId }))
+    // Stamp the wake-prompt timestamp AT the last mile — right before the
+    // driver's session sees the text — so the local-tz wall-clock the agent
+    // reads reflects the moment its process is being handed the prompt, not
+    // the moment the spawn effect was scheduled by the policy reducer. The
+    // difference matters on cold starts where system-prompt assembly + child
+    // wiring above adds tens/hundreds of ms.
+    const stampedPrompt = this.stampNow(prompt);
+    void Promise.resolve(session.start({ text: stampedPrompt, sessionId: ctx.config.sessionId }))
       .then(() => {
         // A concurrent stop()/terminate_stalled can race this in-flight
         // start() and finish first — its `exit` handler above already
@@ -628,7 +726,7 @@ export class AgentProcessManager {
   }
 
   private onRuntimeEvent(agentId: string, e: unknown, runtimeId: string): void {
-    const ev = e as { kind?: string; sessionId?: string; text?: string; name?: string };
+    const ev = e as { kind?: string; sessionId?: string; text?: string; name?: string; input?: unknown };
     if (!ev?.kind) return;
     // Bot audit hook — thinking + non-Bash tool_call, no correlation.
     // Context carries the sessionId/launchId learned so far this launch so
@@ -649,14 +747,20 @@ export class AgentProcessManager {
         // first so the audit log preserves thinking→action ordering.
         this.flushThinkingAudit(agentId);
         if (ev.kind === "tool_call" && typeof ev.name === "string") {
-          // Bash suppression — the credential proxy emits the authoritative
-          // `cli_invocation` when the agent invokes `alook` from a shell, and
-          // raw non-`alook` Bash isn't user-visible in the audit spec.
-          if (ev.name !== "Bash") {
+          // Bash-command suppression — a Bash call whose command is `alook`
+          // (or `alook <sub …>`) is already covered by the credential-proxy
+          // `cli_invocation` audit row; emitting a second `tool_call` here
+          // would double-count the same action. Every other Bash command
+          // (rm, sed, git, pnpm, echo …) is real user-visible work and must
+          // surface as a `tool_call` row with a short command summary.
+          const isBash = ev.name === "Bash";
+          const command = isBash ? extractBashCommandSummary(ev.input) : undefined;
+          const suppressed = isBash && isAlookShellCommand(command);
+          if (!suppressed) {
             try {
               this.opts.onBotAuditEvent(agentId, {
                 kind: "tool_call",
-                payload: { name: ev.name },
+                payload: command ? { name: ev.name, command } : { name: ev.name },
               }, {
                 sessionId: this.liveSessions.get(agentId) ?? null,
                 launchId: this.launchIds.get(agentId) ?? null,

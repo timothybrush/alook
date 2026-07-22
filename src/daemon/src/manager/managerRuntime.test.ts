@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { AgentProcessManager, truncateThinking, type ManagedSession, type SessionFactory } from "./managerRuntime.js";
+import {
+  AgentProcessManager,
+  truncateThinking,
+  extractBashCommandSummary,
+  isAlookShellCommand,
+  type ManagedSession,
+  type SessionFactory,
+} from "./managerRuntime.js";
 import { SdkRuntimeSession, type SdkSessionHandle } from "../runtime/sdkRuntimeSession.js";
 import type { Driver, LaunchContext, SdkDriverDeps } from "../types.js";
 import type { Logger } from "../logger.js";
@@ -848,21 +855,107 @@ describe("AgentProcessManager — bot audit event emission", () => {
     );
   });
 
-  it("DROPS `tool_call { name: \"Bash\" }` regardless of proxy sightings (Bash suppression)", () => {
+  it("DROPS `Bash` tool_call whose command is `alook <sub>` (proxy is authoritative)", () => {
     const onBotAuditEvent = vi.fn();
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
 
-    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: { command: "ls -la" } });
+    session.fire("runtime_event", {
+      kind: "tool_call",
+      name: "Bash",
+      input: { command: "alook inbox pull --max 5" },
+    });
+    session.fire("runtime_event", {
+      kind: "tool_call",
+      name: "Bash",
+      input: { command: "  alook message send @gus hi" },
+    });
+    session.fire("runtime_event", {
+      kind: "tool_call",
+      name: "Bash",
+      input: { command: "alook" },
+    });
 
-    // No audit event should be emitted for a Bash tool_call — the
-    // credential-proxy sighting (Producer B) is the authoritative source
-    // for `alook <sub>` invocations. Non-audit-hook side effects (progress
-    // dispatch) are unaffected.
     const bashCalls = onBotAuditEvent.mock.calls.filter(
       ([, ev]) => (ev as { kind?: string })?.kind === "tool_call"
     );
     expect(bashCalls).toHaveLength(0);
+  });
+
+  it("EMITS `Bash` tool_call for non-alook shell work (rm, sed, git, echo)", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", {
+      kind: "tool_call",
+      name: "Bash",
+      input: { command: "rm -rf /tmp/xxx" },
+    });
+    session.fire("runtime_event", {
+      kind: "tool_call",
+      name: "Bash",
+      input: { command: "sed -i '' '/pattern/d' todo.md" },
+    });
+    session.fire("runtime_event", {
+      kind: "tool_call",
+      name: "Bash",
+      input: { command: "echo -n > todo.md" },
+    });
+
+    const bashCalls = onBotAuditEvent.mock.calls.filter(
+      ([, ev]) => (ev as { kind?: string })?.kind === "tool_call"
+    );
+    expect(bashCalls).toHaveLength(3);
+    expect((bashCalls[0]![1] as { payload: { command?: string } }).payload.command).toBe("rm -rf /tmp/xxx");
+    expect((bashCalls[1]![1] as { payload: { command?: string } }).payload.command).toBe(
+      "sed -i '' '/pattern/d' todo.md",
+    );
+    expect((bashCalls[2]![1] as { payload: { command?: string } }).payload.command).toBe("echo -n > todo.md");
+  });
+
+  it("truncates a long Bash command to <= 200 chars with an ellipsis", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    const long = "echo " + "x".repeat(400);
+    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: { command: long } });
+
+    const [call] = onBotAuditEvent.mock.calls.filter(
+      ([, ev]) => (ev as { kind?: string })?.kind === "tool_call",
+    );
+    const cmd = (call![1] as { payload: { command?: string } }).payload.command!;
+    expect([...cmd].length).toBeLessThanOrEqual(200);
+    expect(cmd.endsWith("…")).toBe(true);
+  });
+
+  it("emits a `Bash` tool_call without `command` when input has no command string", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: {} });
+
+    const [call] = onBotAuditEvent.mock.calls.filter(
+      ([, ev]) => (ev as { kind?: string })?.kind === "tool_call",
+    );
+    expect((call![1] as { payload: unknown }).payload).toEqual({ name: "Bash" });
+  });
+
+  it("emits non-Bash tool_calls (Edit, Write, MultiEdit, Grep, Glob) with name only", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    for (const name of ["Edit", "Write", "MultiEdit", "Grep", "Glob"]) {
+      session.fire("runtime_event", { kind: "tool_call", name, input: { path: "/x" } });
+    }
+
+    const names = onBotAuditEvent.mock.calls
+      .filter(([, ev]) => (ev as { kind?: string })?.kind === "tool_call")
+      .map(([, ev]) => (ev as { payload: { name: string } }).payload.name);
+    expect(names).toEqual(["Edit", "Write", "MultiEdit", "Grep", "Glob"]);
   });
 
   it("does NOT emit for non-audit event kinds (session_init, text, turn_end)", () => {
@@ -875,5 +968,59 @@ describe("AgentProcessManager — bot audit event emission", () => {
     session.fire("runtime_event", { kind: "turn_end" });
 
     expect(onBotAuditEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("extractBashCommandSummary", () => {
+  it("returns the command verbatim when it fits", () => {
+    expect(extractBashCommandSummary({ command: "rm -rf tmp" })).toBe("rm -rf tmp");
+  });
+
+  it("returns the first non-empty line", () => {
+    expect(extractBashCommandSummary({ command: "\n\n  git commit -m 'wip'  \nfoo" })).toBe(
+      "git commit -m 'wip'",
+    );
+  });
+
+  it("handles codex-shaped `input.item.command` string", () => {
+    expect(extractBashCommandSummary({ item: { command: "ls -la" } })).toBe("ls -la");
+  });
+
+  it("handles codex-shaped `input.item.command` array", () => {
+    expect(extractBashCommandSummary({ item: { command: ["bash", "-lc", "echo hi"] } })).toBe(
+      "bash -lc echo hi",
+    );
+  });
+
+  it("returns undefined when no command string is present", () => {
+    expect(extractBashCommandSummary({})).toBeUndefined();
+    expect(extractBashCommandSummary(null)).toBeUndefined();
+    expect(extractBashCommandSummary({ item: {} })).toBeUndefined();
+  });
+
+  it("truncates to <=200 chars with an ellipsis", () => {
+    const long = "echo " + "y".repeat(400);
+    const out = extractBashCommandSummary({ command: long })!;
+    expect([...out].length).toBeLessThanOrEqual(200);
+    expect(out.endsWith("…")).toBe(true);
+  });
+});
+
+describe("isAlookShellCommand", () => {
+  it("matches `alook <sub>` and bare `alook`", () => {
+    expect(isAlookShellCommand("alook")).toBe(true);
+    expect(isAlookShellCommand("alook inbox pull")).toBe(true);
+    expect(isAlookShellCommand("  alook message send")).toBe(true);
+  });
+
+  it("does NOT match commands that merely mention alook", () => {
+    expect(isAlookShellCommand("rm alook.log")).toBe(false);
+    expect(isAlookShellCommand("echo alook")).toBe(false);
+    expect(isAlookShellCommand("alookalike")).toBe(false);
+  });
+
+  it("returns false for missing input", () => {
+    expect(isAlookShellCommand(undefined)).toBe(false);
+    expect(isAlookShellCommand("")).toBe(false);
   });
 });

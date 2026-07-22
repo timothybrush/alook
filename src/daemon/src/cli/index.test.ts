@@ -117,10 +117,13 @@ describe("inbox pull", () => {
       }),
     );
     await main(["inbox", "pull"]);
-    const env = parseEnvelope(cap.lines()) as { success: { acked: number; messages: unknown[] } };
+    const env = parseEnvelope(cap.lines()) as {
+      success: { acked: number; messages: unknown[]; pulledAt: string };
+    };
     expect(ackSpy).toHaveBeenCalledOnce();
     expect(env.success.acked).toBe(1);
     expect(env.success.messages).toHaveLength(1);
+    expect(env.success.pulledAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/);
   });
 
   it("--no-ack skips advancing the waterline", async () => {

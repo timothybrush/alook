@@ -10,6 +10,19 @@ describe("parseAuditLogPayload", () => {
     const p = parseAuditLogPayload("tool_call", JSON.stringify({ name: "Read" }))
     expect(p).toEqual({ name: "Read" })
   })
+  it("parses a Bash tool_call payload with a `command` summary", () => {
+    const p = parseAuditLogPayload(
+      "tool_call",
+      JSON.stringify({ name: "Bash", command: "rm -rf tmp" }),
+    )
+    expect(p).toEqual({ name: "Bash", command: "rm -rf tmp" })
+  })
+  it("rejects a tool_call `command` longer than 240 chars", () => {
+    const long = "x".repeat(241)
+    expect(parseAuditLogPayload("tool_call", JSON.stringify({ name: "Bash", command: long }))).toBe(
+      null,
+    )
+  })
   it("parses a well-shaped thinking payload", () => {
     const p = parseAuditLogPayload(
       "thinking",

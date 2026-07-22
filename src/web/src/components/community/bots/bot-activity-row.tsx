@@ -77,8 +77,23 @@ function RowBody({
     )
   }
   if (event.kind === "tool_call") {
-    const p = event.payload as { name?: string } | null
-    return <span className="font-mono text-[13px] text-foreground">{p?.name ?? "?"}</span>
+    const p = event.payload as { name?: string; command?: string } | null
+    const name = p?.name ?? "?"
+    // Bash-family calls carry a short command summary. Show it inline so the
+    // owner can distinguish `rm -rf tmp` from `git commit`; without it, all
+    // shell activity would collapse into an indistinguishable pile of "Bash".
+    if (p?.command) {
+      return (
+        <div
+          title={p.command}
+          className="truncate font-mono text-[13px] text-foreground"
+        >
+          {name} <span className="text-muted-foreground/60">·</span>{" "}
+          <span className="text-muted-foreground">{p.command}</span>
+        </div>
+      )
+    }
+    return <span className="font-mono text-[13px] text-foreground">{name}</span>
   }
   const p = event.payload as { text?: string; truncated?: boolean; chars?: number } | null
   const text = p?.text ?? ""

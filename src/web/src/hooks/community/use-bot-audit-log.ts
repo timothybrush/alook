@@ -94,9 +94,26 @@ export function useBotAuditLog(botId: string | null | undefined) {
     )
   }, [botId, enabled, liveEvents, qc, query.data])
 
+  // Flatten pages and dedup by id. The WS-prepend effect above dedups fresh
+  // live events against ALL cached pages before writing them into page 1,
+  // so on paper duplicates can't leak into the flattened array. In practice
+  // they can — a prepended live event on page 1 whose id later appears in a
+  // just-fetched older page 2 (the cursor race, when the daemon's
+  // server-stamped `createdAt` is close to the page-1 boundary), or a page
+  // re-fetch that overlaps at the seam. Dedup here so React never sees two
+  // rows with the same key. Keep first occurrence (page order = newest-first).
   const events = useMemo(() => {
     if (!query.data) return [] as AuditEvent[]
-    return query.data.pages.flatMap((p) => p.events)
+    const seen = new Set<string>()
+    const out: AuditEvent[] = []
+    for (const p of query.data.pages) {
+      for (const e of p.events) {
+        if (seen.has(e.id)) continue
+        seen.add(e.id)
+        out.push(e)
+      }
+    }
+    return out
   }, [query.data])
 
   return {

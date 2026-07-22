@@ -1206,7 +1206,11 @@ export type CommunityAgentJoinServerRequest = z.infer<
 // discriminated branches.
 //
 // - cli_invocation → the daemon's credential proxy handled an alook subcommand
-// - tool_call      → the runtime invoked a non-Bash tool (Bash is suppressed)
+// - tool_call      → the runtime invoked a tool. `Bash` calls whose command
+//                    starts with `alook ` are suppressed here (the proxy
+//                    emits the authoritative `cli_invocation` for those); any
+//                    other `Bash` command lands here with an optional
+//                    `command` summary attached.
 // - thinking       → excerpted thinking text, truncated at 4096 UTF-8 bytes
 
 export const AuditLogCliInvocationPayloadSchema = z.object({
@@ -1214,6 +1218,8 @@ export const AuditLogCliInvocationPayloadSchema = z.object({
 });
 export const AuditLogToolCallPayloadSchema = z.object({
   name: z.string().min(1),
+  /** First non-empty line of `input.command` for Bash-family tool_calls, truncated. */
+  command: z.string().max(240).optional(),
 });
 export const AuditLogThinkingPayloadSchema = z.object({
   text: z.string(),

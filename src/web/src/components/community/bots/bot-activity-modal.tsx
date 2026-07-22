@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react"
+import { useLayoutEffect, useMemo, useRef, useEffect } from "react"
 import { AgentAvatar } from "@/components/avatar"
 import {
   Dialog,
@@ -22,12 +22,13 @@ import { BotActivityRow } from "./bot-activity-row"
  * pushing a route.
  *
  * Reads like a developer log tail:
- *   - oldest at the top, newest at the bottom;
+ *   - oldest at the top, newest at the bottom (sorted by (createdAt, id));
  *   - auto-scrolls to the tail on open and on new live rows (only when the
  *     user was already near the tail — a reader scrolled up to inspect
  *     history is not yanked back);
- *   - scroll UP to load the next (older) page; the scroll offset is
- *     preserved across the prepend so the row under the eye stays fixed.
+ *   - a "Load older" button at the top of the log fetches the next (older)
+ *     page on click; the scroll offset is preserved across the prepend so
+ *     the row under the eye stays fixed.
  *
  * Day dividers group rows chronologically without adding per-row chrome.
  */
@@ -53,9 +54,18 @@ export function BotActivityModal({
     isFetchingNextPage,
   } = useBotAuditLog(open ? bot?.id : null)
 
-  // The API returns newest-first (createdAt DESC). The UI wants
-  // oldest-first at the top so the log reads chronologically — flip once here.
-  const chronological = useMemo(() => [...events].reverse(), [events])
+  // Merged stream = paginated GET (DESC) + live WS ring (arrival-ordered).
+  // The two are NOT a single monotonic sequence: a live event can carry a
+  // `createdAt` that interleaves with an older page, and a paginated older
+  // page prepends rows whose timestamps sit before the live tail. Sort
+  // once by `(createdAt, id)` ascending so the UI is chronological
+  // end-to-end — reversing alone would leave that jumbled.
+  const chronological = useMemo(() => {
+    return [...events].sort((a, b) => {
+      if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    })
+  }, [events])
 
   // Chronologically-adjacent rows are grouped under a shared day header,
   // rendered when the day boundary changes. Cheap to compute at the render
@@ -63,23 +73,61 @@ export function BotActivityModal({
   const grouped = useMemo(() => groupByDay(chronological), [chronological])
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const bottomAnchorRef = useRef<HTMLDivElement | null>(null)
   const lastCountRef = useRef(0)
   const pendingOlderAnchorRef = useRef<number | null>(null)
+  const didInitialTailScrollRef = useRef(false)
 
-  useEffect(() => {
+  const onLoadOlder = () => {
+    if (!hasNextPage || isFetchingNextPage) return
     const el = scrollRef.current
-    if (!el || !hasNextPage) return
-    const onScroll = () => {
-      if (isFetchingNextPage) return
-      if (el.scrollTop < 80) {
-        pendingOlderAnchorRef.current = el.scrollHeight
-        void fetchNextPage()
-      }
-    }
-    el.addEventListener("scroll", onScroll)
-    return () => el.removeEventListener("scroll", onScroll)
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage])
+    if (el) pendingOlderAnchorRef.current = el.scrollHeight
+    void fetchNextPage()
+  }
 
+  // Reset the once-per-open latch when the modal closes or the target bot
+  // changes, so the next open lands on the newest event again.
+  useEffect(() => {
+    if (!open) {
+      lastCountRef.current = 0
+      pendingOlderAnchorRef.current = null
+      didInitialTailScrollRef.current = false
+    }
+  }, [open, bot?.id])
+
+  // Snap to the newest event on first paint of an open cycle. The Radix
+  // Dialog mounts DialogContent inside a portal with an entrance animation,
+  // so relying on a `useLayoutEffect` that only fires when
+  // `chronological.length` changes can race the portal's first layout — the
+  // scroll fires before the container has its final height. Anchor + rAF
+  // guarantees the browser has laid out at least once before we jump.
+  useEffect(() => {
+    if (!open) return
+    if (didInitialTailScrollRef.current) return
+    if (chronological.length === 0) return
+    const anchor = bottomAnchorRef.current
+    const el = scrollRef.current
+    if (!anchor || !el) return
+    didInitialTailScrollRef.current = true
+    lastCountRef.current = chronological.length
+    // Two rAFs: one to let the portal layout settle, one to jump after the
+    // rows are actually painted. `scrollIntoView({ block: 'end' })` is
+    // instant (no smooth-scroll) so the reader doesn't see it move.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        anchor.scrollIntoView({ block: "end" })
+        // Belt-and-braces: if the anchor was already in view before jumping,
+        // browsers sometimes no-op scrollIntoView — pin scrollTop explicitly.
+        el.scrollTop = el.scrollHeight
+      })
+    })
+  }, [open, chronological.length])
+
+  // After the initial tail scroll, handle two ongoing cases:
+  //   1. `pendingOlderAnchorRef` set — Load older prepended rows; preserve
+  //      the reader's visible offset by shifting scrollTop by the height delta.
+  //   2. A new live event arrived and the reader was already near the tail —
+  //      keep the tail pinned so streaming rows stay visible.
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -89,25 +137,24 @@ export function BotActivityModal({
     if (nextCount === 0) return
 
     if (pendingOlderAnchorRef.current !== null) {
-      const delta = el.scrollHeight - pendingOlderAnchorRef.current
-      el.scrollTop = el.scrollTop + delta
+      // Only consume the anchor when rows were actually prepended. An older-page
+      // fetch that settles with zero new rows leaves the pending anchor stale;
+      // applying its `delta` on a later live-event render would yank the reader
+      // to a scrollTop derived from an unrelated prior scrollHeight.
+      if (nextCount > prevCount) {
+        const delta = el.scrollHeight - pendingOlderAnchorRef.current
+        el.scrollTop = el.scrollTop + delta
+      }
       pendingOlderAnchorRef.current = null
       return
     }
 
+    if (!didInitialTailScrollRef.current) return
     const nearTail = el.scrollHeight - (el.scrollTop + el.clientHeight) < 80
-    const firstPaint = prevCount === 0
-    if (firstPaint || (nextCount > prevCount && nearTail)) {
+    if (nextCount > prevCount && nearTail) {
       el.scrollTop = el.scrollHeight
     }
   }, [chronological.length])
-
-  useEffect(() => {
-    if (!open) {
-      lastCountRef.current = 0
-      pendingOlderAnchorRef.current = null
-    }
-  }, [open, bot?.id])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -150,13 +197,16 @@ export function BotActivityModal({
             <EmptyState />
           ) : (
             <div className="pb-3">
-              {isFetchingNextPage ? (
-                <div className="py-2 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
-                  Loading older
-                </div>
-              ) : hasNextPage ? (
-                <div className="py-2 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground/40">
-                  Scroll up for older
+              {hasNextPage ? (
+                <div className="flex justify-center py-2">
+                  <button
+                    type="button"
+                    onClick={onLoadOlder}
+                    disabled={isFetchingNextPage}
+                    className="rounded-md px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isFetchingNextPage ? "Loading older" : "Load older"}
+                  </button>
                 </div>
               ) : (
                 <div className="py-2 text-center font-mono text-[10px] uppercase tracking-wider text-muted-foreground/40">
@@ -171,6 +221,7 @@ export function BotActivityModal({
                   ))}
                 </section>
               ))}
+              <div ref={bottomAnchorRef} aria-hidden />
             </div>
           )}
         </div>

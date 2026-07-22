@@ -16,6 +16,9 @@ import { join } from "path";
 import { acquireLock, releaseLock, lockPathFor } from "./filelock.js";
 import type { ContextTimelineEntry } from "./types.js";
 import type { Message } from "../server/contract.js";
+import { localISOString } from "../util/localTime.js";
+
+export { localISOString };
 
 /* ------------------------------------------------------------------ */
 /* Date / filename helpers (injectable clock)                          */
@@ -26,22 +29,6 @@ export function filenameForDate(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}.jsonl`;
-}
-
-/** Local-timezone ISO-8601 (with offset), e.g. 2026-06-25T17:11:05+08:00. */
-export function localISOString(now: Date): string {
-  const tzOffset = -now.getTimezoneOffset();
-  const sign = tzOffset >= 0 ? "+" : "-";
-  const abs = Math.abs(tzOffset);
-  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
-  const mm = String(abs % 60).padStart(2, "0");
-  const y = now.getFullYear();
-  const mo = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  const h = String(now.getHours()).padStart(2, "0");
-  const mi = String(now.getMinutes()).padStart(2, "0");
-  const s = String(now.getSeconds()).padStart(2, "0");
-  return `${y}-${mo}-${d}T${h}:${mi}:${s}${sign}${hh}:${mm}`;
 }
 
 /** Filenames for the last `maxDays` days, today first. */

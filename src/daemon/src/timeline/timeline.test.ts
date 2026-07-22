@@ -124,7 +124,7 @@ describe("findResumableSession", () => {
 });
 
 describe("localISOString", () => {
-  it("formats local time with a timezone offset", () => {
-    expect(localISOString(NOW)).toMatch(/^2026-06-25T12:00:00[+-]\d{2}:\d{2}$/);
+  it("formats local time with milliseconds and a timezone offset", () => {
+    expect(localISOString(NOW)).toMatch(/^2026-06-25T12:00:00\.000[+-]\d{2}:\d{2}$/);
   });
 });

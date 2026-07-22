@@ -61,6 +61,34 @@ export function deriveAuditLogSubcommand(pathname: string): string | null {
   return sub;
 }
 
+/**
+ * Implicit typing.stop on `alook message send`. Emits `agent_typing_stop` for
+ * every DM scope currently tracked for the agent, and DELIBERATELY leaves the
+ * `typingTracker` + heartbeat interval untouched. Semantics:
+ *   - Client pill drops immediately (nice UX when the reply just landed).
+ *   - If the agent is still working, the next scheduled `agent_typing` frame
+ *     (≤5s later, from the heartbeat) re-arms the pill.
+ *   - If `turn_end` follows shortly, the normal FSM path (`onAgentActivity` →
+ *     `emitTypingStopsAndClear`) clears the tracker and stops the heartbeat,
+ *     so the pill stays down.
+ * Guards a driver stream that never emits `turn_end` (a known Claude Code
+ * failure mode: `type:"result"` never lands, `turnActive` stays `true`
+ * forever, pill would dangle without this fallback).
+ */
+export function emitImplicitTypingStopOnSend(args: {
+  subcommand: string;
+  agentId: string;
+  typingTracker: Pick<TypingScopeTracker, "snapshot">;
+  reportAgentTypingStop?: (info: { agentId: string; dmConversationId: string }) => void;
+}): void {
+  if (args.subcommand !== "send") return;
+  const emit = args.reportAgentTypingStop;
+  if (!emit) return;
+  for (const dmConversationId of args.typingTracker.snapshot(args.agentId)) {
+    emit({ agentId: args.agentId, dmConversationId });
+  }
+}
+
 /** The minimal WebSocket the control channel needs (host injects a `ws` factory). */
 export type DaemonWebSocketFactory = (url: string, headers: Record<string, string>) => unknown;
 
@@ -153,7 +181,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
     agentId: string,
     event:
       | { kind: "cli_invocation"; payload: { subcommand: string } }
-      | { kind: "tool_call"; payload: { name: string } }
+      | { kind: "tool_call"; payload: { name: string; command?: string } }
       | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } },
     context?: { sessionId?: string | null; launchId?: string | null }
   ) => {
@@ -165,6 +193,10 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
       event,
     });
   };
+
+  // Declared above the proxy so `onProxyRequest`'s implicit-typing.stop hook
+  // can read it. Populated later by the AgentRouter on each `agent:wake`.
+  const typingTracker: TypingScopeTracker = createTypingScopeTracker();
 
   const broker = new CredentialBroker({ upstreamBaseUrl: opts.serverUrl });
   const proxy = await startCredentialProxy(broker, {
@@ -182,6 +214,13 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
         kind: "cli_invocation",
         payload: { subcommand },
       }, context);
+      // Typing pill fallback — see `emitImplicitTypingStopOnSend` docstring.
+      emitImplicitTypingStopOnSend({
+        subcommand,
+        agentId,
+        typingTracker,
+        reportAgentTypingStop: channelRef?.reportAgentTypingStop?.bind(channelRef),
+      });
     },
   });
 
@@ -190,11 +229,11 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
 
   // ── Bot typing indicator (DM-only) ─────────────────────────────────────
   //
-  // Shared in-memory tracker of per-agent DM conversation ids the daemon
-  // should be broadcasting "bot is typing…" for. Populated by the
-  // AgentRouter on each `agent:wake` (from `unreadNotice.dmConversationId`)
-  // and cleared on FSM transitions into `idle`/`stopping`.
-  const typingTracker: TypingScopeTracker = createTypingScopeTracker();
+  // `typingTracker` is declared above the proxy so `onProxyRequest`'s
+  // implicit-typing.stop hook can read it. Populated by the AgentRouter on
+  // each `agent:wake` (from `unreadNotice.dmConversationId`) and cleared on
+  // FSM transitions into `idle`/`stopping`.
+  //
   // Per-agent heartbeat interval handles. Only alive while an agent is in
   // a running-family state; recreated on each starting/running transition.
   const typingHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
@@ -507,6 +546,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
     sdkDriverDepsFor: (ctx) => createPiSdkDriverDeps(ctx),
     timeline,
     wakePromptFooter: "Use `alook inbox pull` to read your messages, then reply with `alook message send`.",
+    stampWakePromptTime: true,
     logger: log.child("manager"),
   });
   managerRef = manager;

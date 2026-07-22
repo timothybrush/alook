@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { EventEmitter } from "events";
-import { createDaemon, deriveAuditLogSubcommand } from "./createDaemon";
+import { createDaemon, deriveAuditLogSubcommand, emitImplicitTypingStopOnSend } from "./createDaemon";
 import type { Driver } from "../types";
 import type { Logger } from "../logger";
 
@@ -454,6 +454,61 @@ describe("deriveAuditLogSubcommand", () => {
   it("returns null for non-/api pathnames", () => {
     expect(deriveAuditLogSubcommand("/health")).toBe(null);
     expect(deriveAuditLogSubcommand("/")).toBe(null);
+  });
+});
+
+describe("emitImplicitTypingStopOnSend", () => {
+  const tracker = (scopes: Record<string, string[]>) => ({
+    snapshot: (agentId: string) => scopes[agentId] ?? [],
+  });
+
+  it("emits an agent_typing_stop for every active DM scope when the sub is `send`", () => {
+    const emitted: Array<{ agentId: string; dmConversationId: string }> = [];
+    emitImplicitTypingStopOnSend({
+      subcommand: "send",
+      agentId: "bot_1",
+      typingTracker: tracker({ bot_1: ["dm-a", "dm-b"] }),
+      reportAgentTypingStop: (info) => emitted.push(info),
+    });
+    expect(emitted).toEqual([
+      { agentId: "bot_1", dmConversationId: "dm-a" },
+      { agentId: "bot_1", dmConversationId: "dm-b" },
+    ]);
+  });
+
+  it("no-ops when the sub is not `send`", () => {
+    const emitted: unknown[] = [];
+    for (const sub of ["inboxPull", "read", "listServers", "attachmentUpload"]) {
+      emitImplicitTypingStopOnSend({
+        subcommand: sub,
+        agentId: "bot_1",
+        typingTracker: tracker({ bot_1: ["dm-a"] }),
+        reportAgentTypingStop: (info) => emitted.push(info),
+      });
+    }
+    expect(emitted).toEqual([]);
+  });
+
+  it("no-ops when the tracker has no scope for this agent (never woken via DM)", () => {
+    const emitted: unknown[] = [];
+    emitImplicitTypingStopOnSend({
+      subcommand: "send",
+      agentId: "bot_1",
+      typingTracker: tracker({}),
+      reportAgentTypingStop: (info) => emitted.push(info),
+    });
+    expect(emitted).toEqual([]);
+  });
+
+  it("no-ops when the channel isn't wired for typing (defensive)", () => {
+    expect(() =>
+      emitImplicitTypingStopOnSend({
+        subcommand: "send",
+        agentId: "bot_1",
+        typingTracker: tracker({ bot_1: ["dm-a"] }),
+        reportAgentTypingStop: undefined,
+      }),
+    ).not.toThrow();
   });
 });
 
