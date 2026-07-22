@@ -1182,6 +1182,14 @@ export type CommunityAgentListMembersRequest = z.infer<
   typeof CommunityAgentListMembersRequestSchema
 >;
 
+export const CommunityAgentChannelMemberRequestSchema = z.object({
+  channel: z.string().min(1),
+  agentId: z.string().optional(),
+});
+export type CommunityAgentChannelMemberRequest = z.infer<
+  typeof CommunityAgentChannelMemberRequestSchema
+>;
+
 export const CommunityAgentJoinServerRequestSchema = z.object({
   invite: z.string().min(1),
 });

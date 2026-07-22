@@ -10,7 +10,10 @@ import { makeRuntimeConfig } from "../runtimeConfig";
  * is called to assemble the full standing prompt — the daemon never passes raw
  * instruction text as the prompt.
  */
-function managerCapturingCtx(): { mgr: AgentProcessManager; ctxs: LaunchContext[] } {
+function managerCapturingCtx(): {
+  mgr: AgentProcessManager;
+  ctxs: LaunchContext[];
+} {
   const ctxs: LaunchContext[] = [];
   const mgr = new AgentProcessManager({
     driverFor: () =>
@@ -18,9 +21,14 @@ function managerCapturingCtx(): { mgr: AgentProcessManager; ctxs: LaunchContext[
         lifecycle: { kind: "persistent" },
         supportsStdinNotification: true,
         busyDeliveryMode: "gated",
-        buildSystemPrompt: (config: { description?: string }) => config.description ? `[system] ${config.description}` : "",
+        buildSystemPrompt: (config: { description?: string }) =>
+          config.description ? `[system] ${config.description}` : "",
       }) as never,
-    baseContextFor: (agentId) => ({ agentId, workingDirectory: "/tmp/x", config: {} }),
+    baseContextFor: (agentId) => ({
+      agentId,
+      workingDirectory: "/tmp/x",
+      config: {},
+    }),
     sessionFactory: ({ ctx }) => {
       ctxs.push(ctx);
       return {
@@ -46,7 +54,7 @@ describe("agent profile from server-downlinked RuntimeConfig", () => {
     mgr.register("agent_1", {
       runtimeConfig: makeRuntimeConfig({
         runtime: "mock",
-        agentName: "Cindy",
+        agentName: "Gus",
         instruction: "You are the onboarding assistant.",
       }),
     });
@@ -54,14 +62,22 @@ describe("agent profile from server-downlinked RuntimeConfig", () => {
 
     expect(ctxs).toHaveLength(1);
     // instruction flows to config.description → driver.buildSystemPrompt wraps it
-    expect(ctxs[0].standingPrompt).toBe("[system] You are the onboarding assistant.");
-    expect(ctxs[0].config.description).toBe("You are the onboarding assistant.");
-    expect(ctxs[0].config.runtimeConfig?.instruction).toBe("You are the onboarding assistant.");
+    expect(ctxs[0].standingPrompt).toBe(
+      "[system] You are the onboarding assistant.",
+    );
+    expect(ctxs[0].config.description).toBe(
+      "You are the onboarding assistant.",
+    );
+    expect(ctxs[0].config.runtimeConfig?.instruction).toBe(
+      "You are the onboarding assistant.",
+    );
   });
 
   it("returns empty standingPrompt when driver.buildSystemPrompt produces nothing", () => {
     const { mgr, ctxs } = managerCapturingCtx();
-    mgr.register("agent_2", { runtimeConfig: makeRuntimeConfig({ runtime: "mock", agentName: "Bot" }) });
+    mgr.register("agent_2", {
+      runtimeConfig: makeRuntimeConfig({ runtime: "mock", agentName: "Bot" }),
+    });
     mgr.deliver("agent_2", { seq: 1, text: "hi" });
     expect(ctxs[0].standingPrompt).toBe("[system] Bot");
     expect(ctxs[0].config.description).toBe("Bot");

@@ -349,13 +349,47 @@ export interface ListChannelsRequest {
  * channels by `ChannelRef`, never by raw id, so `ref` is the only locator an
  * agent needs (and is directly reusable as `--channel`/`--target`). `type`
  * is real per-row data (`"text"` vs `"forum"`), not the always-`"channel"`
- * `kind` the old shape hardcoded.
+ * `kind` the old shape hardcoded. `visibility` is derived from the channel's
+ * category — `"private"` iff the row's category has `private = 1`, else
+ * `"public"` — and lets the agent decide whether to enumerate members via
+ * `channel member` or fall back to `server member`.
  */
 export interface ChannelListItem {
   ref: ChannelRef;
   name: string;
   type: ChannelType;
+  visibility: "public" | "private";
 }
+
+/**
+ * A category as surfaced to the agent CLI (`channel list`). Wire-only,
+ * de-normalized on read — the agent never addresses a category by id, so
+ * category ids are NOT emitted. `private` mirrors `community_category.private`.
+ */
+export interface CategoryRef {
+  name: string;
+  private: boolean;
+}
+
+/**
+ * One category-bucketed group of channels in `channel list`'s grouped
+ * response. `category === null` is the uncategorized bucket (Discord-style,
+ * emitted first).
+ */
+export interface ChannelGroup {
+  category: CategoryRef | null;
+  channels: ChannelListItem[];
+}
+
+/**
+ * `alook channel member` result — a public channel/forum returns a hint
+ * pointing at `alook server member` (no roster enumeration); everything else
+ * (private channel, private forum, forum post, thread) returns the concrete
+ * roster.
+ */
+export type ChannelMemberResult =
+  | { visibility: "public"; hint: string }
+  | { visibility: "private"; members: ServerMember[] };
 
 /** One server member, as surfaced to the agent CLI (`server member`). */
 export interface ServerMember {
@@ -385,8 +419,16 @@ export interface ServerApi {
   /** Which servers/workspaces this agent participates in. */
   listServers(req: { agentId: AgentId }): Promise<{ servers: Server[] }>;
 
-  /** Channels (and DMs) visible to the agent, optionally scoped to one server. */
-  listChannels(req: ListChannelsRequest): Promise<{ channels: ChannelListItem[] }>;
+  /** Channels visible to the agent, grouped by category, optionally scoped to one server. */
+  listChannels(req: ListChannelsRequest): Promise<{ groups: ChannelGroup[] }>;
+
+  /**
+   * Members visible to the agent for a channel/thread ref. Public top-level
+   * channels/forums return a hint pointing at `alook server member`; private
+   * channels, private forums, forum posts, and threads (regardless of parent
+   * visibility) return the concrete roster.
+   */
+  channelMember(req: { agentId?: AgentId; channel: ChannelRef }): Promise<ChannelMemberResult>;
 
   /** Drain unread messages for this agent (across all its servers), flat JSONL. */
   inboxPull(req: InboxPullRequest): Promise<InboxPullResponse>;

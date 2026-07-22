@@ -265,8 +265,15 @@ async function cmdChannelList(opts: Record<string, unknown>): Promise<unknown> {
   const agent = agentId(opts);
   const server = opts.server as string;
   if (!server) throw new CliError("channel list: --server <id-or-name> is required");
-  const { channels } = await api.listChannels({ agentId: agent, server });
-  return { channels };
+  return await api.listChannels({ agentId: agent, server });
+}
+
+async function cmdChannelMember(opts: Record<string, unknown>): Promise<unknown> {
+  const api = getApi();
+  const agent = agentId(opts);
+  const channel = opts.channel as string;
+  if (!channel) throw new CliError("channel member: --channel <ref> is required");
+  return await api.channelMember({ agentId: agent, channel });
 }
 
 async function cmdChannelHistory(opts: Record<string, unknown>): Promise<unknown> {
@@ -443,6 +450,19 @@ function buildProgram(): Command {
       const localOpts = this.opts();
       const globalOpts = program.opts();
       const result = await cmdChannelHistory({ ...globalOpts, ...localOpts });
+      printEnvelope({ success: result });
+    });
+
+  channel
+    .command("member")
+    .description("fetch the followed members of a channel or thread; public channels return a hint pointing at `alook server member`")
+    .option("--channel <ref>", "channel/thread ref (path-style)")
+    .exitOverride()
+    .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+    .action(async function (this: Command) {
+      const localOpts = this.opts();
+      const globalOpts = program.opts();
+      const result = await cmdChannelMember({ ...globalOpts, ...localOpts });
       printEnvelope({ success: result });
     });
 

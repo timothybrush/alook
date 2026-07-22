@@ -64,7 +64,7 @@ export interface RuntimeConfig {
    */
   agentName?: string;
   /**
-   * The agent's global @mention handle, `@name#0042` (e.g. "@cindy#4821").
+   * The agent's global @mention handle, `@name#0042` (e.g. "@Gus#4821").
    * Every account in Alook — human or agent — has a name plus a 4-digit
    * discriminator; this is the `@`-prefixed pair, unique even when names
    * collide.
@@ -79,7 +79,9 @@ export interface RuntimeConfig {
 /* ------------------------------------------------------------------ */
 
 /** Build a fully-defaulted RuntimeConfig from a partial input. */
-export function makeRuntimeConfig(input: Partial<RuntimeConfig> & { runtime: string }): RuntimeConfig {
+export function makeRuntimeConfig(
+  input: Partial<RuntimeConfig> & { runtime: string },
+): RuntimeConfig {
   return {
     version: RUNTIME_CONFIG_VERSION,
     runtime: input.runtime,

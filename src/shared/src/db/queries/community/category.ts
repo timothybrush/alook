@@ -1,4 +1,4 @@
-import { eq, inArray, count } from "drizzle-orm";
+import { asc, eq, inArray, count } from "drizzle-orm";
 import { communityCategory, communityChannel } from "../../community-schema";
 import type { Database } from "../../index";
 
@@ -8,6 +8,24 @@ export async function getCategoriesByIds(db: Database, categoryIds: string[]) {
     .select()
     .from(communityCategory)
     .where(inArray(communityCategory.id, categoryIds));
+}
+
+/**
+ * Category dictionary for a server, ordered by position asc then id asc for
+ * stable deterministic ordering. Used by the agent `channel list` route to
+ * bucket channels into groups without a per-row join.
+ */
+export async function listCategoriesByServer(db: Database, serverId: string) {
+  return db
+    .select({
+      id: communityCategory.id,
+      name: communityCategory.name,
+      position: communityCategory.position,
+      private: communityCategory.private,
+    })
+    .from(communityCategory)
+    .where(eq(communityCategory.serverId, serverId))
+    .orderBy(asc(communityCategory.position), asc(communityCategory.id));
 }
 
 export async function createCategory(

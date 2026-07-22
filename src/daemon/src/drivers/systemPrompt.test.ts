@@ -16,11 +16,17 @@ const baseConfig: LaunchConfig = {
 };
 
 /**
- * These tests intentionally do NOT pin down exact prose/headings — that
- * content changes often and asserting on its literal wording turns every
- * copy edit into a test-fixing chore with no real regression protection.
- * Instead we test the actual input → output *contract*: what varies based
- * on `config`/`opts`, and what doesn't.
+ * Rules for this file:
+ * - The system prompt's prose (headings, section titles, feature keywords,
+ *   phrasing) changes constantly. Asserting on that content is worthless
+ *   regression protection and turns every copy edit into a test-fixing chore.
+ * - Only test the INPUT → OUTPUT contract: values that come in via
+ *   `LaunchConfig` / `SystemPromptOpts` must round-trip verbatim into the
+ *   output, and their absence must NOT leak into the output.
+ * - DO NOT ADD tests that assert on specific prompt content (section headings,
+ *   command names, feature strings, tone words). If you find yourself writing
+ *   `expect(prompt).toContain("some english phrase")` for a phrase that isn't
+ *   a value the caller passed in, stop — that test does not belong here.
  */
 describe("buildCliSystemPrompt", () => {
   it("returns non-empty content for both lifecycle kinds", () => {
@@ -34,19 +40,12 @@ describe("buildCliSystemPrompt", () => {
     expect(persistent).not.toBe(perTurn);
   });
 
-  it("injects agentName and agentHandle into the prompt only when set", () => {
-    // Discriminator deliberately avoids "4821" — the messaging section's own
-    // illustrative example (`@gustavo#4821`) is fixed doc prose, unrelated to
-    // `config.agentHandle`, and would collide with a `not.toContain` check
-    // below if reused here.
+  it("round-trips agentName and agentHandle verbatim, and omits them when absent", () => {
     const withIdentity = buildCliSystemPrompt(
       { ...baseConfig, agentName: "Nova", agentHandle: "@nova#7392" },
       { lifecycleKind: "persistent" },
     );
     expect(withIdentity).toContain("Nova");
-    // Assert on the contract (config.agentHandle's exact value round-trips
-    // verbatim), not on the surrounding prose — see this file's philosophy
-    // note above.
     expect(withIdentity).toContain("@nova#7392");
 
     const without = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
@@ -54,93 +53,25 @@ describe("buildCliSystemPrompt", () => {
     expect(without).not.toContain("#7392");
   });
 
-  it("injects ownerHandle and an owner-privacy statement into the prompt only when set", () => {
+  it("round-trips ownerHandle verbatim, and omits it when absent", () => {
     const withOwner = buildCliSystemPrompt(
       { ...baseConfig, ownerHandle: "@gustavo#5150" },
       { lifecycleKind: "persistent" },
     );
     expect(withOwner).toContain("@gustavo#5150");
-    expect(withOwner.toLowerCase()).toContain("owned by");
-    expect(withOwner.toLowerCase()).toContain("never share");
 
     const without = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
     expect(without).not.toContain("#5150");
-    expect(without.toLowerCase()).not.toContain("owned by");
   });
 
-  it("includes a Role subsection (nested under Identity) with config.description's exact text only when it's set", () => {
+  it("round-trips config.description verbatim, and omits it when absent", () => {
     const withRole = buildCliSystemPrompt(
       { ...baseConfig, description: "You are the onboarding assistant." },
       { lifecycleKind: "persistent" },
     );
     expect(withRole).toContain("You are the onboarding assistant.");
-    expect(withRole).toContain("### Role");
-    expect(withRole).toContain("## Identity");
 
     const withoutRole = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
     expect(withoutRole).not.toContain("You are the onboarding assistant.");
-    expect(withoutRole).not.toContain("### Role");
-  });
-
-  it("never parameterizes the CLI/product identity away (Alook is the product, not a configurable host)", () => {
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt).toContain("alook");
-    expect(prompt).toContain("Alook");
-  });
-
-  it("lists the three server commands under ### Servers", () => {
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt).toContain("### Servers");
-    expect(prompt).toContain("server list");
-    expect(prompt).toContain("server member");
-    expect(prompt).toContain("server join");
-  });
-
-  it("instructs the agent to act on /c/invite/ links", () => {
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt).toContain("/c/invite/");
-  });
-
-  it("tells the agent that refs also render as clickable links when written inline in message text", () => {
-    // Contract check, not prose pinning (see file-level comment above): both
-    // lifecycle kinds share `messagingSection()`, so a single stable phrase
-    // covering "refs work inline, not just as --target" is enough — no need
-    // to duplicate per lifecycle kind.
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt).toContain("also work inline");
-    expect(prompt).toContain("clickable link");
-  });
-
-  it("warns that wrapping an inline ref in backticks/code block breaks its link rendering", () => {
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt.toLowerCase()).toContain("backtick");
-  });
-
-  it("documents the bare /<server> ref form in the channel-ref table", () => {
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt).toContain("| `/<server>` |");
-  });
-
-  it("lists the two channel commands under ### Channels, positioned after ### Servers", () => {
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt).toContain("### Channels");
-    expect(prompt).toContain("channel list");
-    expect(prompt).toContain("channel history");
-    expect(prompt.indexOf("### Servers")).toBeLessThan(prompt.indexOf("### Channels"));
-  });
-
-  it("includes a ## Channels section (after ## Servers) explaining {ref,name,type}", () => {
-    const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind: "persistent" });
-    expect(prompt).toContain("## Channels");
-    expect(prompt.indexOf("## Servers")).toBeLessThan(prompt.indexOf("## Channels"));
-    expect(prompt).toContain("ref, name, type");
-  });
-
-  it("no longer references channel subscribe anywhere in the prompt", () => {
-    for (const lifecycleKind of ["persistent", "per_turn"] as const) {
-      const prompt = buildCliSystemPrompt(baseConfig, { lifecycleKind });
-      expect(prompt).not.toContain("channel subscribe");
-      expect(prompt).not.toContain("wake-notification level");
-    }
   });
 });

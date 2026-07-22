@@ -21,7 +21,8 @@ function parseEnvelope(lines: string[]): Record<string, unknown> {
 function stubApi(over: Partial<ServerApi> = {}): ServerApi {
   return {
     listServers: async () => ({ servers: [] }),
-    listChannels: async () => ({ channels: [] }),
+    listChannels: async () => ({ groups: [] }),
+    channelMember: async () => ({ visibility: "public", hint: "" }),
     inboxPull: async () => ({ messages: [], hasMore: false }),
     inboxSnapshot: async () => ({ rows: [], pendingChannels: 0, pendingMessages: 0 }),
     ack: async () => undefined,
@@ -271,11 +272,22 @@ describe("server join", () => {
 });
 
 describe("channel list", () => {
-  it("prints {success:{channels:[{ref,name,type},...]}} from a stubbed listChannels", async () => {
+  it("prints {success:{groups:[...]}} from a stubbed listChannels", async () => {
     const listChannelsSpy = vi.fn(async () => ({
-      channels: [
-        { ref: "/demo-workspace/general", name: "general", type: "text" as const },
-        { ref: "/demo-workspace/help", name: "help", type: "forum" as const },
+      groups: [
+        {
+          category: null,
+          channels: [
+            { ref: "/demo-workspace/announcements", name: "announcements", type: "text" as const, visibility: "public" as const },
+          ],
+        },
+        {
+          category: { name: "Ops", private: false },
+          channels: [
+            { ref: "/demo-workspace/general", name: "general", type: "text" as const, visibility: "public" as const },
+            { ref: "/demo-workspace/help", name: "help", type: "forum" as const, visibility: "public" as const },
+          ],
+        },
       ],
     }));
     setApiForTesting(stubApi({ listChannels: listChannelsSpy }));
@@ -283,9 +295,20 @@ describe("channel list", () => {
     const env = parseEnvelope(cap.lines());
     expect(env).toEqual({
       success: {
-        channels: [
-          { ref: "/demo-workspace/general", name: "general", type: "text" },
-          { ref: "/demo-workspace/help", name: "help", type: "forum" },
+        groups: [
+          {
+            category: null,
+            channels: [
+              { ref: "/demo-workspace/announcements", name: "announcements", type: "text", visibility: "public" },
+            ],
+          },
+          {
+            category: { name: "Ops", private: false },
+            channels: [
+              { ref: "/demo-workspace/general", name: "general", type: "text", visibility: "public" },
+              { ref: "/demo-workspace/help", name: "help", type: "forum", visibility: "public" },
+            ],
+          },
         ],
       },
     });
@@ -293,7 +316,7 @@ describe("channel list", () => {
   });
 
   it("--server accepts a name and passes it straight through unmodified", async () => {
-    const listChannelsSpy = vi.fn(async () => ({ channels: [] }));
+    const listChannelsSpy = vi.fn(async () => ({ groups: [] }));
     setApiForTesting(stubApi({ listChannels: listChannelsSpy }));
     await main(["channel", "list", "--server", "Design Studio"]);
     expect(listChannelsSpy).toHaveBeenCalledWith(expect.objectContaining({ server: "Design Studio" }));
@@ -327,7 +350,7 @@ describe("channel list", () => {
   });
 
   it("missing --server → CLI error, no API call made", async () => {
-    const listChannelsSpy = vi.fn(async () => ({ channels: [] }));
+    const listChannelsSpy = vi.fn(async () => ({ groups: [] }));
     setApiForTesting(stubApi({ listChannels: listChannelsSpy }));
     await main(["channel", "list"]);
     const env = parseEnvelope(cap.lines());
@@ -335,11 +358,85 @@ describe("channel list", () => {
     expect(listChannelsSpy).not.toHaveBeenCalled();
   });
 
-  it("empty channel list → {success:{channels:[]}}, not an error", async () => {
-    setApiForTesting(stubApi({ listChannels: async () => ({ channels: [] }) }));
+  it("empty channel list → {success:{groups:[]}}, not an error", async () => {
+    setApiForTesting(stubApi({ listChannels: async () => ({ groups: [] }) }));
     await main(["channel", "list", "--server", "srv_1"]);
     const env = parseEnvelope(cap.lines());
-    expect(env).toEqual({ success: { channels: [] } });
+    expect(env).toEqual({ success: { groups: [] } });
+  });
+});
+
+describe("channel member", () => {
+  it("prints {success:{visibility:'public',hint:'...'}} for a public channel", async () => {
+    const channelMemberSpy = vi.fn(async () => ({
+      visibility: "public" as const,
+      hint: "This channel is public. Use `alook server member --server demo` to list who can see it.",
+    }));
+    setApiForTesting(stubApi({ channelMember: channelMemberSpy }));
+    await main(["channel", "member", "--channel", "/demo/general"]);
+    const env = parseEnvelope(cap.lines());
+    expect(env).toEqual({
+      success: {
+        visibility: "public",
+        hint: "This channel is public. Use `alook server member --server demo` to list who can see it.",
+      },
+    });
+    expect(channelMemberSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "/demo/general" }),
+    );
+  });
+
+  it("prints {success:{visibility:'private',members:[...]}} for a private channel", async () => {
+    const channelMemberSpy = vi.fn(async () => ({
+      visibility: "private" as const,
+      members: [
+        { handle: "gustavo#4821", role: "owner", nickname: "Gus" },
+        { handle: "alice#0193", role: "member" },
+      ],
+    }));
+    setApiForTesting(stubApi({ channelMember: channelMemberSpy }));
+    await main(["channel", "member", "--channel", "/demo/leadership"]);
+    const env = parseEnvelope(cap.lines());
+    expect(env).toEqual({
+      success: {
+        visibility: "private",
+        members: [
+          { handle: "gustavo#4821", role: "owner", nickname: "Gus" },
+          { handle: "alice#0193", role: "member" },
+        ],
+      },
+    });
+  });
+
+  it("thread ref passes through unchanged", async () => {
+    const channelMemberSpy = vi.fn(async () => ({ visibility: "private" as const, members: [] }));
+    setApiForTesting(stubApi({ channelMember: channelMemberSpy }));
+    await main(["channel", "member", "--channel", "/demo/general/#12"]);
+    expect(channelMemberSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "/demo/general/#12" }),
+    );
+  });
+
+  it("missing --channel → CLI error, no API call made", async () => {
+    const channelMemberSpy = vi.fn(async () => ({ visibility: "public" as const, hint: "" }));
+    setApiForTesting(stubApi({ channelMember: channelMemberSpy }));
+    await main(["channel", "member"]);
+    const env = parseEnvelope(cap.lines());
+    expect(env).toEqual({ error: "channel member: --channel <ref> is required" });
+    expect(channelMemberSpy).not.toHaveBeenCalled();
+  });
+
+  it("DM ref rejected server-side surfaces as {error: <message>}", async () => {
+    setApiForTesting(
+      stubApi({
+        channelMember: async () => {
+          throw new Error("channel member is channel-scoped — DM refs are not supported");
+        },
+      }),
+    );
+    await main(["channel", "member", "--channel", "/.dm/peer#0042"]);
+    const env = parseEnvelope(cap.lines());
+    expect(env).toEqual({ error: "channel member is channel-scoped — DM refs are not supported" });
   });
 });
 

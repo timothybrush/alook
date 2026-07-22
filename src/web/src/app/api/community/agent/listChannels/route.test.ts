@@ -12,6 +12,7 @@ const mockGetBotBinding = vi.fn()
 const mockListUserServers = vi.fn()
 const mockResolveServerByNameForMember = vi.fn()
 const mockListChannelsForMember = vi.fn()
+const mockListCategoriesByServer = vi.fn()
 
 vi.mock("@alook/shared", async () => {
   const actual = await vi.importActual<typeof import("@alook/shared")>("@alook/shared")
@@ -27,6 +28,7 @@ vi.mock("@alook/shared", async () => {
         resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a),
       },
       communityChannel: { listChannelsForMember: (...a: unknown[]) => mockListChannelsForMember(...a) },
+      communityCategory: { listCategoriesByServer: (...a: unknown[]) => mockListCategoriesByServer(...a) },
     },
   }
 })
@@ -47,6 +49,7 @@ describe("POST /api/community/agent/listChannels", () => {
     mockFindActiveAgentRunnerKeyByBearer.mockResolvedValue({ userId: "owner_1", machineId: "m_1", agentId: "bot_1" })
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
+    mockListCategoriesByServer.mockResolvedValue([])
   })
 
   it("401 without Authorization", async () => {
@@ -61,13 +64,13 @@ describe("POST /api/community/agent/listChannels", () => {
     expect(res.status).toBe(400)
   })
 
-  it("empty body defaults to {} — lists channels across every server the bot is in, as {ref,name,type} items", async () => {
+  it("empty body defaults to {} — concatenates groups across every server the bot is in", async () => {
     mockListUserServers.mockResolvedValue([{ id: "srv_1", name: "studio" }, { id: "srv_2", name: "lounge" }])
     mockListChannelsForMember.mockImplementation((_db: unknown, serverId: string) =>
       Promise.resolve(
         serverId === "srv_1"
-          ? [{ id: "ch_1", serverId: "srv_1", name: "general", type: "text" }]
-          : [{ id: "ch_2", serverId: "srv_2", name: "random", type: "text" }]
+          ? [{ id: "ch_1", serverId: "srv_1", name: "general", type: "text", categoryId: null }]
+          : [{ id: "ch_2", serverId: "srv_2", name: "random", type: "text", categoryId: null }]
       )
     )
     const res = await POST(
@@ -78,9 +81,15 @@ describe("POST /api/community/agent/listChannels", () => {
     )
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
-      channels: [
-        { ref: "/studio/general", name: "general", type: "text" },
-        { ref: "/lounge/random", name: "random", type: "text" },
+      groups: [
+        {
+          category: null,
+          channels: [{ ref: "/studio/general", name: "general", type: "text", visibility: "public" }],
+        },
+        {
+          category: null,
+          channels: [{ ref: "/lounge/random", name: "random", type: "text", visibility: "public" }],
+        },
       ],
     })
     expect(mockListUserServers).toHaveBeenCalledTimes(1)
@@ -89,38 +98,70 @@ describe("POST /api/community/agent/listChannels", () => {
 
   it("--server <id>: resolves server-side and scopes to that one server", async () => {
     mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "studio" }])
-    mockListChannelsForMember.mockResolvedValue([{ id: "ch_1", serverId: "srv_1", name: "general", type: "text" }])
+    mockListChannelsForMember.mockResolvedValue([{ id: "ch_1", serverId: "srv_1", name: "general", type: "text", categoryId: null }])
     const res = await POST(req({ server: "srv_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     expect(mockListUserServers).not.toHaveBeenCalled()
     expect(mockResolveServerByNameForMember).toHaveBeenCalledWith(expect.anything(), "bot_1", "srv_1")
     expect(mockListChannelsForMember).toHaveBeenCalledWith(expect.anything(), "srv_1", "bot_1")
     expect(await res.json()).toEqual({
-      channels: [{ ref: "/studio/general", name: "general", type: "text" }],
+      groups: [
+        {
+          category: null,
+          channels: [{ ref: "/studio/general", name: "general", type: "text", visibility: "public" }],
+        },
+      ],
     })
   })
 
-  it("--server <name>: resolves to the matching server's id and builds refs from that server's name", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "Design Studio" }])
-    mockListChannelsForMember.mockResolvedValue([{ id: "ch_1", serverId: "srv_1", name: "help", type: "forum" }])
-    const res = await POST(req({ server: "Design Studio" }, { Authorization: "Bearer crk_abc" }))
+  it("channels bucketed into their category groups; null-category emitted first; empty groups dropped", async () => {
+    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "demo" }])
+    mockListChannelsForMember.mockResolvedValue([
+      { id: "ch_1", serverId: "srv_1", name: "announcements", type: "text", categoryId: null, position: 0 },
+      { id: "ch_2", serverId: "srv_1", name: "general", type: "text", categoryId: "cat_ops", position: 1 },
+      { id: "ch_3", serverId: "srv_1", name: "leadership", type: "text", categoryId: "cat_founders", position: 2 },
+    ])
+    mockListCategoriesByServer.mockResolvedValue([
+      { id: "cat_ops", name: "Ops", position: 0, private: 0 },
+      { id: "cat_founders", name: "Founders", position: 1, private: 1 },
+      { id: "cat_empty", name: "Empty", position: 2, private: 0 },
+    ])
+    const res = await POST(req({ server: "srv_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
-      channels: [{ ref: "/Design Studio/help", name: "help", type: "forum" }],
+      groups: [
+        {
+          category: null,
+          channels: [{ ref: "/demo/announcements", name: "announcements", type: "text", visibility: "public" }],
+        },
+        {
+          category: { name: "Ops", private: false },
+          channels: [{ ref: "/demo/general", name: "general", type: "text", visibility: "public" }],
+        },
+        {
+          category: { name: "Founders", private: true },
+          channels: [{ ref: "/demo/leadership", name: "leadership", type: "text", visibility: "private" }],
+        },
+      ],
     })
   })
 
   it("a forum-type channel is reported with type:'forum'; a plain channel with type:'text'", async () => {
     mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "studio" }])
     mockListChannelsForMember.mockResolvedValue([
-      { id: "ch_1", serverId: "srv_1", name: "general", type: "text" },
-      { id: "ch_2", serverId: "srv_1", name: "help", type: "forum" },
+      { id: "ch_1", serverId: "srv_1", name: "general", type: "text", categoryId: null },
+      { id: "ch_2", serverId: "srv_1", name: "help", type: "forum", categoryId: null },
     ])
     const res = await POST(req({ server: "srv_1" }, { Authorization: "Bearer crk_abc" }))
     expect(await res.json()).toEqual({
-      channels: [
-        { ref: "/studio/general", name: "general", type: "text" },
-        { ref: "/studio/help", name: "help", type: "forum" },
+      groups: [
+        {
+          category: null,
+          channels: [
+            { ref: "/studio/general", name: "general", type: "text", visibility: "public" },
+            { ref: "/studio/help", name: "help", type: "forum", visibility: "public" },
+          ],
+        },
       ],
     })
   })
@@ -145,11 +186,11 @@ describe("POST /api/community/agent/listChannels", () => {
     expect(mockListChannelsForMember).not.toHaveBeenCalled()
   })
 
-  it("empty channel list → { channels: [] }, not an error", async () => {
+  it("empty channel list → { groups: [] }, not an error", async () => {
     mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "studio" }])
     mockListChannelsForMember.mockResolvedValue([])
     const res = await POST(req({ server: "srv_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ channels: [] })
+    expect(await res.json()).toEqual({ groups: [] })
   })
 })

@@ -29,31 +29,31 @@
  */
 export type DriverLifecycle =
   | {
-    kind: "persistent";
-    /**
-     * How busy-time stdin writes are timed:
-     * - `direct`: write immediately (runtime tolerates injection any time).
-     * - `gated`: hold writes until a safe stream boundary (Claude — avoids
-     *   colliding with in-flight signed thinking blocks).
-     */
-    stdin: "direct" | "gated";
-    /** What to do if a message arrives while a turn is in flight. */
-    inFlightWake: "steer" | "queue";
-  }
+      kind: "persistent";
+      /**
+       * How busy-time stdin writes are timed:
+       * - `direct`: write immediately (runtime tolerates injection any time).
+       * - `gated`: hold writes until a safe stream boundary (Claude — avoids
+       *   colliding with in-flight signed thinking blocks).
+       */
+      stdin: "direct" | "gated";
+      /** What to do if a message arrives while a turn is in flight. */
+      inFlightWake: "steer" | "queue";
+    }
   | {
-    kind: "per_turn";
-    /**
-     * When to spawn:
-     * - `immediate`: spawn as soon as woken.
-     * - `defer_until_concrete_message`: don't spawn for bookkeeping-only
-     *   wakes (e.g. a system task event); wait for a real message.
-     */
-    start: "immediate" | "defer_until_concrete_message";
-    /** How the per-turn process ends. */
-    exit: "natural" | "terminate_on_turn_end";
-    /** A wake mid-turn either starts a new process or folds into the pending run. */
-    inFlightWake: "spawn_new" | "coalesce_into_pending";
-  };
+      kind: "per_turn";
+      /**
+       * When to spawn:
+       * - `immediate`: spawn as soon as woken.
+       * - `defer_until_concrete_message`: don't spawn for bookkeeping-only
+       *   wakes (e.g. a system task event); wait for a real message.
+       */
+      start: "immediate" | "defer_until_concrete_message";
+      /** How the per-turn process ends. */
+      exit: "natural" | "terminate_on_turn_end";
+      /** A wake mid-turn either starts a new process or folds into the pending run. */
+      inFlightWake: "spawn_new" | "coalesce_into_pending";
+    };
 
 /** Session recovery strategy across restarts. */
 export interface DriverSession {
@@ -104,17 +104,27 @@ export type ParsedEvent =
   | { kind: "compaction_finished" }
   | { kind: "review_started" }
   | { kind: "review_finished" }
-  | { kind: "internal_progress"; source?: string; itemType?: string; payloadBytes?: number }
-  | { kind: "runtime_diagnostic"; severity?: string; source?: string; message: string }
+  | {
+      kind: "internal_progress";
+      source?: string;
+      itemType?: string;
+      payloadBytes?: number;
+    }
+  | {
+      kind: "runtime_diagnostic";
+      severity?: string;
+      source?: string;
+      message: string;
+    }
   | { kind: "turn_end"; sessionId?: string }
   | { kind: "error"; message: string }
   | {
-    kind: "telemetry";
-    name: "token_usage" | "rate_limits";
-    source: string;
-    usageKind?: string;
-    attrs: Record<string, unknown>;
-  };
+      kind: "telemetry";
+      name: "token_usage" | "rate_limits";
+      source: string;
+      usageKind?: string;
+      attrs: Record<string, unknown>;
+    };
 
 /* ------------------------------------------------------------------ */
 /* Launch context & stdin encoding                                     */
@@ -179,10 +189,10 @@ export interface LaunchConfig {
   runtimeConfig?: import("./runtimeConfig").RuntimeConfig;
   description?: string;
   runtimeContext?: RuntimeContext;
-  /** Agent display name (e.g. "Cindy"). */
+  /** Agent display name (e.g. "Gus"). */
   agentName?: string;
   /**
-   * Agent's global @mention handle, `@name#0042` (e.g. "@cindy#4821"). Every
+   * Agent's global @mention handle, `@name#0042` (e.g. "@Gus#4821"). Every
    * account in Alook — human or agent — has a name plus a 4-digit
    * discriminator; this is the `@`-prefixed pair, unique even when names
    * collide.
@@ -235,7 +245,9 @@ export interface SdkDriverDeps {
   /** Build the per-launch spawn env (credential voucher, PATH link, …). */
   buildSpawnEnv: () => Promise<NodeJS.ProcessEnv>;
   /** Create the vendor SDK's session object. Shape is driver-specific. */
-  createAgentSession: (opts: Record<string, unknown>) => Promise<{ session: unknown; sessionId: string }>;
+  createAgentSession: (
+    opts: Record<string, unknown>,
+  ) => Promise<{ session: unknown; sessionId: string }>;
 }
 
 /**
@@ -275,7 +287,10 @@ export interface Driver {
    * to the returned session first, then sends the first turn, so no early
    * events are lost. Absent on child-process drivers.
    */
-  createSession?(ctx: LaunchContext, deps: SdkDriverDeps): Promise<import("./runtime/sdkRuntimeSession.js").SdkRuntimeSession>;
+  createSession?(
+    ctx: LaunchContext,
+    deps: SdkDriverDeps,
+  ): Promise<import("./runtime/sdkRuntimeSession.js").SdkRuntimeSession>;
 
   /** Parse one stdout line into zero or more normalized events. */
   parseLine(line: string): ParsedEvent[];
@@ -288,7 +303,11 @@ export interface Driver {
    * Returns the wire string (a `\n` is appended by the caller), or `null` if
    * this runtime cannot accept mid-session input.
    */
-  encodeStdinMessage(text: string, sessionId: string | null, opts?: EncodeOpts): string | null;
+  encodeStdinMessage(
+    text: string,
+    sessionId: string | null,
+    opts?: EncodeOpts,
+  ): string | null;
 
   /** Build the standing/system prompt for this runtime. */
   buildSystemPrompt(config: LaunchConfig, agentId?: string): string;

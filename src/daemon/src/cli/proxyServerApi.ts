@@ -34,7 +34,9 @@ import type {
   ReadRequest,
   ResolveRequest,
   ListChannelsRequest,
-  ChannelListItem,
+  ChannelGroup,
+  ChannelMemberResult,
+  ChannelRef,
   ServerMember,
   Page,
   Message,
@@ -181,7 +183,9 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
 
   return {
     listServers: (r: { agentId: AgentId }) => call<{ servers: Server[] }>("listServers", r),
-    listChannels: (r: ListChannelsRequest) => call<{ channels: ChannelListItem[] }>("listChannels", r),
+    listChannels: (r: ListChannelsRequest) => call<{ groups: ChannelGroup[] }>("listChannels", r),
+    channelMember: (r: { agentId?: AgentId; channel: ChannelRef }) =>
+      call<ChannelMemberResult>("channelMember", r),
     inboxPull: (r: InboxPullRequest) => call<InboxPullResponse>("inboxPull", r),
     inboxSnapshot: (r: { agentId: AgentId }) => call<InboxSnapshot>("inboxSnapshot", r),
     ack: (r: AckRequest) => call<void>("ack", r),
