@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { toastApiError } from "@/lib/api/client"
-import { isPresenceOnline } from "@alook/shared"
+import { isPresenceOnline, type CommunityMachineSummary } from "@alook/shared"
 import { machineName } from "@/lib/community/machine-name"
 import {
   Sheet,
@@ -36,6 +36,38 @@ function randomBotName(): string {
   return uniqueNamesGenerator({ dictionaries: [names], length: 1, style: "capital" })
 }
 
+type NormalizedRuntime = { id: string; unhealthy: boolean }
+
+/**
+ * Normalize a machine's runtimes into `{ id, unhealthy }`, healthy-first.
+ *
+ * A legacy CommunityMachineSummary cached client-side may still be missing
+ * availableRuntimes, or a runtime entry may still be a bare string
+ * (pre-health-status shape). Normalize both instead of hiding unhealthy
+ * runtimes outright, so the radio card can show *why* an option is disabled.
+ * Available runtimes sort first — the ones you can actually pick should never
+ * be buried below ones you can't.
+ */
+export function normalizeRuntimes(machine: CommunityMachineSummary | undefined): NormalizedRuntime[] {
+  const rt = machine?.availableRuntimes ?? []
+  const normalized = rt.map((r) =>
+    typeof r === "string"
+      ? { id: r, unhealthy: false }
+      : { id: (r as { id: string }).id, unhealthy: (r as { status?: string }).status === "unhealthy" },
+  )
+  return normalized.sort((a, b) => Number(a.unhealthy) - Number(b.unhealthy))
+}
+
+/** First healthy (selectable) runtime id, or "" if none. */
+export function firstHealthyRuntimeId(options: NormalizedRuntime[]): string {
+  return options.find((o) => !o.unhealthy)?.id ?? ""
+}
+
+/** First online (selectable) machine id, or "" if none. */
+export function firstOnlineMachineId(machines: CommunityMachineSummary[]): string {
+  return machines.find((m) => isPresenceOnline(m.status))?.id ?? ""
+}
+
 export function CreateBotSheet({
   open,
   onOpenChange,
@@ -57,22 +89,7 @@ export function CreateBotSheet({
   })
 
   const selectedMachine = machines.find((m) => m.id === machineId)
-  const runtimeOptions = useMemo(() => {
-    // Nullish guard — a legacy CommunityMachineSummary cached client-side may
-    // still be missing availableRuntimes, or a runtime entry may still be a
-    // bare string (pre-health-status shape). Normalize both into
-    // `{ id, unhealthy }` instead of hiding unhealthy runtimes outright, so
-    // the radio card can show *why* an option is disabled.
-    const rt = selectedMachine?.availableRuntimes ?? []
-    const normalized = rt.map((r) =>
-      typeof r === "string"
-        ? { id: r, unhealthy: false }
-        : { id: (r as { id: string }).id, unhealthy: (r as { status?: string }).status === "unhealthy" },
-    )
-    // Available runtimes sort first — the ones you can actually pick should
-    // never be buried below ones you can't.
-    return normalized.sort((a, b) => Number(a.unhealthy) - Number(b.unhealthy))
-  }, [selectedMachine])
+  const runtimeOptions = useMemo(() => normalizeRuntimes(selectedMachine), [selectedMachine])
 
   // Randomize name + avatar on client mount (not during SSR — Math.random would
   // hydration-mismatch). Fires once per sheet open.
@@ -92,6 +109,23 @@ export function CreateBotSheet({
     setFieldErrors({})
   }, [open])
 
+  // Auto-select sensible defaults once machine data arrives. useMachines()
+  // loads async, so `machines` is often [] on the open transition and
+  // populates a tick later — this reacts to that. Each write is guarded on the
+  // target being "" so a presence refetch never overwrites a made choice.
+  useEffect(() => {
+    if (!open) return
+    if (machineId === "") {
+      const next = firstOnlineMachineId(machines)
+      if (next) setMachineId(next)
+      return
+    }
+    if (runtime === "") {
+      const next = firstHealthyRuntimeId(runtimeOptions)
+      if (next) setRuntime(next)
+    }
+  }, [open, machines, runtimeOptions, machineId, runtime])
+
   function shuffleName() {
     setName(randomBotName())
     setFieldErrors((prev) => ({ ...prev, name: undefined }))
@@ -106,7 +140,8 @@ export function CreateBotSheet({
 
   function selectMachine(id: string) {
     setMachineId(id)
-    setRuntime("")
+    const nextMachine = machines.find((m) => m.id === id)
+    setRuntime(firstHealthyRuntimeId(normalizeRuntimes(nextMachine)))
     setFieldErrors((prev) => ({ ...prev, machineId: undefined }))
   }
 
