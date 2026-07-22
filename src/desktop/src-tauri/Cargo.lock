@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "alook-desktop"
-version = "0.0.157"
+version = "0.0.158"
 dependencies = [
  "base64 0.22.1",
  "objc2",
