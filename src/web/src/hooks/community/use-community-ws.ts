@@ -1111,7 +1111,7 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
  * `ch:` prefix keeps the two id spaces from colliding. Threads collapse to
  * `ch:<channelId>` on the client (no sender emits `threadId`).
  */
-export function typingScopeKey(e: { dmConversationId?: string; channelId?: string }): string {
+function typingScopeKey(e: { dmConversationId?: string; channelId?: string }): string {
   return e.dmConversationId ? `dm:${e.dmConversationId}` : `ch:${e.channelId}`
 }
 
