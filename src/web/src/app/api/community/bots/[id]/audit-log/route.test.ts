@@ -111,6 +111,26 @@ describe("GET /api/community/bots/[id]/audit-log", () => {
     expect(body.nextCursor).toBe(null)
   })
 
+  it("round-trips a canonical tool_call row: name is lowercased, target survives", async () => {
+    mockGetBotOwnedBy.mockResolvedValue({ id: "b1" })
+    mockListBotActivityEvents.mockResolvedValue([
+      {
+        id: "bae_1",
+        botId: "b1",
+        sessionId: null,
+        launchId: null,
+        kind: "tool_call",
+        payload: JSON.stringify({ name: "read", target: "AGENTS.md" }),
+        createdAt: "2025-01-01T00:00:00.000Z",
+      },
+    ])
+    const res = await GET(req(), ctx("b1"))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { events: Array<{ payload: { name: string; target?: string } }> }
+    expect(body.events[0]!.payload.name).toBe("read")
+    expect(body.events[0]!.payload.target).toBe("AGENTS.md")
+  })
+
   it("returns a composite nextCursor when the page fills to the limit", async () => {
     mockGetBotOwnedBy.mockResolvedValue({ id: "b1" })
     const rows = Array.from({ length: 2 }).map((_, i) => ({

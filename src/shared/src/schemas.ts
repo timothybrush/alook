@@ -1206,11 +1206,24 @@ export type CommunityAgentJoinServerRequest = z.infer<
 // discriminated branches.
 //
 // - cli_invocation → the daemon's credential proxy handled an alook subcommand
-// - tool_call      → the runtime invoked a tool. `Bash` calls whose command
-//                    starts with `alook ` are suppressed here (the proxy
-//                    emits the authoritative `cli_invocation` for those); any
-//                    other `Bash` command lands here with an optional
-//                    `command` summary attached.
+// - tool_call      → the runtime invoked a tool. `name` is a canonical
+//                    lowercase tag (`bash`, `read`, `edit`, `write`, `grep`,
+//                    `glob`, `find`, `ls`, `notebook_edit`, `web_search`,
+//                    `web_fetch`, `todo_write`, `mcp_*`, `collab_tool_call`,
+//                    …) — case-collapsed on the daemon write side so a mixed
+//                    stream of `Bash` and `bash` reads as one shape.
+//                    Bash-family calls whose resolved command is
+//                    `alook <sub>` are suppressed here (the credential proxy
+//                    emits the authoritative `cli_invocation` for those);
+//                    every other tool call lands here with an optional
+//                    `target` — the file path, shell command, search
+//                    pattern, url, or MCP tool name that the call acts on.
+//                    Historical rows written before this convention keep
+//                    whatever `name` they were persisted with; unknown keys
+//                    (e.g. the pre-shipping `command` field from a local
+//                    dev branch) are silently dropped by Zod's default
+//                    strip-unknown behavior, so a legacy `{name, command}`
+//                    row parses as `{name}` — rendered as name-only.
 // - thinking       → excerpted thinking text, truncated at 4096 UTF-8 bytes
 
 export const AuditLogCliInvocationPayloadSchema = z.object({
@@ -1218,8 +1231,17 @@ export const AuditLogCliInvocationPayloadSchema = z.object({
 });
 export const AuditLogToolCallPayloadSchema = z.object({
   name: z.string().min(1),
-  /** First non-empty line of `input.command` for Bash-family tool_calls, truncated. */
-  command: z.string().max(240).optional(),
+  /**
+   * Short human-facing summary of what the tool acted on — file path for
+   * file-target tools, first non-empty line of the shell command for
+   * `bash`, `pattern` for search tools, `url` / `query` / MCP name for
+   * fallthrough tools. Absent for tools that have no meaningful entity
+   * (e.g. `todo_write`) or when the runtime emitted an input we couldn't
+   * pick a field from. Capped at 240 UTF-16 code units to match the wire
+   * budget; the daemon truncates to 200 code units + `…` before sending
+   * so future producers have headroom.
+   */
+  target: z.string().max(240).optional(),
 });
 export const AuditLogThinkingPayloadSchema = z.object({
   text: z.string(),

@@ -251,7 +251,7 @@ describe("WsControlChannel — bot audit event reports", () => {
       ch.reportBotAuditEvent({
         type: "bot_audit_event",
         agentId: "bot_1",
-        event: { kind: "tool_call", payload: { name: "Read" } },
+        event: { kind: "tool_call", payload: { name: "read", target: "AGENTS.md" } },
       })
     ).resolves.toBeUndefined();
     expect(sockets[0].frames().some((f) => f.type === "bot_audit_event")).toBe(false);

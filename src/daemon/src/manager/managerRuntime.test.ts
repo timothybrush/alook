@@ -2,8 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import {
   AgentProcessManager,
   truncateThinking,
-  extractBashCommandSummary,
-  isAlookShellCommand,
+  canonicalToolName,
+  extractToolAudit,
+  isAlookShellInvocation,
+  truncateTargetToCodeUnits,
   type ManagedSession,
   type SessionFactory,
 } from "./managerRuntime.js";
@@ -781,7 +783,6 @@ describe("AgentProcessManager — bot audit event emission", () => {
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
 
-    // A reasoning block buffers until a non-thinking event flushes it.
     session.fire("runtime_event", { kind: "thinking", text: "think about it" });
     expect(onBotAuditEvent).not.toHaveBeenCalled();
     session.fire("runtime_event", { kind: "turn_end" });
@@ -805,13 +806,11 @@ describe("AgentProcessManager — bot audit event emission", () => {
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
 
-    // Delta-streaming drivers (codex/pi) emit token fragments + empty markers.
     session.fire("runtime_event", { kind: "thinking", text: "" });
     session.fire("runtime_event", { kind: "thinking", text: "let me " });
     session.fire("runtime_event", { kind: "thinking", text: "count" });
     session.fire("runtime_event", { kind: "thinking", text: "" });
-    // Flush on the following tool_call.
-    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: {} });
+    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: { file_path: "/x" } });
 
     const thinkingCalls = onBotAuditEvent.mock.calls.filter(
       ([, ev]) => (ev as { kind?: string })?.kind === "thinking"
@@ -825,16 +824,16 @@ describe("AgentProcessManager — bot audit event emission", () => {
     );
   });
 
-  it("emits `tool_call` with name only (strips input)", () => {
+  it("emits `tool_call` with canonical name + resolved target", () => {
     const onBotAuditEvent = vi.fn();
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
 
-    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: { path: "/etc/passwd" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: { file_path: "/etc/passwd" } });
 
     expect(onBotAuditEvent).toHaveBeenCalledWith(
       "a1",
-      { kind: "tool_call", payload: { name: "Read" } },
+      { kind: "tool_call", payload: { name: "read", target: "/etc/passwd" } },
       expect.objectContaining({ sessionId: null, launchId: null })
     );
   });
@@ -844,18 +843,17 @@ describe("AgentProcessManager — bot audit event emission", () => {
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
 
-    // Learn the runtime session id from the handshake.
     session.fire("runtime_event", { kind: "session_init", sessionId: "s_abc" });
-    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: {} });
+    session.fire("runtime_event", { kind: "tool_call", name: "Read", input: { file_path: "/x" } });
 
     expect(onBotAuditEvent).toHaveBeenCalledWith(
       "a1",
-      { kind: "tool_call", payload: { name: "Read" } },
+      { kind: "tool_call", payload: { name: "read", target: "/x" } },
       { sessionId: "s_abc", launchId: null }
     );
   });
 
-  it("DROPS `Bash` tool_call whose command is `alook <sub>` (proxy is authoritative)", () => {
+  it("DROPS bash-family tool_call whose command is `alook <sub>` for BOTH capitalized and lowercase names", () => {
     const onBotAuditEvent = vi.fn();
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
@@ -867,13 +865,18 @@ describe("AgentProcessManager — bot audit event emission", () => {
     });
     session.fire("runtime_event", {
       kind: "tool_call",
-      name: "Bash",
+      name: "bash",
       input: { command: "  alook message send @gus hi" },
     });
     session.fire("runtime_event", {
       kind: "tool_call",
       name: "Bash",
       input: { command: "alook" },
+    });
+    session.fire("runtime_event", {
+      kind: "tool_call",
+      name: "shell",
+      input: { command: "alook inbox pull" },
     });
 
     const bashCalls = onBotAuditEvent.mock.calls.filter(
@@ -882,39 +885,28 @@ describe("AgentProcessManager — bot audit event emission", () => {
     expect(bashCalls).toHaveLength(0);
   });
 
-  it("EMITS `Bash` tool_call for non-alook shell work (rm, sed, git, echo)", () => {
+  it("EMITS bash tool_call for non-alook shell work with canonical `bash` name + target", () => {
     const onBotAuditEvent = vi.fn();
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
 
-    session.fire("runtime_event", {
-      kind: "tool_call",
-      name: "Bash",
-      input: { command: "rm -rf /tmp/xxx" },
-    });
-    session.fire("runtime_event", {
-      kind: "tool_call",
-      name: "Bash",
-      input: { command: "sed -i '' '/pattern/d' todo.md" },
-    });
-    session.fire("runtime_event", {
-      kind: "tool_call",
-      name: "Bash",
-      input: { command: "echo -n > todo.md" },
-    });
+    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: { command: "rm -rf /tmp/xxx" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "bash", input: { command: "sed -i '' '/pattern/d' todo.md" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: { command: "echo -n > todo.md" } });
 
     const bashCalls = onBotAuditEvent.mock.calls.filter(
       ([, ev]) => (ev as { kind?: string })?.kind === "tool_call"
     );
     expect(bashCalls).toHaveLength(3);
-    expect((bashCalls[0]![1] as { payload: { command?: string } }).payload.command).toBe("rm -rf /tmp/xxx");
-    expect((bashCalls[1]![1] as { payload: { command?: string } }).payload.command).toBe(
-      "sed -i '' '/pattern/d' todo.md",
-    );
-    expect((bashCalls[2]![1] as { payload: { command?: string } }).payload.command).toBe("echo -n > todo.md");
+    for (const call of bashCalls) {
+      expect((call![1] as { payload: { name: string } }).payload.name).toBe("bash");
+    }
+    expect((bashCalls[0]![1] as { payload: { target?: string } }).payload.target).toBe("rm -rf /tmp/xxx");
+    expect((bashCalls[1]![1] as { payload: { target?: string } }).payload.target).toBe("sed -i '' '/pattern/d' todo.md");
+    expect((bashCalls[2]![1] as { payload: { target?: string } }).payload.target).toBe("echo -n > todo.md");
   });
 
-  it("truncates a long Bash command to <= 200 chars with an ellipsis", () => {
+  it("truncates a long Bash target to <= 200 chars with an ellipsis", () => {
     const onBotAuditEvent = vi.fn();
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
@@ -925,12 +917,12 @@ describe("AgentProcessManager — bot audit event emission", () => {
     const [call] = onBotAuditEvent.mock.calls.filter(
       ([, ev]) => (ev as { kind?: string })?.kind === "tool_call",
     );
-    const cmd = (call![1] as { payload: { command?: string } }).payload.command!;
-    expect([...cmd].length).toBeLessThanOrEqual(200);
-    expect(cmd.endsWith("…")).toBe(true);
+    const target = (call![1] as { payload: { target?: string } }).payload.target!;
+    expect(target.length).toBeLessThanOrEqual(200);
+    expect(target.endsWith("…")).toBe(true);
   });
 
-  it("emits a `Bash` tool_call without `command` when input has no command string", () => {
+  it("emits bash tool_call without `target` when input has no command string", () => {
     const onBotAuditEvent = vi.fn();
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
@@ -940,22 +932,30 @@ describe("AgentProcessManager — bot audit event emission", () => {
     const [call] = onBotAuditEvent.mock.calls.filter(
       ([, ev]) => (ev as { kind?: string })?.kind === "tool_call",
     );
-    expect((call![1] as { payload: unknown }).payload).toEqual({ name: "Bash" });
+    expect((call![1] as { payload: unknown }).payload).toEqual({ name: "bash" });
   });
 
-  it("emits non-Bash tool_calls (Edit, Write, MultiEdit, Grep, Glob) with name only", () => {
+  it("canonicalizes tool names on tool_calls (Edit → edit, MultiEdit → edit, Grep → grep, Glob → glob) with resolved target", () => {
     const onBotAuditEvent = vi.fn();
     const { mgr, session } = makeManager({ onBotAuditEvent });
     mgr.deliver("a1", { seq: 1, text: "hello" });
 
-    for (const name of ["Edit", "Write", "MultiEdit", "Grep", "Glob"]) {
-      session.fire("runtime_event", { kind: "tool_call", name, input: { path: "/x" } });
-    }
+    session.fire("runtime_event", { kind: "tool_call", name: "Edit", input: { file_path: "/x" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "Write", input: { file_path: "/y" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "MultiEdit", input: { file_path: "/z" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "Grep", input: { pattern: "TODO" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "Glob", input: { pattern: "**/*.ts" } });
 
-    const names = onBotAuditEvent.mock.calls
+    const payloads = onBotAuditEvent.mock.calls
       .filter(([, ev]) => (ev as { kind?: string })?.kind === "tool_call")
-      .map(([, ev]) => (ev as { payload: { name: string } }).payload.name);
-    expect(names).toEqual(["Edit", "Write", "MultiEdit", "Grep", "Glob"]);
+      .map(([, ev]) => (ev as { payload: { name: string; target?: string } }).payload);
+    expect(payloads).toEqual([
+      { name: "edit", target: "/x" },
+      { name: "write", target: "/y" },
+      { name: "edit", target: "/z" },
+      { name: "grep", target: "TODO" },
+      { name: "glob", target: "**/*.ts" },
+    ]);
   });
 
   it("does NOT emit for non-audit event kinds (session_init, text, turn_end)", () => {
@@ -969,58 +969,388 @@ describe("AgentProcessManager — bot audit event emission", () => {
 
     expect(onBotAuditEvent).not.toHaveBeenCalled();
   });
+
+  it("payload never contains extra fields beyond {name, target?} (T11)", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", { kind: "tool_call", name: "Edit", input: { file_path: "/x", oldText: "a", newText: "b", edits: [] } });
+    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: { command: "rm x", stdin: "secret" } });
+
+    const payloads = onBotAuditEvent.mock.calls
+      .filter(([, ev]) => (ev as { kind?: string })?.kind === "tool_call")
+      .map(([, ev]) => (ev as { payload: Record<string, unknown> }).payload);
+    for (const p of payloads) {
+      const keys = Object.keys(p);
+      for (const k of keys) expect(["name", "target"]).toContain(k);
+    }
+  });
 });
 
-describe("extractBashCommandSummary", () => {
-  it("returns the command verbatim when it fits", () => {
-    expect(extractBashCommandSummary({ command: "rm -rf tmp" })).toBe("rm -rf tmp");
+describe("canonicalToolName", () => {
+  it("canonicalizes bash/shell to bash (case-insensitive)", () => {
+    expect(canonicalToolName("Bash")).toBe("bash");
+    expect(canonicalToolName("bash")).toBe("bash");
+    expect(canonicalToolName("BASH")).toBe("bash");
+    expect(canonicalToolName("shell")).toBe("bash");
   });
-
-  it("returns the first non-empty line", () => {
-    expect(extractBashCommandSummary({ command: "\n\n  git commit -m 'wip'  \nfoo" })).toBe(
-      "git commit -m 'wip'",
-    );
+  it("canonicalizes file-target tools", () => {
+    expect(canonicalToolName("Read")).toBe("read");
+    expect(canonicalToolName("read")).toBe("read");
+    expect(canonicalToolName("Edit")).toBe("edit");
+    expect(canonicalToolName("MultiEdit")).toBe("edit");
+    expect(canonicalToolName("file_change")).toBe("edit");
+    expect(canonicalToolName("Write")).toBe("write");
+    expect(canonicalToolName("LS")).toBe("ls");
+    expect(canonicalToolName("NotebookEdit")).toBe("notebook_edit");
   });
-
-  it("handles codex-shaped `input.item.command` string", () => {
-    expect(extractBashCommandSummary({ item: { command: "ls -la" } })).toBe("ls -la");
+  it("canonicalizes pattern tools", () => {
+    expect(canonicalToolName("Grep")).toBe("grep");
+    expect(canonicalToolName("Glob")).toBe("glob");
+    expect(canonicalToolName("Find")).toBe("find");
   });
-
-  it("handles codex-shaped `input.item.command` array", () => {
-    expect(extractBashCommandSummary({ item: { command: ["bash", "-lc", "echo hi"] } })).toBe(
-      "bash -lc echo hi",
-    );
+  it("canonicalizes web + todo tools", () => {
+    expect(canonicalToolName("WebSearch")).toBe("web_search");
+    expect(canonicalToolName("web_search")).toBe("web_search");
+    expect(canonicalToolName("WebFetch")).toBe("web_fetch");
+    expect(canonicalToolName("TodoWrite")).toBe("todo_write");
   });
-
-  it("returns undefined when no command string is present", () => {
-    expect(extractBashCommandSummary({})).toBeUndefined();
-    expect(extractBashCommandSummary(null)).toBeUndefined();
-    expect(extractBashCommandSummary({ item: {} })).toBeUndefined();
+  it("falls through to lowercase for unknown names", () => {
+    expect(canonicalToolName("mcp_search")).toBe("mcp_search");
+    expect(canonicalToolName("Frobnicate")).toBe("frobnicate");
+    expect(canonicalToolName("collab_tool_call")).toBe("collab_tool_call");
   });
+});
 
-  it("truncates to <=200 chars with an ellipsis", () => {
-    const long = "echo " + "y".repeat(400);
-    const out = extractBashCommandSummary({ command: long })!;
-    expect([...out].length).toBeLessThanOrEqual(200);
+describe("extractToolAudit — shell class", () => {
+  it("Anthropic Bash + non-alook command yields {name: 'bash', target, suppressed: false}", () => {
+    expect(extractToolAudit("Bash", { command: "rm -rf tmp" })).toEqual({
+      name: "bash",
+      target: "rm -rf tmp",
+      suppressed: false,
+    });
+  });
+  it("pi lowercase bash + non-alook command yields the same shape", () => {
+    expect(extractToolAudit("bash", { command: "sed -i '' '/x/d' todo.md" })).toEqual({
+      name: "bash",
+      target: "sed -i '' '/x/d' todo.md",
+      suppressed: false,
+    });
+  });
+  it("suppresses alook invocations for capitalized Bash", () => {
+    expect(extractToolAudit("Bash", { command: "alook inbox pull" }).suppressed).toBe(true);
+  });
+  it("suppresses alook invocations for lowercase bash (pi)", () => {
+    expect(extractToolAudit("bash", { command: "alook" }).suppressed).toBe(true);
+  });
+  it("suppresses even with leading whitespace (raw command trimmed for the check)", () => {
+    expect(extractToolAudit("Bash", { command: "  alook  message send" }).suppressed).toBe(true);
+  });
+  it("codex shell (string command) — driver already unwrapped params.item", () => {
+    expect(extractToolAudit("shell", { command: "pnpm test" })).toEqual({
+      name: "bash",
+      target: "pnpm test",
+      suppressed: false,
+    });
+  });
+  it("codex shell (array command) — joined with spaces, noisy-but-honest form", () => {
+    expect(extractToolAudit("shell", { command: ["bash", "-lc", "rm -rf tmp"] })).toEqual({
+      name: "bash",
+      target: "bash -lc rm -rf tmp",
+      suppressed: false,
+    });
+  });
+  it("codex shell array wrapping `alook …` inside `bash -lc` does NOT suppress — outer shell is real work", () => {
+    const out = extractToolAudit("shell", { command: ["bash", "-lc", "alook inbox pull"] });
+    expect(out.suppressed).toBe(false);
+    expect(out.name).toBe("bash");
+    expect(out.target).toBe("bash -lc alook inbox pull");
+  });
+});
+
+describe("extractToolAudit — file-target class", () => {
+  it("Anthropic Read → file_path", () => {
+    expect(extractToolAudit("Read", { file_path: "/etc/passwd" })).toEqual({
+      name: "read",
+      target: "/etc/passwd",
+      suppressed: false,
+    });
+  });
+  it("pi read → path", () => {
+    expect(extractToolAudit("read", { path: "AGENTS.md" })).toEqual({
+      name: "read",
+      target: "AGENTS.md",
+      suppressed: false,
+    });
+  });
+  it("Edit picks file_path, ignoring other keys", () => {
+    expect(extractToolAudit("Edit", { file_path: "src/foo.ts", oldText: "x", newText: "y" })).toEqual({
+      name: "edit",
+      target: "src/foo.ts",
+      suppressed: false,
+    });
+  });
+  it("pi edit → path", () => {
+    expect(extractToolAudit("edit", { path: "plans/x.md", edits: [] })).toEqual({
+      name: "edit",
+      target: "plans/x.md",
+      suppressed: false,
+    });
+  });
+  it("Write / pi write → file_path / path", () => {
+    expect(extractToolAudit("Write", { file_path: "x.md", content: "..." }).target).toBe("x.md");
+    expect(extractToolAudit("write", { path: "x.md", content: "..." }).target).toBe("x.md");
+  });
+  it("MultiEdit → edit + file_path (semantic collapse)", () => {
+    expect(extractToolAudit("MultiEdit", { file_path: "x.ts", edits: [] })).toEqual({
+      name: "edit",
+      target: "x.ts",
+      suppressed: false,
+    });
+  });
+  it("NotebookEdit → notebook_path", () => {
+    expect(extractToolAudit("NotebookEdit", { notebook_path: "nb.ipynb" })).toEqual({
+      name: "notebook_edit",
+      target: "nb.ipynb",
+      suppressed: false,
+    });
+  });
+  it("LS → path", () => {
+    expect(extractToolAudit("LS", { path: "src/" })).toEqual({
+      name: "ls",
+      target: "src/",
+      suppressed: false,
+    });
+  });
+  it("codex file_change → edit + path (already-unwrapped params.item)", () => {
+    expect(extractToolAudit("file_change", { path: "src/x.ts" })).toEqual({
+      name: "edit",
+      target: "src/x.ts",
+      suppressed: false,
+    });
+  });
+});
+
+describe("extractToolAudit — pattern class", () => {
+  it("Grep with pattern + path picks pattern", () => {
+    expect(extractToolAudit("Grep", { pattern: "TODO", path: "src/" }).target).toBe("TODO");
+  });
+  it("pi grep with pattern only", () => {
+    expect(extractToolAudit("grep", { pattern: "TODO" }).target).toBe("TODO");
+  });
+  it("Glob picks pattern", () => {
+    expect(extractToolAudit("Glob", { pattern: "**/*.tsx" }).target).toBe("**/*.tsx");
+  });
+  it("find picks pattern", () => {
+    expect(extractToolAudit("find", { pattern: "*.ts", path: "src" }).target).toBe("*.ts");
+  });
+  it("grep falls back to path when no pattern is set", () => {
+    expect(extractToolAudit("grep", { path: "src" }).target).toBe("src");
+  });
+});
+
+describe("extractToolAudit — fallthrough / MCP / web", () => {
+  it("WebFetch → url", () => {
+    expect(extractToolAudit("WebFetch", { url: "https://example.com" })).toEqual({
+      name: "web_fetch",
+      target: "https://example.com",
+      suppressed: false,
+    });
+  });
+  it("mcp_search stays as mcp_search + query target", () => {
+    expect(extractToolAudit("mcp_search", { query: "foo" })).toEqual({
+      name: "mcp_search",
+      target: "foo",
+      suppressed: false,
+    });
+  });
+  it("web_search → query", () => {
+    expect(extractToolAudit("web_search", { query: "cats" })).toEqual({
+      name: "web_search",
+      target: "cats",
+      suppressed: false,
+    });
+  });
+  it("collab_tool_call → name (from input.name)", () => {
+    expect(extractToolAudit("collab_tool_call", { name: "x" }).target).toBe("x");
+  });
+  it("TodoWrite → no target", () => {
+    expect(extractToolAudit("TodoWrite", { todos: [] })).toEqual({
+      name: "todo_write",
+      suppressed: false,
+    });
+  });
+  it("Unknown tool falls through as lowercased name + no target", () => {
+    expect(extractToolAudit("Frobnicate", {})).toEqual({
+      name: "frobnicate",
+      suppressed: false,
+    });
+  });
+});
+
+describe("extractToolAudit — non-object input guard", () => {
+  it("null / undefined / string / number / array — all return no target without throwing", () => {
+    expect(extractToolAudit("Bash", null)).toEqual({ name: "bash", suppressed: false });
+    expect(extractToolAudit("Bash", undefined)).toEqual({ name: "bash", suppressed: false });
+    expect(extractToolAudit("Bash", "raw string")).toEqual({ name: "bash", suppressed: false });
+    expect(extractToolAudit("Bash", 42)).toEqual({ name: "bash", suppressed: false });
+    expect(extractToolAudit("Bash", ["a", "b"])).toEqual({ name: "bash", suppressed: false });
+  });
+  it("copilot stringified-JSON recovery: input is a JSON string that decodes to a record", () => {
+    expect(extractToolAudit("Bash", '{"command":"rm -rf tmp"}')).toEqual({
+      name: "bash",
+      target: "rm -rf tmp",
+      suppressed: false,
+    });
+  });
+  it("invalid JSON string — no throw, returns no target", () => {
+    expect(extractToolAudit("Bash", "not json{")).toEqual({ name: "bash", suppressed: false });
+  });
+  it("JSON string that decodes to a non-object — no throw, returns no target", () => {
+    expect(extractToolAudit("Bash", "42")).toEqual({ name: "bash", suppressed: false });
+    expect(extractToolAudit("Bash", '["a","b"]')).toEqual({ name: "bash", suppressed: false });
+  });
+});
+
+describe("truncateTargetToCodeUnits", () => {
+  it("passes short strings through unchanged", () => {
+    expect(truncateTargetToCodeUnits("hello")).toBe("hello");
+  });
+  it("truncates a 300-unit ASCII string to <=200 units + ellipsis", () => {
+    const out = truncateTargetToCodeUnits("a".repeat(300));
+    expect(out.length).toBeLessThanOrEqual(200);
     expect(out.endsWith("…")).toBe(true);
   });
+  it("emoji-heavy: never emits a lone surrogate + round-trips clean UTF-8", () => {
+    const emoji = "😀";
+    const s = emoji.repeat(200);
+    const out = truncateTargetToCodeUnits(s);
+    expect(out.length).toBeLessThanOrEqual(200);
+    expect(out.endsWith("…")).toBe(true);
+    expect(Buffer.from(out, "utf8").toString("utf8")).toBe(out);
+  });
 });
 
-describe("isAlookShellCommand", () => {
+describe("isAlookShellInvocation", () => {
   it("matches `alook <sub>` and bare `alook`", () => {
-    expect(isAlookShellCommand("alook")).toBe(true);
-    expect(isAlookShellCommand("alook inbox pull")).toBe(true);
-    expect(isAlookShellCommand("  alook message send")).toBe(true);
+    expect(isAlookShellInvocation("alook")).toBe(true);
+    expect(isAlookShellInvocation("alook inbox pull")).toBe(true);
+    expect(isAlookShellInvocation("  alook message send")).toBe(true);
   });
-
   it("does NOT match commands that merely mention alook", () => {
-    expect(isAlookShellCommand("rm alook.log")).toBe(false);
-    expect(isAlookShellCommand("echo alook")).toBe(false);
-    expect(isAlookShellCommand("alookalike")).toBe(false);
+    expect(isAlookShellInvocation("rm alook.log")).toBe(false);
+    expect(isAlookShellInvocation("echo alook")).toBe(false);
+    expect(isAlookShellInvocation("alookalike")).toBe(false);
+  });
+  it("returns false for missing input", () => {
+    expect(isAlookShellInvocation(undefined)).toBe(false);
+    expect(isAlookShellInvocation("")).toBe(false);
+  });
+});
+
+describe("extractToolAudit — driver coverage matrix", () => {
+  const cases: Array<{ driver: string; rawName: string; rawInput: unknown; expected: { name: string; target?: string; suppressed: boolean } }> = [
+    { driver: "claude", rawName: "Bash", rawInput: { command: "rm tmp" }, expected: { name: "bash", target: "rm tmp", suppressed: false } },
+    { driver: "claude", rawName: "Read", rawInput: { file_path: "/x" }, expected: { name: "read", target: "/x", suppressed: false } },
+    { driver: "claude", rawName: "Edit", rawInput: { file_path: "/x" }, expected: { name: "edit", target: "/x", suppressed: false } },
+    { driver: "claude", rawName: "MultiEdit", rawInput: { file_path: "/y" }, expected: { name: "edit", target: "/y", suppressed: false } },
+    { driver: "claude", rawName: "Write", rawInput: { file_path: "/x" }, expected: { name: "write", target: "/x", suppressed: false } },
+    { driver: "claude", rawName: "Grep", rawInput: { pattern: "TODO" }, expected: { name: "grep", target: "TODO", suppressed: false } },
+    { driver: "claude", rawName: "Glob", rawInput: { pattern: "**/*" }, expected: { name: "glob", target: "**/*", suppressed: false } },
+    { driver: "claude", rawName: "LS", rawInput: { path: "/src" }, expected: { name: "ls", target: "/src", suppressed: false } },
+    { driver: "claude", rawName: "NotebookEdit", rawInput: { notebook_path: "nb.ipynb" }, expected: { name: "notebook_edit", target: "nb.ipynb", suppressed: false } },
+    { driver: "claude", rawName: "WebSearch", rawInput: { query: "cats" }, expected: { name: "web_search", target: "cats", suppressed: false } },
+    { driver: "claude", rawName: "WebFetch", rawInput: { url: "https://x" }, expected: { name: "web_fetch", target: "https://x", suppressed: false } },
+    { driver: "claude", rawName: "TodoWrite", rawInput: { todos: [] }, expected: { name: "todo_write", suppressed: false } },
+
+    { driver: "cursor", rawName: "Bash", rawInput: { command: "rm tmp" }, expected: { name: "bash", target: "rm tmp", suppressed: false } },
+
+    { driver: "pi", rawName: "bash", rawInput: { command: "rm tmp" }, expected: { name: "bash", target: "rm tmp", suppressed: false } },
+    { driver: "pi", rawName: "read", rawInput: { path: "/x" }, expected: { name: "read", target: "/x", suppressed: false } },
+    { driver: "pi", rawName: "edit", rawInput: { path: "/x", edits: [] }, expected: { name: "edit", target: "/x", suppressed: false } },
+    { driver: "pi", rawName: "write", rawInput: { path: "/x", content: "" }, expected: { name: "write", target: "/x", suppressed: false } },
+    { driver: "pi", rawName: "grep", rawInput: { pattern: "TODO" }, expected: { name: "grep", target: "TODO", suppressed: false } },
+    { driver: "pi", rawName: "find", rawInput: { pattern: "*.ts" }, expected: { name: "find", target: "*.ts", suppressed: false } },
+    { driver: "pi", rawName: "ls", rawInput: { path: "/src" }, expected: { name: "ls", target: "/src", suppressed: false } },
+
+    { driver: "codex", rawName: "shell", rawInput: { command: "pnpm test" }, expected: { name: "bash", target: "pnpm test", suppressed: false } },
+    { driver: "codex", rawName: "shell", rawInput: { command: ["bash", "-lc", "rm tmp"] }, expected: { name: "bash", target: "bash -lc rm tmp", suppressed: false } },
+    { driver: "codex", rawName: "file_change", rawInput: { path: "/x" }, expected: { name: "edit", target: "/x", suppressed: false } },
+    { driver: "codex", rawName: "web_search", rawInput: { query: "cats" }, expected: { name: "web_search", target: "cats", suppressed: false } },
+    { driver: "codex", rawName: "mcp_search", rawInput: { query: "foo" }, expected: { name: "mcp_search", target: "foo", suppressed: false } },
+    { driver: "codex", rawName: "collab_tool_call", rawInput: { name: "x" }, expected: { name: "collab_tool_call", target: "x", suppressed: false } },
+
+    { driver: "gemini", rawName: "bash", rawInput: { command: "rm tmp" }, expected: { name: "bash", target: "rm tmp", suppressed: false } },
+    { driver: "gemini", rawName: "read", rawInput: { path: "/x" }, expected: { name: "read", target: "/x", suppressed: false } },
+    { driver: "gemini", rawName: "edit", rawInput: { file_path: "/x" }, expected: { name: "edit", target: "/x", suppressed: false } },
+    { driver: "gemini", rawName: "write", rawInput: { path: "/x" }, expected: { name: "write", target: "/x", suppressed: false } },
+    { driver: "gemini", rawName: "grep", rawInput: { pattern: "TODO" }, expected: { name: "grep", target: "TODO", suppressed: false } },
+
+    { driver: "kimi", rawName: "bash", rawInput: { command: "rm tmp" }, expected: { name: "bash", target: "rm tmp", suppressed: false } },
+    { driver: "kimi", rawName: "read", rawInput: { path: "/x" }, expected: { name: "read", target: "/x", suppressed: false } },
+    { driver: "kimi", rawName: "edit", rawInput: { file_path: "/x" }, expected: { name: "edit", target: "/x", suppressed: false } },
+    { driver: "kimi", rawName: "write", rawInput: { path: "/x" }, expected: { name: "write", target: "/x", suppressed: false } },
+    { driver: "kimi", rawName: "grep", rawInput: { pattern: "TODO" }, expected: { name: "grep", target: "TODO", suppressed: false } },
+
+    { driver: "opencode", rawName: "bash", rawInput: { command: "rm tmp" }, expected: { name: "bash", target: "rm tmp", suppressed: false } },
+    { driver: "opencode", rawName: "read", rawInput: { file_path: "/x" }, expected: { name: "read", target: "/x", suppressed: false } },
+    { driver: "opencode", rawName: "edit", rawInput: { file_path: "/x" }, expected: { name: "edit", target: "/x", suppressed: false } },
+    { driver: "opencode", rawName: "write", rawInput: { file_path: "/x" }, expected: { name: "write", target: "/x", suppressed: false } },
+    { driver: "opencode", rawName: "grep", rawInput: { pattern: "TODO" }, expected: { name: "grep", target: "TODO", suppressed: false } },
+
+    { driver: "copilot", rawName: "bash", rawInput: '{"command":"rm tmp"}', expected: { name: "bash", target: "rm tmp", suppressed: false } },
+    { driver: "copilot", rawName: "bash", rawInput: { command: "rm tmp" }, expected: { name: "bash", target: "rm tmp", suppressed: false } },
+    { driver: "copilot", rawName: "read", rawInput: { file_path: "/x" }, expected: { name: "read", target: "/x", suppressed: false } },
+    { driver: "copilot", rawName: "edit", rawInput: { file_path: "/x" }, expected: { name: "edit", target: "/x", suppressed: false } },
+    { driver: "copilot", rawName: "write", rawInput: { file_path: "/x" }, expected: { name: "write", target: "/x", suppressed: false } },
+    { driver: "copilot", rawName: "grep", rawInput: { pattern: "TODO" }, expected: { name: "grep", target: "TODO", suppressed: false } },
+  ];
+  it.each(cases)("$driver × $rawName produces canonical shape", ({ rawName, rawInput, expected }) => {
+    expect(extractToolAudit(rawName, rawInput)).toEqual(expected);
+  });
+});
+
+describe("onBotAuditEvent — integration through onRuntimeEvent (T9/T10)", () => {
+  it("emits canonical lowercase name for every driver × tool combo", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    const combos: Array<{ name: string; input: unknown; expect: { name: string; target?: string } }> = [
+      { name: "Bash", input: { command: "rm" }, expect: { name: "bash", target: "rm" } },
+      { name: "bash", input: { command: "rm" }, expect: { name: "bash", target: "rm" } },
+      { name: "Read", input: { file_path: "x" }, expect: { name: "read", target: "x" } },
+      { name: "read", input: { path: "x" }, expect: { name: "read", target: "x" } },
+      { name: "Edit", input: { file_path: "x" }, expect: { name: "edit", target: "x" } },
+      { name: "edit", input: { path: "x" }, expect: { name: "edit", target: "x" } },
+      { name: "Grep", input: { pattern: "TODO" }, expect: { name: "grep", target: "TODO" } },
+      { name: "shell", input: { command: "pnpm test" }, expect: { name: "bash", target: "pnpm test" } },
+      { name: "file_change", input: { path: "src/x.ts" }, expect: { name: "edit", target: "src/x.ts" } },
+    ];
+
+    for (const c of combos) {
+      session.fire("runtime_event", { kind: "tool_call", name: c.name, input: c.input });
+    }
+
+    const payloads = onBotAuditEvent.mock.calls
+      .filter(([, ev]) => (ev as { kind?: string })?.kind === "tool_call")
+      .map(([, ev]) => (ev as { payload: { name: string; target?: string } }).payload);
+    expect(payloads).toEqual(combos.map((c) => c.expect));
   });
 
-  it("returns false for missing input", () => {
-    expect(isAlookShellCommand(undefined)).toBe(false);
-    expect(isAlookShellCommand("")).toBe(false);
+  it("alook-shell suppression fires for Bash, pi bash, AND codex shell", () => {
+    const onBotAuditEvent = vi.fn();
+    const { mgr, session } = makeManager({ onBotAuditEvent });
+    mgr.deliver("a1", { seq: 1, text: "hello" });
+
+    session.fire("runtime_event", { kind: "tool_call", name: "Bash", input: { command: "alook inbox pull" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "bash", input: { command: "alook" } });
+    session.fire("runtime_event", { kind: "tool_call", name: "shell", input: { command: "alook message send" } });
+
+    const toolCalls = onBotAuditEvent.mock.calls.filter(
+      ([, ev]) => (ev as { kind?: string })?.kind === "tool_call"
+    );
+    expect(toolCalls).toHaveLength(0);
   });
 });

@@ -181,7 +181,7 @@ export async function createDaemon(opts: CreateDaemonOptions): Promise<RunningDa
     agentId: string,
     event:
       | { kind: "cli_invocation"; payload: { subcommand: string } }
-      | { kind: "tool_call"; payload: { name: string; command?: string } }
+      | { kind: "tool_call"; payload: { name: string; target?: string } }
       | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } },
     context?: { sessionId?: string | null; launchId?: string | null }
   ) => {

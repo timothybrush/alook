@@ -21,7 +21,10 @@ export function BotActivityRow({ event }: { event: AuditEvent }) {
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <div className="group grid grid-cols-[64px_56px_1fr] items-baseline gap-x-3 px-4 py-1.5 hover:bg-accent/30">
+    <div
+      data-testid="bot-activity-row"
+      className="group grid grid-cols-[64px_56px_1fr] items-baseline gap-x-3 px-4 py-1.5 hover:bg-accent/30"
+    >
       <time
         dateTime={event.createdAt}
         title={new Date(event.createdAt).toLocaleString()}
@@ -77,19 +80,16 @@ function RowBody({
     )
   }
   if (event.kind === "tool_call") {
-    const p = event.payload as { name?: string; command?: string } | null
-    const name = p?.name ?? "?"
-    // Bash-family calls carry a short command summary. Show it inline so the
-    // owner can distinguish `rm -rf tmp` from `git commit`; without it, all
-    // shell activity would collapse into an indistinguishable pile of "Bash".
-    if (p?.command) {
+    const p = event.payload as { name?: string; target?: string } | null
+    const name = (p?.name ?? "?").toLowerCase()
+    if (p?.target) {
       return (
         <div
-          title={p.command}
+          title={p.target}
           className="truncate font-mono text-[13px] text-foreground"
         >
           {name} <span className="text-muted-foreground/60">·</span>{" "}
-          <span className="text-muted-foreground">{p.command}</span>
+          <span className="text-muted-foreground">{p.target}</span>
         </div>
       )
     }

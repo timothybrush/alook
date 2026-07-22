@@ -102,18 +102,21 @@ export interface ManagerRuntimeOpts {
   /**
    * Notified whenever a runtime `thinking` or `tool_call` event lands. Wired
    * in `createDaemon` to send a `bot_audit_event` frame through the WS
-   * control channel. `Bash` tool_calls whose `input.command` starts with
-   * `alook ` are dropped inside `onRuntimeEvent` — the credential-proxy
-   * `cli_invocation` sighting is authoritative for those. Every other `Bash`
-   * call arrives here with a truncated `command` summary attached.
+   * control channel. Tool calls flow through `extractToolAudit`, which
+   * canonicalizes the tool name to lowercase (`Bash` → `bash`, codex
+   * `shell` → `bash`, codex `file_change` → `edit`, etc.), picks a
+   * `target` field driver-agnostically (file path / shell command /
+   * pattern / url / mcp name), and suppresses any bash-family call whose
+   * resolved command is `alook <sub>` — the credential-proxy
+   * `cli_invocation` sighting is authoritative for those.
    *
    * `thinking` payloads carry truncated `text` + original `chars`; the audit
-   * log does not record raw tool input beyond the optional `command`.
+   * log does not record raw tool input beyond the optional `target`.
    */
   onBotAuditEvent?: (
     agentId: string,
     event:
-      | { kind: "tool_call"; payload: { name: string; command?: string } }
+      | { kind: "tool_call"; payload: { name: string; target?: string } }
       | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } },
     context: { sessionId: string | null; launchId: string | null }
   ) => void;
@@ -194,59 +197,223 @@ export interface TimelineRecorder {
 const THINKING_MAX_BYTES = 4096;
 
 /**
- * Max UTF-16 code units for a `Bash` tool_call's `command` summary. The wire
- * schema caps `command` at 240 chars (see `AuditLogToolCallPayloadSchema`) and
- * Zod's `.max()` measures UTF-16 length — so we truncate on the same unit an
- * astral character (emoji) counts as 2. Truncating on codepoints would let an
- * emoji-heavy command exceed 240 UTF-16 units and get rejected at the wire.
+ * Max UTF-16 code units for a tool_call's `target` field. The wire schema
+ * caps `target` at 240 (see `AuditLogToolCallPayloadSchema`) and Zod's
+ * `.max()` measures UTF-16 length — the extractor truncates at 200 to keep
+ * 40 units of headroom for any future producer that stamps a suffix before
+ * wire validation. Truncating on codepoints would let an emoji-heavy target
+ * exceed 240 UTF-16 units and get rejected at the wire.
  */
-const BASH_COMMAND_SUMMARY_MAX_CHARS = 200;
+const MAX_TARGET_CODE_UNITS = 200;
 
 /**
- * Extract a short command summary from a tool_call's `input`. Bash-family
- * tools carry a `command` string in most drivers (claude, cursor, kimi,
- * opencode) — codex wraps it inside `input.item.command` or a `type:
- * "commandExecution"` variant. Best-effort extraction: return the first
- * non-empty line trimmed and truncated to `BASH_COMMAND_SUMMARY_MAX_CHARS`
- * UTF-16 code units (ellipsis if cut, walking back one unit if the boundary
- * would split a surrogate pair). Returns `undefined` if no plausible command
- * string is present.
+ * Canonicalize a driver-raw tool name to the lowercase tag the audit log
+ * stores. The map is case-insensitive on the input: `Bash|bash|BASH → bash`,
+ * codex's `shell → bash` and `file_change → edit`, `MultiEdit → edit`
+ * (intentional semantic collapse — every MultiEdit acts on one file),
+ * `NotebookEdit → notebook_edit`, `LS → ls`, `WebSearch → web_search`,
+ * `WebFetch → web_fetch`, `TodoWrite → todo_write`. Anything else falls
+ * through to its lowercased original (e.g. `mcp_search` stays `mcp_search`,
+ * an unknown `Frobnicate` becomes `frobnicate`) so new drivers don't need
+ * this table updated to surface.
  */
-export function extractBashCommandSummary(input: unknown): string | undefined {
-  const raw = pickCommandString(input);
-  if (typeof raw !== "string") return undefined;
-  const firstLine = raw.split("\n").map((s) => s.trim()).find((s) => s.length > 0);
-  if (!firstLine) return undefined;
-  if (firstLine.length <= BASH_COMMAND_SUMMARY_MAX_CHARS) return firstLine;
-  let end = BASH_COMMAND_SUMMARY_MAX_CHARS - 1;
-  const cu = firstLine.charCodeAt(end - 1);
-  if (cu >= 0xd800 && cu <= 0xdbff) end -= 1;
-  return firstLine.slice(0, end) + "…";
+export function canonicalToolName(rawName: string): string {
+  const lower = rawName.toLowerCase();
+  switch (lower) {
+    case "bash":
+    case "shell":
+      return "bash";
+    case "read":
+      return "read";
+    case "edit":
+    case "multiedit":
+    case "file_change":
+      return "edit";
+    case "write":
+      return "write";
+    case "grep":
+      return "grep";
+    case "glob":
+      return "glob";
+    case "find":
+      return "find";
+    case "ls":
+      return "ls";
+    case "notebookedit":
+    case "notebook_edit":
+      return "notebook_edit";
+    case "websearch":
+    case "web_search":
+      return "web_search";
+    case "webfetch":
+    case "web_fetch":
+      return "web_fetch";
+    case "todowrite":
+    case "todo_write":
+      return "todo_write";
+    default:
+      return lower;
+  }
 }
 
-function pickCommandString(input: unknown): string | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const rec = input as Record<string, unknown>;
-  if (typeof rec.command === "string") return rec.command;
-  // codex `commandExecution` shape: input.item.command (array or string)
-  const item = rec.item as Record<string, unknown> | undefined;
-  if (item) {
-    if (typeof item.command === "string") return item.command;
-    if (Array.isArray(item.command)) return item.command.filter((v) => typeof v === "string").join(" ");
+type ToolClass = "shell" | "file_target" | "pattern" | "fallthrough";
+
+function classify(canonicalName: string): ToolClass {
+  switch (canonicalName) {
+    case "bash":
+      return "shell";
+    case "read":
+    case "edit":
+    case "write":
+    case "ls":
+    case "notebook_edit":
+      return "file_target";
+    case "grep":
+    case "glob":
+    case "find":
+      return "pattern";
+    default:
+      return "fallthrough";
   }
+}
+
+/**
+ * Coerce a runtime-emitted `input` to a plain record for field-picking.
+ * Non-object inputs (null, undefined, array, number, boolean) become
+ * `undefined`. As a special case, string inputs get a single `JSON.parse`
+ * attempt: copilot's OpenAI-style tool-call `arguments` reaches this layer
+ * as a stringified JSON blob when the driver's `arguments ?? parameters ??
+ * input ?? {}` fallback picks the raw string up unparsed. If the parse
+ * succeeds and yields a record, that record is returned; on any failure
+ * (non-JSON string, JSON that decodes to a non-object) we return
+ * `undefined` — never throw. One parse attempt per event, so an adversarial
+ * huge string is bounded by the runtime's own event size limits.
+ */
+function coerceInputRecord(input: unknown): Record<string, unknown> | undefined {
+  if (typeof input === "string") {
+    try {
+      const parsed = JSON.parse(input);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  return input as Record<string, unknown>;
+}
+
+/**
+ * Extract a raw command string from a shell-class tool_call's `input`. Every
+ * driver reduces to a root `input.command` after its normalizer runs
+ * (Anthropic, cursor, kimi, opencode, pi, gemini, copilot, and codex — the
+ * codex normalizer unwraps `params.item`, so `command` is already flat).
+ * String or array (`["bash", "-lc", "..."]` from codex) — arrays get
+ * space-joined, keeping the honest form the runtime saw. Returns
+ * `undefined` when no plausible command is present.
+ */
+export function pickCommandString(input: unknown): string | undefined {
+  const rec = coerceInputRecord(input);
+  if (!rec) return undefined;
+  if (typeof rec.command === "string") return rec.command;
+  if (Array.isArray(rec.command)) return rec.command.filter((v) => typeof v === "string").join(" ");
+  return undefined;
+}
+
+function pickFileTarget(input: unknown): string | undefined {
+  const rec = coerceInputRecord(input);
+  if (!rec) return undefined;
+  if (typeof rec.file_path === "string") return rec.file_path;
+  if (typeof rec.path === "string") return rec.path;
+  if (typeof rec.notebook_path === "string") return rec.notebook_path;
+  return undefined;
+}
+
+function pickPatternTarget(input: unknown): string | undefined {
+  const rec = coerceInputRecord(input);
+  if (!rec) return undefined;
+  if (typeof rec.pattern === "string") return rec.pattern;
+  if (typeof rec.query === "string") return rec.query;
+  if (typeof rec.path === "string") return rec.path;
+  return undefined;
+}
+
+function pickFallthroughTarget(input: unknown): string | undefined {
+  const rec = coerceInputRecord(input);
+  if (!rec) return undefined;
+  if (typeof rec.url === "string") return rec.url;
+  if (typeof rec.query === "string") return rec.query;
+  if (typeof rec.path === "string") return rec.path;
+  if (typeof rec.name === "string") return rec.name;
   return undefined;
 }
 
 /**
- * A `Bash` tool_call is the daemon proxy's shadow when — and only when — the
- * command is `alook` or `alook <sub …>`. In that case the credential proxy
- * emits an authoritative `cli_invocation` audit row and the tool_call would
- * duplicate it. Any other Bash command (rm, sed, git, pnpm, echo, …) is user
+ * A bash-family tool_call is the daemon proxy's shadow when — and only when
+ * — the resolved command is `alook` or `alook <sub …>`. In that case the
+ * credential proxy emits an authoritative `cli_invocation` audit row and
+ * the tool_call would duplicate it. Any other command (rm, sed, git, pnpm,
+ * echo, `bash -lc "alook …"` — the outer shell is real work) is user
  * intent and must surface.
  */
-export function isAlookShellCommand(command: string | undefined): boolean {
+export function isAlookShellInvocation(command: string | undefined): boolean {
   if (!command) return false;
   return /^alook(\s|$)/.test(command.trimStart());
+}
+
+/**
+ * Truncate a target to at most `MAX_TARGET_CODE_UNITS` UTF-16 code units,
+ * appending `…` when cut. Walks back one unit if the boundary lands on a
+ * high surrogate (never emits a lone surrogate).
+ */
+export function truncateTargetToCodeUnits(s: string): string {
+  if (s.length <= MAX_TARGET_CODE_UNITS) return s;
+  let end = MAX_TARGET_CODE_UNITS - 1;
+  const cu = s.charCodeAt(end - 1);
+  if (cu >= 0xd800 && cu <= 0xdbff) end -= 1;
+  return s.slice(0, end) + "…";
+}
+
+/**
+ * Driver-agnostic tool_call extractor. Given a runtime-raw `(name, input)`
+ * pair, returns the canonical lowercase `name`, an optional short `target`
+ * summary (file path / shell command / pattern / url / mcp name), and a
+ * `suppressed` flag that's true for bash-family calls whose command is
+ * `alook <sub>` (the credential proxy's `cli_invocation` is authoritative
+ * for those).
+ *
+ * The returned object contains ONLY `{name, target?, suppressed}`. Raw
+ * `input` is NEVER returned. Callers must destructure — never spread — so
+ * a future extractor field addition cannot accidentally leak sensitive tool
+ * args onto the wire.
+ */
+export function extractToolAudit(
+  rawName: string,
+  rawInput: unknown
+): { name: string; target?: string; suppressed: boolean } {
+  const name = canonicalToolName(rawName);
+  const cls = classify(name);
+  if (cls === "shell") {
+    const raw = pickCommandString(rawInput);
+    if (isAlookShellInvocation(raw)) {
+      return { name, suppressed: true };
+    }
+    const firstLine = typeof raw === "string"
+      ? raw.split("\n").map((s) => s.trim()).find((s) => s.length > 0)
+      : undefined;
+    if (!firstLine) return { name, suppressed: false };
+    return { name, target: truncateTargetToCodeUnits(firstLine), suppressed: false };
+  }
+  let target: string | undefined;
+  if (cls === "file_target") target = pickFileTarget(rawInput);
+  else if (cls === "pattern") target = pickPatternTarget(rawInput);
+  else target = pickFallthroughTarget(rawInput);
+  if (typeof target !== "string" || target.length === 0) {
+    return { name, suppressed: false };
+  }
+  return { name, target: truncateTargetToCodeUnits(target), suppressed: false };
 }
 
 /**
@@ -747,20 +914,15 @@ export class AgentProcessManager {
         // first so the audit log preserves thinking→action ordering.
         this.flushThinkingAudit(agentId);
         if (ev.kind === "tool_call" && typeof ev.name === "string") {
-          // Bash-command suppression — a Bash call whose command is `alook`
-          // (or `alook <sub …>`) is already covered by the credential-proxy
-          // `cli_invocation` audit row; emitting a second `tool_call` here
-          // would double-count the same action. Every other Bash command
-          // (rm, sed, git, pnpm, echo …) is real user-visible work and must
-          // surface as a `tool_call` row with a short command summary.
-          const isBash = ev.name === "Bash";
-          const command = isBash ? extractBashCommandSummary(ev.input) : undefined;
-          const suppressed = isBash && isAlookShellCommand(command);
-          if (!suppressed) {
+          const audit = extractToolAudit(ev.name, ev.input);
+          if (!audit.suppressed) {
+            const payload = audit.target !== undefined
+              ? { name: audit.name, target: audit.target }
+              : { name: audit.name };
             try {
               this.opts.onBotAuditEvent(agentId, {
                 kind: "tool_call",
-                payload: command ? { name: ev.name, command } : { name: ev.name },
+                payload,
               }, {
                 sessionId: this.liveSessions.get(agentId) ?? null,
                 launchId: this.launchIds.get(agentId) ?? null,

@@ -14,6 +14,8 @@ Alook's main purpose is to make the cli agent always on, and give it a email add
 - run `pnpm typecheck`, `pnpm test` as the final check when you think the code is ready.
 - service must be STATELESS! All the state must be in DB or local, never put important states in memory.
 - scope the queries before, not check the ownership after. don't query data then check if the data belongs to a workspace, use workspace id ahead to query the data.
+- respect others' works, don't reset any other git changes just because it's not done by you, others may working at the same time, never revert anything without asking the user.
+  - don't stash others' works, you can wait, but stash others' work will cause many problems.
 
 ## Release — Unified Version Bump
 All workspace packages share one version. Use `pnpm bump` to release:

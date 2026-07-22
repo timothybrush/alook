@@ -602,7 +602,7 @@ export type AgentActivityState = "idle" | "starting" | "running" | "stopping";
  */
 export type BotAuditEventPayload =
   | { kind: "cli_invocation"; payload: { subcommand: string } }
-  | { kind: "tool_call"; payload: { name: string } }
+  | { kind: "tool_call"; payload: { name: string; target?: string } }
   | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } };
 
 export interface HostBotAuditEventFrame {

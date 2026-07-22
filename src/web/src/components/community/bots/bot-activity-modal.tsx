@@ -159,6 +159,7 @@ export function BotActivityModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        data-testid="bot-activity-modal"
         showCloseButton={false}
         className="flex h-[72vh] max-h-170 w-full max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
       >
