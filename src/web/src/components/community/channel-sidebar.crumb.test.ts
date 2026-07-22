@@ -2,15 +2,9 @@ import { describe, it, expect, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-// The header's ServerCrumb is gated on the mobile breakpoint — mock the hook
-// so each case renders deterministically without a DOM/matchMedia.
-const isMobile = vi.fn<() => boolean>()
-vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => isMobile() }))
-
 import { ChannelSidebar } from "./channel-sidebar"
 import type { ChannelTree } from "./use-channel-tree"
 
-// Minimal empty tree — the header renders regardless of channel content.
 const emptyTree = {
   collapsed: new Set<string>(),
   catOrder: [],
@@ -41,18 +35,10 @@ const render = () =>
     }),
   )
 
-describe("ChannelSidebar header ServerCrumb", () => {
-  it("renders the server crumb on mobile (rail is hidden — sole identity marker)", () => {
-    isMobile.mockReturnValue(true)
-    // ServerCrumb is the only element that emits aria-label/title with the name.
-    expect(render()).toContain('aria-label="Alpha"')
-  })
-
-  it("omits the server crumb on desktop (rail already shows the icon)", () => {
-    isMobile.mockReturnValue(false)
+describe("ChannelSidebar header", () => {
+  it("renders the server name as the sole header identity marker (no duplicate ServerCrumb icon)", () => {
     const html = render()
-    expect(html).not.toContain('aria-label="Alpha"')
-    // The server name itself still renders in the header text.
     expect(html).toContain("Alpha")
+    expect(html).not.toContain('aria-label="Alpha"')
   })
 })

@@ -76,7 +76,7 @@ export function ChannelHeader({
       {onBack && (
         <Button variant="ghost" size="icon-sm" onClick={onBack} className="text-muted-foreground hover:text-foreground" aria-label="Back"><ChevronLeft className="size-5" /></Button>
       )}
-      {server && <ServerCrumb id={server.id} name={server.name} icon={server.icon} className="ml-1" />}
+      {server && <ServerCrumb id={server.id} name={server.name} icon={server.icon} size={6} className="ml-1" />}
       {breadcrumb ? (
         <>
           <button onClick={breadcrumb.onNavigateBack} className={`flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors ${server ? "" : "ml-1"}`}>
@@ -163,17 +163,20 @@ function ChannelOverflowMenu({
 // serves as the separator), now also reused by `ChannelSidebar`'s header at
 // the larger `size={7}`. Tailwind only picks up complete literal class names
 // at build time, so `size` can't be interpolated — it's an explicit ternary.
-export function ServerCrumb({ id, name, icon, size = 5, className = "" }: { id: string; name: string; icon: string | null; size?: 5 | 7; className?: string }) {
+export function ServerCrumb({ id, name, icon, size = 5, className = "" }: { id: string; name: string; icon: string | null; size?: 5 | 6 | 7; className?: string }) {
+  const sizeCls = size === 7 ? "size-7" : size === 6 ? "size-6" : "size-5"
+  const iconTextCls = size === 7 ? "text-xs" : size === 6 ? "text-[0.6875rem]" : "text-[0.625rem]"
+  const initialTextCls = size === 7 ? "text-base" : size === 6 ? "text-sm" : "text-xs"
   return (
     <span
       // No icon → the same deterministic marble fallback used by the rail
       // (`sortable-server.tsx`) and folder rows, so a server reads as "the
       // same server" everywhere it shows up, not a flat generic tile here.
-      className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md font-semibold ${icon ? "bg-secondary text-foreground" : "text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.35)]"} ${size === 7 ? "size-7 text-xs" : "size-5 text-[0.625rem]"} ${className}`}
+      className={`relative grid shrink-0 place-items-center overflow-hidden rounded-md ${icon ? `font-semibold ${iconTextCls} bg-secondary text-foreground` : `font-brand font-bold ${initialTextCls} text-white [text-shadow:0_1px_2px_rgb(0_0_0/0.35)]`} ${sizeCls} ${className}`}
       aria-label={name}
       title={name}
     >
-      {icon ? <img src={icon} alt="" className="size-full object-cover" /> : <><MarbleBackground seed={id} /><span className="relative">{avatarInitial(name)}</span></>}
+      {icon ? <img src={icon} alt="" className="size-full object-cover" /> : <><MarbleBackground seed={id} /><span className="relative -translate-x-[1px] [-webkit-text-stroke:0.5px_currentColor]">{avatarInitial(name)}</span></>}
     </span>
   )
 }
