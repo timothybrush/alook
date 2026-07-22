@@ -37,7 +37,7 @@ export function MentionPill({
   const className = [
     "rounded-[4px] px-1 font-medium",
     everyone ? "bg-primary/15 text-primary" : "bg-accent text-foreground",
-    onClick ? "cursor-pointer hover:underline" : "",
+    onClick ? "cursor-pointer transition-colors hover:bg-primary/15 hover:text-primary" : "",
   ].join(" ")
   if (onClick) {
     return (
@@ -68,12 +68,14 @@ export function ChannelPill({
   const className = [
     "inline-flex items-center gap-1 rounded-lg bg-accent px-1 font-medium text-foreground",
     muted ? "opacity-60" : "",
-    onClick ? "cursor-pointer hover:underline" : "",
+    onClick ? "group/pill cursor-pointer transition-colors hover:bg-primary/15 hover:text-primary" : "",
   ].join(" ")
   const content = (
     <>
       <ChannelIcon className="text-xs" />
-      {serverPrefix && <span className="text-muted-foreground">{serverPrefix} /</span>}
+      {serverPrefix && (
+        <span className="text-muted-foreground transition-colors group-hover/pill:text-primary">{serverPrefix} /</span>
+      )}
       {children}
     </>
   )
@@ -103,7 +105,7 @@ export function ServerPill({
   const className = [
     "inline-flex items-center gap-1 rounded-lg bg-accent px-1 font-medium text-foreground",
     muted ? "opacity-60" : "",
-    onClick ? "cursor-pointer hover:underline" : "",
+    onClick ? "group/pill cursor-pointer transition-colors hover:bg-primary/15 hover:text-primary" : "",
   ].join(" ")
   const content = (
     <>
