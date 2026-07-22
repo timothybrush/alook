@@ -11,10 +11,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { Avatar } from "./avatar"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { toastApiError } from "@/lib/api/client"
 import { hasStatus } from "./status-presets"
 import { tid } from "@/lib/community/testids"
 import type { Member, Role, OpenProfile, MemberManageContext } from "./_types"
 import { canManageServer, isServerOwner, ROLES, isPresenceOnline, isPresenceOffline } from "./_types"
+
+// The Leave/Remove confirm flow the row menu opens (private channel/post/thread).
+type ManageConfirm = { kind: "leave" | "remove"; member: Member }
 
 const SETTABLE_ROLES: Role[] = ["admin", "member"]
 
@@ -110,9 +114,16 @@ export function MemberList({
   myRole?: Role
   onOpenProfile?: OpenProfile
   onSetRole?: (name: string, role: Role) => void
-  onKick?: (name: string) => void
+  onKick?: (memberId: string) => Promise<unknown> | void
 }) {
-  const [kickTarget, setKickTarget] = useState<string | null>(null)
+  // Kick target stores BOTH the display name (for the confirm title) and the
+  // member row id (what the DELETE route keys on — passing the name here was a
+  // latent 404 bug on the community right-panel kick path).
+  const [kickTarget, setKickTarget] = useState<{ name: string; memberId: string } | null>(null)
+  const [kicking, setKicking] = useState(false)
+  // Leave/Remove confirm (private channel/post/thread roster).
+  const [manageConfirm, setManageConfirm] = useState<ManageConfirm | null>(null)
+  const [actioning, setActioning] = useState(false)
   const [query, setQuery] = useState("")
   const canManage = canManageServer(myRole)
 
@@ -166,13 +177,59 @@ export function MemberList({
     <>
       <ConfirmDialog
         open={!!kickTarget}
-        onOpenChange={(o) => { if (!o) setKickTarget(null) }}
-        title={`Kick ${kickTarget}?`}
+        onOpenChange={(o) => { if (!o && !kicking) setKickTarget(null) }}
+        title={`Kick ${kickTarget?.name}?`}
         description="They will be removed from this server but can rejoin with an invite."
         confirmLabel="Kick"
+        loadingLabel="Kicking…"
+        loading={kicking}
         confirmVariant="destructive"
-        onConfirm={() => { if (kickTarget) onKick?.(kickTarget); setKickTarget(null) }}
+        onConfirm={async () => {
+          if (!kickTarget) return
+          setKicking(true)
+          try {
+            await onKick?.(kickTarget.memberId)
+            setKickTarget(null)
+          } catch (e) {
+            toastApiError(e, "Failed to kick member")
+          } finally {
+            setKicking(false)
+          }
+        }}
       />
+      {manageConfirm && (
+        <ConfirmDialog
+          open
+          onOpenChange={(o) => { if (!o && !actioning) setManageConfirm(null) }}
+          title={
+            manageConfirm.kind === "leave"
+              ? `Leave /${manageContext?.unitLabel ?? ""}?`
+              : `Remove ${manageConfirm.member.name}?`
+          }
+          description={
+            manageConfirm.kind === "leave"
+              ? "You'll lose access until you're added back."
+              : "They'll lose access until they're added back."
+          }
+          confirmLabel={manageConfirm.kind === "leave" ? "Leave" : "Remove"}
+          loadingLabel={manageConfirm.kind === "leave" ? "Leaving…" : "Removing…"}
+          loading={actioning}
+          confirmVariant="destructive"
+          onConfirm={async () => {
+            if (!manageContext) return
+            setActioning(true)
+            try {
+              const fn = manageConfirm.kind === "leave" ? manageContext.onLeave : manageContext.onRemove
+              await fn(manageConfirm.member.userId)
+              setManageConfirm(null)
+            } catch (e) {
+              toastApiError(e, manageConfirm.kind === "leave" ? "Failed to leave" : "Failed to remove")
+            } finally {
+              setActioning(false)
+            }
+          }}
+        />
+      )}
       <aside className="flex h-full flex-col bg-background">
         {(onSearch || onAddMember) && (
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
@@ -232,7 +289,8 @@ export function MemberList({
                         showDiscriminator={duplicateNames.has(item.member.name.toLowerCase())}
                         onOpenProfile={onOpenProfile}
                         onSetRole={onSetRole}
-                        onKick={setKickTarget}
+                        onKick={(mem) => setKickTarget({ name: mem.name, memberId: mem.id })}
+                        onRequestManage={(kind, mem) => setManageConfirm({ kind, member: mem })}
                         manageContext={manageContext}
                       />
                     )}
@@ -266,6 +324,7 @@ function MemberRow({
   onOpenProfile,
   onSetRole,
   onKick,
+  onRequestManage,
   manageContext,
 }: {
   mem: Member
@@ -277,7 +336,11 @@ function MemberRow({
   showDiscriminator: boolean
   onOpenProfile?: OpenProfile
   onSetRole?: (name: string, role: Role) => void
-  onKick: (name: string) => void
+  // Opens the server-kick confirm — receives the member so the caller can key
+  // the DELETE on the member row id (not the display name).
+  onKick: (mem: Member) => void
+  // Opens the Leave/Remove confirm for a private channel/post/thread row.
+  onRequestManage: (kind: "leave" | "remove", mem: Member) => void
   manageContext?: MemberManageContext
 }) {
   const button = (
@@ -325,11 +388,11 @@ function MemberRow({
         <ContextMenuContent className="w-48">
           <div className="truncate px-2 py-1 text-xs font-semibold text-muted-foreground">{mem.name}</div>
           {canLeave ? (
-            <ContextMenuItem onClick={() => manageContext.onLeave(mem.userId)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
+            <ContextMenuItem onClick={() => onRequestManage("leave", mem)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
               <LogOut className="size-4" /> Leave
             </ContextMenuItem>
           ) : (
-            <ContextMenuItem onClick={() => manageContext.onRemove(mem.userId)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
+            <ContextMenuItem onClick={() => onRequestManage("remove", mem)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
               <UserMinus className="size-4" /> Remove {mem.name}
             </ContextMenuItem>
           )}
@@ -359,7 +422,7 @@ function MemberRow({
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onKick(mem.name)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
+        <ContextMenuItem onClick={() => onKick(mem)} className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive">
           <UserMinus className="size-4" /> Kick {mem.name}
         </ContextMenuItem>
       </ContextMenuContent>

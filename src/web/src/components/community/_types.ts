@@ -348,6 +348,12 @@ export type MemberManageContext = {
   // The viewer created this unit → their own row shows no Leave (owners keep
   // the unit), and they may Remove other explicit members.
   viewerIsCreator: boolean
-  onLeave: (userId: string) => void
-  onRemove: (userId: string) => void
+  // The unit's display name (channel/post/thread), used in the Leave confirm
+  // dialog title ("Leave /general?"). Optional for back-compat.
+  unitLabel?: string
+  // Return a promise so the confirm dialog can show a loading state until the
+  // remove settles. Resolved value is ignored (mutateAsync resolves to the API
+  // payload) — the dialog only awaits settlement.
+  onLeave: (userId: string) => Promise<unknown> | void
+  onRemove: (userId: string) => Promise<unknown> | void
 }

@@ -718,14 +718,13 @@ function ChannelView() {
     ? {
         viewerUserId: currentUser.id,
         viewerIsCreator: viewerIsUnitCreator,
+        unitLabel: currentChannelMeta?.name ?? channelName,
+        // Return the promise so the confirm dialog can show a loading state and
+        // surface errors from ONE place (MemberList's confirm catch).
         onLeave: (userId: string) =>
-          (isThread ? removeThreadParticipantMut : removeChannelMemberMut).mutate(userId, {
-            onError: (e) => toastApiError(e, "Failed to leave"),
-          }),
+          (isThread ? removeThreadParticipantMut : removeChannelMemberMut).mutateAsync(userId),
         onRemove: (userId: string) =>
-          (isThread ? removeThreadParticipantMut : removeChannelMemberMut).mutate(userId, {
-            onError: (e) => toastApiError(e, "Failed to remove"),
-          }),
+          (isThread ? removeThreadParticipantMut : removeChannelMemberMut).mutateAsync(userId),
       }
     : undefined
   const panelProps = {
@@ -755,12 +754,11 @@ function ChannelView() {
         onError: (e) => toastApiError(e, "Failed to update role"),
       })
     },
-    onKickMember: (memberId: string) => {
-      kickMemberMut.mutate({ serverId, memberId }, {
-        onSuccess: () => toast("Member kicked"),
-        onError: (e) => toastApiError(e, "Failed to kick member"),
-      })
-    },
+    // Return the promise (and success toast) so MemberList's confirm dialog can
+    // show a loading state; the error is surfaced from MemberList's catch (one
+    // toast source).
+    onKickMember: (memberId: string) =>
+      kickMemberMut.mutateAsync({ serverId, memberId }).then(() => toast("Member kicked")),
     onJumpToMessage: (id: string) => {
       setScrollToMessageId(id)
       setTimeout(() => setScrollToMessageId(null), 100)
@@ -787,8 +785,7 @@ function ChannelView() {
           title={`Add participants to /${currentChannelMeta?.name ?? channelName}`}
           subtitle="Added people are notified of new replies. Anyone with access can already read the thread."
           candidates={candidates}
-          addPending={addThreadParticipantMut.isPending}
-          onAdd={async (userId) => { await addThreadParticipantMut.mutateAsync(userId) }}
+          onAdd={(userId) => addThreadParticipantMut.mutateAsync(userId)}
           onClose={() => setManageMembersOpen(false)}
         />
       )
@@ -803,8 +800,7 @@ function ChannelView() {
         title={`Add members to /${channelName}`}
         subtitle="Added members can see and post in this channel."
         candidates={candidates}
-        addPending={addChannelMemberMut.isPending}
-        onAdd={async (userId) => { await addChannelMemberMut.mutateAsync(userId) }}
+        onAdd={(userId) => addChannelMemberMut.mutateAsync(userId)}
         onClose={() => setManageMembersOpen(false)}
       />
     )

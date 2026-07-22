@@ -1,6 +1,5 @@
 "use client"
 
-import { toast } from "sonner"
 import { AddMembersDialog } from "./add-members-dialog"
 import {
   useAddableMembers,
@@ -36,14 +35,7 @@ export function ChannelAddMembersDialog({
       title={`Add members to /${channelName}`}
       subtitle="Added members can see and post in this channel."
       candidates={candidates}
-      addPending={addMember.isPending}
-      onAdd={async (userId) => {
-        try {
-          await addMember.mutateAsync(userId)
-        } catch (err) {
-          toast(err instanceof Error ? err.message : "Couldn't add member")
-        }
-      }}
+      onAdd={(userId) => addMember.mutateAsync(userId)}
       onClose={onClose}
     />
   )
