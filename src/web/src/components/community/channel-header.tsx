@@ -158,12 +158,11 @@ function ChannelOverflowMenu({
 }
 
 // Server identity chip — icon (or initial-letter fallback) in a rounded
-// square. Originally just the mobile breadcrumb's leading segment (the
-// channel segment that follows leads with its own "/" or forum icon, which
-// serves as the separator), now also reused by `ChannelSidebar`'s header at
-// the larger `size={7}`. Tailwind only picks up complete literal class names
-// at build time, so `size` can't be interpolated — it's an explicit ternary.
-export function ServerCrumb({ id, name, icon, size = 5, className = "" }: { id: string; name: string; icon: string | null; size?: 5 | 6 | 7; className?: string }) {
+// square. The mobile breadcrumb's leading segment (the channel segment that
+// follows leads with its own "/" or forum icon, which serves as the
+// separator). Tailwind only picks up complete literal class names at build
+// time, so `size` can't be interpolated — it's an explicit ternary.
+function ServerCrumb({ id, name, icon, size = 5, className = "" }: { id: string; name: string; icon: string | null; size?: 5 | 6 | 7; className?: string }) {
   const sizeCls = size === 7 ? "size-7" : size === 6 ? "size-6" : "size-5"
   const iconTextCls = size === 7 ? "text-xs" : size === 6 ? "text-[0.6875rem]" : "text-[0.625rem]"
   const initialTextCls = size === 7 ? "text-base" : size === 6 ? "text-sm" : "text-xs"

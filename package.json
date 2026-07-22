@@ -12,6 +12,7 @@
     "reinstall": "pnpm run clean && pnpm install",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
+    "knip": "turbo run knip",
     "dev:web": "pnpm --filter @alook/web dev",
     "dev:cli": "ALOOK_SERVER_URL=http://localhost:3000 ALOOK_PROJECT_ROOT=$PWD/.alook ALOOK_HEALTH_PORT=19515 pnpm --filter @alook/cli dev",
     "daemon": "pnpm --filter @alook/daemon exec tsx src/cli/index.ts daemon",
@@ -42,7 +43,7 @@
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {
-    "pre-commit": "pnpm typecheck && pnpm lint && pnpm test && pnpm typegrep:ws"
+    "pre-commit": "pnpm typecheck && pnpm lint && pnpm test && pnpm typegrep:ws && pnpm knip"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.10",
