@@ -15,25 +15,54 @@ const DEFAULT_BASE_DELAY_MS = 100
 const defaultLogger: Logger = createLogger({ service: "d1-resilience" })
 
 const RETRYABLE_SIGNATURES = [
+  // workerd / D1 transient runtime errors.
   "internal error; reference",
   "SQLITE_BUSY",
   "database is locked",
   "SQLITE_INTERRUPT",
+  // CF RPC / fetch transient shapes. `fetch failed` covers Node's
+  // fetch-rejection wrapper, `ETIMEDOUT` / `ECONNRESET` / `EAI_AGAIN`
+  // catch DNS + socket transients seen from daemon-plane routes.
   "Network connection lost",
   "connection reset",
+  "fetch failed",
+  "ETIMEDOUT",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EAI_AGAIN",
+  // `timeout after` catches Node's / undici's phrase; leading space on the
+  // others avoids matching column names like `timeout_at` inside a
+  // SQLITE_CONSTRAINT message.
+  "timeout after",
+  " timed out",
+  "network timeout",
+  "socket hang up",
 ]
 
-function peelDrizzle(err: unknown): unknown {
-  let cur = err
+/**
+ * Peel a DrizzleQueryError chain to its underlying cause. If Drizzle ever
+ * wraps a transient RPC error WITHOUT preserving `.cause` (older versions
+ * of the ORM did this, and some codepaths still do), the bare wrapper's
+ * message is `Failed query: …` — no signature matches, so classification
+ * would silently return "not retryable" and every retry across the fleet
+ * stops working. Return `null` in that case so the caller can conservatively
+ * treat a bare DrizzleQueryError as retryable.
+ */
+function peelDrizzle(err: unknown): { peeled: unknown; bareWrapper: boolean } {
+  if (!(err instanceof DrizzleQueryError)) return { peeled: err, bareWrapper: false }
+  let cur: unknown = err
   while (cur instanceof DrizzleQueryError) {
-    if (!cur.cause) return cur
+    if (!cur.cause) return { peeled: cur, bareWrapper: true }
     cur = cur.cause
   }
-  return cur
+  return { peeled: cur, bareWrapper: false }
 }
 
 export function isRetryableD1Error(err: unknown): boolean {
-  const peeled = peelDrizzle(err)
+  const { peeled, bareWrapper } = peelDrizzle(err)
+  // A DrizzleQueryError with no `.cause` is a database error whose transient
+  // shape we can't inspect — retry conservatively rather than fail-fast.
+  if (bareWrapper) return true
   if (!(peeled instanceof Error)) return false
   const msg = peeled.message
   if (typeof msg !== "string") return false

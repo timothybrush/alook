@@ -126,6 +126,46 @@ describe("classifier — isRetryableD1Error", () => {
     expect(isRetryableD1Error(new DrizzleQueryError("q", [], new Error("Network connection lost")))).toBe(true)
     expect(isRetryableD1Error(new DrizzleQueryError("q", [], new Error("connection reset by peer")))).toBe(true)
   })
+
+  it("retries fetch/socket-level transients daemon-plane routes see", () => {
+    for (const sig of [
+      "fetch failed",
+      "ETIMEDOUT",
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "EAI_AGAIN",
+      "request timeout after 5000ms",
+      "socket hang up",
+    ]) {
+      expect(isRetryableD1Error(new DrizzleQueryError("q", [], new Error(sig)))).toBe(true)
+    }
+  })
+
+  it("does NOT match column names containing 'timeout' in a SQLITE_CONSTRAINT message", () => {
+    // Guard the tightened matcher — bare `timeout` used to match here.
+    const err = new DrizzleQueryError(
+      "INSERT",
+      [],
+      new Error("SQLITE_CONSTRAINT_NOTNULL: NOT NULL constraint failed: session.timeout_at"),
+    )
+    expect(isRetryableD1Error(err)).toBe(false)
+  })
+
+  it("conservatively retries a bare DrizzleQueryError with no .cause", () => {
+    // Older Drizzle versions (and some codepaths in current ones) wrap a
+    // transient RPC error without preserving `.cause` — the wrapper's
+    // message is `Failed query: …` with no signature. Treat as retryable
+    // rather than fail-fast.
+    class BareDQE extends DrizzleQueryError {
+      constructor() {
+        super("SELECT 1", [], undefined as unknown as Error)
+        // @ts-expect-error — deliberately null out cause to simulate the
+        // bare-wrapper shape.
+        this.cause = undefined
+      }
+    }
+    expect(isRetryableD1Error(new BareDQE())).toBe(true)
+  })
 })
 
 describe("readOrStale", () => {

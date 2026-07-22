@@ -625,6 +625,71 @@ export class WebSocketDurableObject extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Date.now() + (COMMUNITY_MACHINE_OFFLINE_THRESHOLD_MS - elapsed))
   }
 
+  /**
+   * Shared scaffold for every daemon-reported bot frame (agent_activity,
+   * agent_typing, agent_typing_stop, bot_audit_event):
+   *
+   *   1. resolve binding → if the query throws, log `phase=binding_check`
+   *      under `ws_frame_dropped` and drop (never `_write` — the write
+   *      never ran and this is a security-adjacent lookup failure).
+   *   2. verify ownership → drop with a plain warn if `binding.machineId`
+   *      doesn't match this DO's identity (frame-supplied agentId can't
+   *      be trusted).
+   *   3. run the frame-specific write → if it throws, log `phase=write`
+   *      under `writeCategory` (`ws_frame_dropped_write` for audit events
+   *      feeding the SLO, `ws_frame_dropped` for everything else).
+   *
+   * Centralized here so a new frame type CAN'T ship with the wrong log
+   * category or a missing phase tag — the whole reason the discipline
+   * exists.
+   */
+  private async handleFrameForBoundBot<B>(args: {
+    frameType: string
+    agentId: string
+    machineId: string
+    writeCategory?: "ws_frame_dropped" | "ws_frame_dropped_write"
+    resolveBinding: () => Promise<B | null | undefined>
+    isMatch: (binding: B) => boolean
+    write: (binding: B) => Promise<void>
+  }): Promise<void> {
+    const { frameType, agentId, machineId, resolveBinding, isMatch, write } = args
+    const writeCategory = args.writeCategory ?? "ws_frame_dropped"
+
+    let binding: B | null | undefined
+    try {
+      binding = await resolveBinding()
+    } catch (err) {
+      log.warn("ws_frame_dropped", {
+        category: "ws_frame_dropped",
+        frame_type: frameType,
+        phase: "binding_check",
+        agentId,
+        machineId,
+        err: err instanceof Error ? err : new Error(String(err)),
+      })
+      return
+    }
+    if (!binding || !isMatch(binding)) {
+      log.warn(`${frameType} frame for a bot not bound to this machine — dropped`, {
+        agentId,
+        machineId,
+      })
+      return
+    }
+    try {
+      await write(binding)
+    } catch (err) {
+      log.warn("ws_frame_dropped", {
+        category: writeCategory,
+        frame_type: frameType,
+        phase: "write",
+        agentId,
+        machineId,
+        err: err instanceof Error ? err : new Error(String(err)),
+      })
+    }
+  }
+
   private async handleCommunityMachineMessage(parsed: unknown): Promise<void> {
     // Identity lives in ctx.storage — one D1 lookup at accept, zero here.
     const identity = await this.ctx.storage.get<CommunityMachineIdentity>(IDENTITY_KEY)
@@ -707,63 +772,40 @@ export class WebSocketDurableObject extends DurableObject<Env> {
     if (activityParse.success) {
       const { agentId, state } = activityParse.data
       const db = createDb(this.env.DB)
-      let binding: Awaited<ReturnType<typeof queries.communityBot.getBotBinding>>
-      try {
-        binding = await queries.communityBot.getBotBinding(db, agentId)
-      } catch (err) {
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped",
-          frame_type: "agent_activity",
-          phase: "binding_check",
-          agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-        return
-      }
-      if (!binding || binding.machineId !== identity.machineId) {
-        log.warn("agent_activity frame for a bot not bound to this machine — dropped", {
-          agentId,
-          machineId: identity.machineId,
-        })
-        return
-      }
-      try {
-        const prior = await queries.communityUserProfile.getProfile(db, agentId)
-        const priorEmoji = prior?.statusEmoji ?? null
-        const priorText = prior?.statusText ?? null
-        const priorIsRunning =
-          priorEmoji !== null &&
-          RUNNING_PRESETS.some((p) => p.emoji === priorEmoji && p.text === priorText)
-        // For `running`, reuse the currently-persisted preset if it's already
-        // one of the running variants — matches the "one phrase per episode"
-        // invariant instead of re-rolling on every derived running transition
-        // (turn_end → idle → wake → running fires this repeatedly).
-        const preset =
-          state === "running" && priorIsRunning
-            ? { emoji: priorEmoji as string, text: priorText as string }
-            : pickBotActivityPreset(state, Math.random())
-        if (preset.emoji === priorEmoji && preset.text === priorText) return
-        await queries.communityUserProfile.updateProfile(db, agentId, {
-          statusEmoji: preset.emoji,
-          statusText: preset.text,
-        })
-        await this.broadcastToAudience(agentId, {
-          type: "community:status.update",
-          userId: agentId,
-          statusEmoji: preset.emoji,
-          statusText: preset.text,
-        })
-      } catch (err) {
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped",
-          frame_type: "agent_activity",
-          phase: "write",
-          agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-      }
+      await this.handleFrameForBoundBot({
+        frameType: "agent_activity",
+        agentId,
+        machineId: identity.machineId,
+        resolveBinding: () => queries.communityBot.getBotBinding(db, agentId),
+        isMatch: (binding) => binding.machineId === identity.machineId,
+        write: async () => {
+          const prior = await queries.communityUserProfile.getProfile(db, agentId)
+          const priorEmoji = prior?.statusEmoji ?? null
+          const priorText = prior?.statusText ?? null
+          const priorIsRunning =
+            priorEmoji !== null &&
+            RUNNING_PRESETS.some((p) => p.emoji === priorEmoji && p.text === priorText)
+          // For `running`, reuse the currently-persisted preset if it's already
+          // one of the running variants — matches the "one phrase per episode"
+          // invariant instead of re-rolling on every derived running transition
+          // (turn_end → idle → wake → running fires this repeatedly).
+          const preset =
+            state === "running" && priorIsRunning
+              ? { emoji: priorEmoji as string, text: priorText as string }
+              : pickBotActivityPreset(state, Math.random())
+          if (preset.emoji === priorEmoji && preset.text === priorText) return
+          await queries.communityUserProfile.updateProfile(db, agentId, {
+            statusEmoji: preset.emoji,
+            statusText: preset.text,
+          })
+          await this.broadcastToAudience(agentId, {
+            type: "community:status.update",
+            userId: agentId,
+            statusEmoji: preset.emoji,
+            statusText: preset.text,
+          })
+        },
+      })
       return
     }
 
@@ -778,86 +820,38 @@ export class WebSocketDurableObject extends DurableObject<Env> {
     if (typingParse.success) {
       const { agentId, dmConversationId } = typingParse.data
       const db = createDb(this.env.DB)
-      let binding: Awaited<ReturnType<typeof queries.communityBot.getBotBindingWithOwner>>
-      try {
-        binding = await queries.communityBot.getBotBindingWithOwner(db, agentId)
-      } catch (err) {
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped",
-          frame_type: "agent_typing",
-          phase: "binding_check",
-          agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-        return
-      }
-      if (!binding || binding.machineId !== identity.machineId) {
-        log.warn("agent_typing frame for a bot not bound to this machine — dropped", {
-          agentId,
-          machineId: identity.machineId,
-        })
-        return
-      }
-      try {
-        // DM participancy is enforced inside `fanOutTyping` — no need to
-        // pre-query `getDM` here at 5s cadence.
-        const event = JSON.stringify({
-          type: "community:typing.start",
-          dmConversationId,
-          userId: agentId,
-        })
-        await this.fanOutTyping(agentId, undefined, dmConversationId, undefined, event)
-      } catch (err) {
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped",
-          frame_type: "agent_typing",
-          phase: "write",
-          agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-      }
+      await this.handleFrameForBoundBot({
+        frameType: "agent_typing",
+        agentId,
+        machineId: identity.machineId,
+        resolveBinding: () => queries.communityBot.getBotBindingWithOwner(db, agentId),
+        isMatch: (binding) => binding.machineId === identity.machineId,
+        write: async () => {
+          // DM participancy is enforced inside `fanOutTyping` — no need to
+          // pre-query `getDM` here at 5s cadence.
+          const event = JSON.stringify({
+            type: "community:typing.start",
+            dmConversationId,
+            userId: agentId,
+          })
+          await this.fanOutTyping(agentId, undefined, dmConversationId, undefined, event)
+        },
+      })
       return
     }
     const typingStopParse = AgentTypingStopMessageSchema.safeParse(parsed)
     if (typingStopParse.success) {
       const { agentId, dmConversationId } = typingStopParse.data
       const db = createDb(this.env.DB)
-      let binding: Awaited<ReturnType<typeof queries.communityBot.getBotBindingWithOwner>>
-      try {
-        binding = await queries.communityBot.getBotBindingWithOwner(db, agentId)
-      } catch (err) {
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped",
-          frame_type: "agent_typing_stop",
-          phase: "binding_check",
-          agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-        return
-      }
-      if (!binding || binding.machineId !== identity.machineId) {
-        log.warn("agent_typing_stop frame for a bot not bound to this machine — dropped", {
-          agentId,
-          machineId: identity.machineId,
-        })
-        return
-      }
-      try {
+      await this.handleFrameForBoundBot({
+        frameType: "agent_typing_stop",
+        agentId,
+        machineId: identity.machineId,
+        resolveBinding: () => queries.communityBot.getBotBindingWithOwner(db, agentId),
+        isMatch: (binding) => binding.machineId === identity.machineId,
         // DM participancy enforced inside `fanOutTypingStop`.
-        await this.fanOutTypingStop(agentId, dmConversationId)
-      } catch (err) {
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped",
-          frame_type: "agent_typing_stop",
-          phase: "write",
-          agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-      }
+        write: () => this.fanOutTypingStop(agentId, dmConversationId),
+      })
       return
     }
 
@@ -869,35 +863,10 @@ export class WebSocketDurableObject extends DurableObject<Env> {
     const auditParse = HostBotAuditEventFrameSchema.safeParse(parsed)
     if (auditParse.success) {
       const frame = auditParse.data
-      const db = createDb(this.env.DB)
-      let binding: Awaited<ReturnType<typeof queries.communityBot.getBotBindingWithOwner>>
-      try {
-        binding = await queries.communityBot.getBotBindingWithOwner(db, frame.agentId)
-      } catch (err) {
-        // Binding check treated as `ws_frame_dropped` (security-adjacent
-        // lookup failure — a daemon reporting on a bot it may not own).
-        // NOT `ws_frame_dropped_write` — that category is reserved for the
-        // insert-side failure that feeds the audit-loss SLO.
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped",
-          frame_type: "bot_audit_event",
-          phase: "binding_check",
-          agentId: frame.agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-        return
-      }
-      if (!binding || binding.machineId !== identity.machineId) {
-        log.warn("bot_audit_event frame for a bot not bound to this machine — dropped", {
-          agentId: frame.agentId,
-          machineId: identity.machineId,
-        })
-        return
-      }
-      // Serialize BEFORE the write try — a non-serializable payload (BigInt,
-      // circular ref, function) throwing here has nothing to do with the
-      // audit-loss SLO and must not be logged under `ws_frame_dropped_write`.
+      // Serialize BEFORE the shared scaffold — a non-serializable payload
+      // (BigInt, circular ref, function) throwing here has nothing to do
+      // with the audit-loss SLO and must not be logged under
+      // `ws_frame_dropped_write`.
       let payload: string
       try {
         payload = JSON.stringify(frame.event.payload)
@@ -912,38 +881,40 @@ export class WebSocketDurableObject extends DurableObject<Env> {
         })
         return
       }
-      try {
-        const inserted = await queries.communityBotAuditLog.insertBotActivityEventAndPrune(db, {
-          botId: frame.agentId,
-          sessionId: frame.sessionId ?? null,
-          launchId: frame.launchId ?? null,
-          kind: frame.event.kind,
-          payload,
-        })
-        if (!inserted) return
-        await this.notifyUserDO(binding.ownerUserId, {
-          type: "community:bot.audit_event",
-          botId: frame.agentId,
-          id: inserted.id,
-          kind: frame.event.kind,
-          payload: frame.event.payload,
-          sessionId: frame.sessionId ?? null,
-          launchId: frame.launchId ?? null,
-          createdAt: inserted.createdAt,
-        }).catch(() => { })
-      } catch (err) {
+      const db = createDb(this.env.DB)
+      await this.handleFrameForBoundBot({
+        frameType: "bot_audit_event",
+        agentId: frame.agentId,
+        machineId: identity.machineId,
         // `ws_frame_dropped_write` — the audit-loss SLO category. Emitted at
         // full-rate ingest via ws-do's `head_sampling_rate = 1.0` so a
-        // low-rate drift doesn't hide behind 10% sampling.
-        log.warn("ws_frame_dropped", {
-          category: "ws_frame_dropped_write",
-          frame_type: "bot_audit_event",
-          phase: "write",
-          agentId: frame.agentId,
-          machineId: identity.machineId,
-          err: err instanceof Error ? err : new Error(String(err)),
-        })
-      }
+        // low-rate drift doesn't hide behind 10% sampling. Binding-check
+        // failures stay on the plain `ws_frame_dropped` category via the
+        // helper's default.
+        writeCategory: "ws_frame_dropped_write",
+        resolveBinding: () => queries.communityBot.getBotBindingWithOwner(db, frame.agentId),
+        isMatch: (binding) => binding.machineId === identity.machineId,
+        write: async (binding) => {
+          const inserted = await queries.communityBotAuditLog.insertBotActivityEventAndPrune(db, {
+            botId: frame.agentId,
+            sessionId: frame.sessionId ?? null,
+            launchId: frame.launchId ?? null,
+            kind: frame.event.kind,
+            payload,
+          })
+          if (!inserted) return
+          await this.notifyUserDO(binding.ownerUserId, {
+            type: "community:bot.audit_event",
+            botId: frame.agentId,
+            id: inserted.id,
+            kind: frame.event.kind,
+            payload: frame.event.payload,
+            sessionId: frame.sessionId ?? null,
+            launchId: frame.launchId ?? null,
+            createdAt: inserted.createdAt,
+          }).catch(() => { })
+        },
+      })
       return
     }
 

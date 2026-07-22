@@ -29,6 +29,25 @@ function serviceUnavailable(): NextResponse {
 }
 
 /**
+ * Run a D1 lookup through `withD1Retry`; on retry-exhaust log the failing
+ * step and return a `NextResponse` sentinel the caller can early-return.
+ * Every lookup MUST route through this helper so a new step can't
+ * accidentally ship with a bare `try/catch` that either swallows the log
+ * or converts the 503 into a 401 (which would rotate CLI runner keys).
+ */
+async function lookupOr503<T>(
+  step: string,
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; response: NextResponse }> {
+  try {
+    return { ok: true, value: await withD1Retry(fn, RETRY_OPTS) }
+  } catch (err) {
+    log.warn("d1_lookup_failed", { step, err: err instanceof Error ? err : new Error(String(err)) })
+    return { ok: false, response: serviceUnavailable() }
+  }
+}
+
+/**
  * Agent-runner auth middleware for the CLI bridge (`/api/community/agent/*`).
  * Requires `Authorization: Bearer crk_…`. Cloned from `withCommunityDaemonAuth`
  * but needs BOTH a bot identity and an owner identity — both come off the
@@ -40,9 +59,12 @@ function serviceUnavailable(): NextResponse {
  *
  * D1-transient failure semantics: each of the 3 D1 reads runs through
  * `withD1Retry`; on retry-exhaust we return 503 + `Retry-After: 1` (RFC 9110
- * §15.6.4) so CLI bridges treat it as retryable and do NOT rotate their
- * runner key. 401 is reserved for real auth failures (bad token, revoked
- * runner key, bot deleted, binding mismatch).
+ * §15.6.4). What that buys us: 401 is reserved for real auth failures (bad
+ * token, revoked runner key, bot deleted, binding mismatch) — so a
+ * transient D1 blip surfaces as "temporarily unavailable" and does NOT
+ * trip the CLI's runner-key rotation path (which is only ever driven by
+ * 401). The CLI itself does not auto-retry on 503 today; the bot's next
+ * wake naturally re-issues the command against a healthy D1.
  */
 export function withAgentRunnerAuth(handler: AgentRunnerAuthenticatedHandler) {
   return async (
@@ -68,44 +90,29 @@ export function withAgentRunnerAuth(handler: AgentRunnerAuthenticatedHandler) {
     const cloudflareEnv = env as Env
     const db = getDb(cloudflareEnv.DB)
 
-    let row: Awaited<ReturnType<typeof queries.communityMachine.findActiveAgentRunnerKeyByBearer>>
-    try {
-      row = await withD1Retry(
-        () => queries.communityMachine.findActiveAgentRunnerKeyByBearer(db, raw),
-        RETRY_OPTS,
-      )
-    } catch (err) {
-      log.warn("d1_lookup_failed", { step: "findActiveAgentRunnerKeyByBearer", err: err instanceof Error ? err : new Error(String(err)) })
-      return serviceUnavailable()
-    }
+    const rowLookup = await lookupOr503("findActiveAgentRunnerKeyByBearer", () =>
+      queries.communityMachine.findActiveAgentRunnerKeyByBearer(db, raw),
+    )
+    if (!rowLookup.ok) return rowLookup.response
+    const row = rowLookup.value
     if (!row) {
       return NextResponse.json({ error: "runner key revoked or unknown" }, { status: 401 })
     }
 
-    let botUser: Awaited<ReturnType<typeof queries.user.getUserInternal>>
-    try {
-      botUser = await withD1Retry(
-        () => queries.user.getUserInternal(db, row!.agentId),
-        RETRY_OPTS,
-      )
-    } catch (err) {
-      log.warn("d1_lookup_failed", { step: "getUserInternal", err: err instanceof Error ? err : new Error(String(err)) })
-      return serviceUnavailable()
-    }
+    const botLookup = await lookupOr503("getUserInternal", () =>
+      queries.user.getUserInternal(db, row.agentId),
+    )
+    if (!botLookup.ok) return botLookup.response
+    const botUser = botLookup.value
     if (!botUser || !botUser.isBot || botUser.deletedAt !== null) {
       return NextResponse.json({ error: "bot not found or inactive" }, { status: 401 })
     }
 
-    let binding: Awaited<ReturnType<typeof queries.communityBot.getBotBinding>>
-    try {
-      binding = await withD1Retry(
-        () => queries.communityBot.getBotBinding(db, row!.agentId),
-        RETRY_OPTS,
-      )
-    } catch (err) {
-      log.warn("d1_lookup_failed", { step: "getBotBinding", err: err instanceof Error ? err : new Error(String(err)) })
-      return serviceUnavailable()
-    }
+    const bindingLookup = await lookupOr503("getBotBinding", () =>
+      queries.communityBot.getBotBinding(db, row.agentId),
+    )
+    if (!bindingLookup.ok) return bindingLookup.response
+    const binding = bindingLookup.value
     if (!binding || binding.machineId !== row.machineId) {
       return NextResponse.json({ error: "bot binding mismatch" }, { status: 401 })
     }
