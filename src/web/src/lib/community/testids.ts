@@ -29,10 +29,12 @@ export const tid = {
   threadIndicator: (msgId: string) => `community-thread-indicator-${msgId}`,
   railUnreadBadge: (serverId: string) => `community-rail-unread-badge-${serverId}`,
   // Forum post feed (ForumView). `forumPostCard` is the whole clickable card;
-  // `forumPostTagBtn` is the hover-revealed tag-edit icon; `forumPostAvatars`
-  // wraps the participant AvatarGroup; `forumTagChip` is a filter-bar tag chip.
+  // `forumPostTagBtn` is the hover-revealed tag-edit icon; `forumPostDeleteBtn`
+  // is the hover-revealed delete icon; `forumPostAvatars` wraps the participant
+  // AvatarGroup; `forumTagChip` is a filter-bar tag chip.
   forumPostCard: (id: string) => `community-forum-post-${id}`,
   forumPostTagBtn: (id: string) => `community-forum-post-tag-btn-${id}`,
+  forumPostDeleteBtn: (id: string) => `community-forum-post-delete-btn-${id}`,
   forumPostAvatars: (id: string) => `community-forum-post-avatars-${id}`,
   forumTagChip: (tag: string) => `community-forum-tag-chip-${tag}`,
 } as const

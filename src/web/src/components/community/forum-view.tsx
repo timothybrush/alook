@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { MessagesSquare, ListChevronsUpDown, Plus, Tag } from "lucide-react"
+import { MessagesSquare, ListChevronsUpDown, Plus, Tag, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { formatRelativeTime } from "./format-time"
 import { Badge } from "@/components/ui/badge"
@@ -11,6 +11,7 @@ import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { EmptyState } from "./empty-state"
 import { CreateForumPost, type NewForumPost } from "./create-forum-post"
 import { PostTagDialog } from "./post-tag-dialog"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { tid } from "@/lib/community/testids"
 import type { ForumPost } from "./_types"
 
@@ -25,6 +26,7 @@ const MAX_AVATARS = 4
 // card (creator + server managers), not a forum-wide manage mode.
 export function ForumView({
   posts, loading, onOpenPost, onCreatePost, onEditPostTags, canEditPostTags, savingTagsFor,
+  onDeletePost, canDeletePost, deletingPost,
 }: {
   posts: ForumPost[]
   loading?: boolean
@@ -36,10 +38,17 @@ export function ForumView({
   canEditPostTags?: (post: ForumPost) => boolean
   // The post id whose tag save is in flight, if any.
   savingTagsFor?: string | null
+  // Delete handler for a single post. Absent → delete disabled.
+  onDeletePost?: (post: ForumPost) => void
+  // Whether the current user may delete a given post (creator or manager).
+  canDeletePost?: (post: ForumPost) => boolean
+  // The post id whose delete is in flight, if any.
+  deletingPost?: string | null
 }) {
   const [tag, setTag] = useState("All")
   const [composing, setComposing] = useState(false)
   const [editingTagsFor, setEditingTagsFor] = useState<ForumPost | null>(null)
+  const [deletingFor, setDeletingFor] = useState<ForumPost | null>(null)
 
   // Deduped union of every post's tags — the forum's tag list is derived, not
   // stored. Only rendered when non-empty.
@@ -90,6 +99,7 @@ export function ForumView({
           <div className="flex flex-col gap-3">
             {filtered.map((p) => {
               const canEdit = !!onEditPostTags && (canEditPostTags?.(p) ?? false)
+              const canDelete = !!onDeletePost && (canDeletePost?.(p) ?? false)
               const others = p.participants.filter((m) => m.id !== p.authorId)
               const shown = others.slice(0, MAX_AVATARS)
               const overflow = others.length - shown.length
@@ -129,6 +139,18 @@ export function ForumView({
                         <Tag className="size-4" />
                       </button>
                     )}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        data-testid={tid.forumPostDeleteBtn(p.id)}
+                        disabled={deletingPost === p.id}
+                        onClick={(e) => { e.stopPropagation(); setDeletingFor(p) }}
+                        className={`${canEdit ? "" : "ml-auto "}grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-destructive focus-visible:opacity-100 group-hover/card:opacity-100 disabled:cursor-not-allowed disabled:opacity-50`}
+                        aria-label="Delete post"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
                   </div>
                   <h3 className="text-[15px] font-semibold leading-tight">{p.name}</h3>
                   <p className="line-clamp-2 text-sm text-muted-foreground">{p.preview}</p>
@@ -156,6 +178,17 @@ export function ForumView({
           allTags={allTags}
           saving={savingTagsFor === editingTagsFor.id}
           onSave={(tags) => { onEditPostTags?.(editingTagsFor.id, tags); setEditingTagsFor(null) }}
+        />
+      )}
+
+      {deletingFor && (
+        <ConfirmDialog
+          open
+          onOpenChange={(v) => { if (!v) setDeletingFor(null) }}
+          title="Delete post?"
+          description={`This permanently deletes “${deletingFor.name}” and all of its replies. This can't be undone.`}
+          confirmLabel="Delete post"
+          onConfirm={() => { const post = deletingFor; setDeletingFor(null); onDeletePost?.(post) }}
         />
       )}
     </>

@@ -29,7 +29,8 @@ describe("useCommunityStore", () => {
     expect(s.currentServerId).toBeNull()
     expect(s.currentChannelId).toBeNull()
     expect(s.currentChannelMeta).toBeNull()
-    expect(s.typingUsers).toEqual([])
+    expect(s.typingByScope).toBeInstanceOf(Map)
+    expect(s.typingByScope.size).toBe(0)
     expect(s.typingTimers).toBeInstanceOf(Map)
     expect(s.typingTimers.size).toBe(0)
     expect(s.lastTypingSent.size).toBe(0)
@@ -153,14 +154,16 @@ describe("useCommunityStore", () => {
       // populate typingTimers before the migration is finished.
       useCommunityStore.setState((prev) => {
         const typingTimers = new Map(prev.typingTimers)
-        typingTimers.set("user1", timerId)
+        typingTimers.set("ch:c1|user1", timerId)
+        const typingByScope = new Map(prev.typingByScope)
+        typingByScope.set("ch:c1", new Set(["user1"]))
         const lastTypingSent = new Map(prev.lastTypingSent)
         lastTypingSent.set("c1", Date.now())
         const reactionTimers = new Map(prev.reactionTimers)
         const rTimer = setTimeout(() => {}, 1_000)
         reactionTimers.set("m1:emoji", { timer: rTimer, originalMe: false })
         return {
-          typingUsers: ["user1"],
+          typingByScope,
           typingTimers,
           lastTypingSent,
           reactionTimers,
@@ -178,7 +181,7 @@ describe("useCommunityStore", () => {
       expect(after.currentServerId).toBeNull()
       expect(after.currentChannelId).toBeNull()
       expect(after.currentChannelMeta).toBeNull()
-      expect(after.typingUsers).toEqual([])
+      expect(after.typingByScope.size).toBe(0)
       expect(after.typingTimers.size).toBe(0)
       expect(after.lastTypingSent.size).toBe(0)
       expect(after.reactionTimers.size).toBe(0)
@@ -188,5 +191,29 @@ describe("useCommunityStore", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("typingByScope isolation", () => {
+  // The `useTypingUsersForScope` hook is a thin `useShallow` wrapper over these
+  // reads (exercised through React in `use-community-ws.test.ts`); the node
+  // test env has no DOM, so here we assert the underlying scoped-Map shape that
+  // the selector reads — one scope's typers never bleed into another.
+  const seed = (entries: Record<string, string[]>) => {
+    useCommunityStore.setState({
+      typingByScope: new Map(Object.entries(entries).map(([k, v]) => [k, new Set(v)])),
+    })
+  }
+  const read = (scopeKey: string) => {
+    const set = useCommunityStore.getState().typingByScope.get(scopeKey)
+    return set ? Array.from(set) : []
+  }
+
+  it("keeps each scope's typers separate; an unrelated scope reads empty", () => {
+    seed({ "dm:d1": ["u1"], "ch:c1": ["u2", "u3"] })
+    expect(read("dm:d1")).toEqual(["u1"])
+    expect(read("ch:c1")).toEqual(["u2", "u3"])
+    // A scope with no typers reads as empty — no leak from the populated scopes.
+    expect(read("ch:c2")).toEqual([])
   })
 })

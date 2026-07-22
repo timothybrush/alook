@@ -68,8 +68,8 @@ import { patchChannelUnread } from "@/hooks/community/server-detail-cache"
  * State this hook owns *outside* the query cache:
  * - `useCommunityWsStore.onlineUserIds` — presence set, WS-only.
  * - `useCommunityWsStore.seenMessageIds` — dedup for `message.create`.
- * - `useCommunityStore.typingUsers` + `typingTimers` — typing indicator with
- *   auto-expire timers keyed by userId.
+ * - `useCommunityStore.typingByScope` + `typingTimers` — typing indicator,
+ *   keyed by conversation scope with per-(scope, user) auto-expire timers.
  * - `useCommunityStore.lastTypingSent` — outbound typing.start rate limit.
  *
  * The subscription (which channel/DM is focused) is read from
@@ -416,7 +416,11 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
           // whichever wins the dedup fires the clear, the loser is a no-op.
           // Clearing before dedup would also clear on WS-reconnect replays
           // of stale messages, briefly wiping a still-active heartbeat pill.
-          clearTypingIndicator(event.message.authorId)
+          // message.create is dual-axis: a DM bot reply carries
+          // `dmConversationId` (not `channelId`), so derive the scope from the
+          // event itself — hardcoding `ch:` would target `ch:undefined` and
+          // leave the DM pill hanging until the 8s timer.
+          clearTypingIndicator(typingScopeKey(event), event.message.authorId)
 
           // 1) Patch the focused channel/dm page cache if the event matches.
           if (event.channelId && event.channelId === sub.channelId) {
@@ -511,7 +515,7 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
           // A DM-only typing.start (no channelId) must NOT fire while the
           // viewer is focused on a channel — `matchesFocus` handles both axes.
           if (!matchesFocus(event)) return
-          applyTypingIndicator(userId)
+          applyTypingIndicator(typingScopeKey(event), userId)
           cbs.onTyping?.(event)
           return
         }
@@ -524,7 +528,7 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
           const viewerId = viewerUserIdRef.current
           if (viewerId && userId === viewerId) return
           if (!matchesFocus(event)) return
-          clearTypingIndicator(userId)
+          clearTypingIndicator(typingScopeKey(event), userId)
           return
         }
 
@@ -700,6 +704,17 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
             queryClient.removeQueries({
               queryKey: communityKeys.forumPosts(event.channelId),
             })
+            // When a child (forum_post / thread) is deleted, refresh the
+            // PARENT's list so the deleted card disappears from the feed on
+            // every client. Absent on older events / top-level channels.
+            if (event.parentChannelId) {
+              void queryClient.invalidateQueries({
+                queryKey: communityKeys.forumPosts(event.parentChannelId),
+              })
+              void queryClient.invalidateQueries({
+                queryKey: communityKeys.threads(event.parentChannelId),
+              })
+            }
           }
           if ("serverId" in event) {
             void queryClient.invalidateQueries({ queryKey: communityKeys.server(event.serverId) })
@@ -816,7 +831,7 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
           // Same rationale as `community:message.create` above — either the
           // message.create or dm.new_message broadcast will pass the dedup
           // first and clear the pill; the other is a no-op.
-          clearTypingIndicator(event.message.authorId)
+          clearTypingIndicator(typingScopeKey(event), event.message.authorId)
 
           // Focus-scope patch (mirrors community message.create).
           if (event.dmConversationId === sub.dmConversationId) {
@@ -837,7 +852,7 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
           const viewerId = viewerUserIdRef.current
           if (viewerId && event.userId === viewerId) return
           if (event.dmConversationId !== sub.dmConversationId) return
-          applyTypingIndicator(event.userId)
+          applyTypingIndicator(typingScopeKey(event), event.userId)
           cbs.onDm?.(event)
           cbs.onTyping?.(event)
           return
@@ -1090,51 +1105,83 @@ export function useCommunityWs(options?: UseCommunityWsOptions) {
 // ── Typing indicator helpers ─────────────────────────────────────────────────
 
 /**
- * Append userId to `typingUsers` and start (or extend) an auto-expire timer.
- * The timer removes the user from the list after `TYPING_INDICATOR_TIMEOUT_MS`
- * if no follow-up typing event arrives.
+ * The conversation scope key an event belongs to, keyed by the axis it actually
+ * carries. `dmConversationId` wins when present (a DM message.create carries it,
+ * not `channelId`) — mirrors `matchesFocus`'s dm-first precedence. The `dm:` /
+ * `ch:` prefix keeps the two id spaces from colliding. Threads collapse to
+ * `ch:<channelId>` on the client (no sender emits `threadId`).
  */
-function applyTypingIndicator(userId: string) {
+export function typingScopeKey(e: { dmConversationId?: string; channelId?: string }): string {
+  return e.dmConversationId ? `dm:${e.dmConversationId}` : `ch:${e.channelId}`
+}
+
+// Timer map key: one auto-expire timer per (scope, user) pair.
+const timerKey = (scopeKey: string, userId: string) => `${scopeKey}|${userId}`
+
+/**
+ * Add userId to a conversation scope's typing set and start (or extend) an
+ * auto-expire timer. The timer removes the user from THAT scope after
+ * `TYPING_INDICATOR_TIMEOUT_MS` if no follow-up typing event arrives.
+ * No-ops the set write when the user is already typing in the scope (rule 2 —
+ * typing.start re-fires every ~3s).
+ */
+function applyTypingIndicator(scopeKey: string, userId: string) {
   useCommunityStore.setState((state) => {
-    const timers = state.typingTimers
-    const existing = timers.get(userId)
+    const tKey = timerKey(scopeKey, userId)
+    const existing = state.typingTimers.get(tKey)
     if (existing) clearTimeout(existing)
     const timer = setTimeout(() => {
-      useCommunityStore.setState((s) => {
-        const nextTimers = new Map(s.typingTimers)
-        nextTimers.delete(userId)
-        return {
-          typingUsers: s.typingUsers.filter((id) => id !== userId),
-          typingTimers: nextTimers,
-        }
-      })
+      useCommunityStore.setState((s) => removeTypingUser(s, scopeKey, userId))
     }, TYPING_INDICATOR_TIMEOUT_MS)
-    const nextTimers = new Map(timers)
-    nextTimers.set(userId, timer)
-    const nextUsers = state.typingUsers.includes(userId)
-      ? state.typingUsers
-      : [...state.typingUsers, userId]
-    return { typingUsers: nextUsers, typingTimers: nextTimers }
+    const nextTimers = new Map(state.typingTimers)
+    nextTimers.set(tKey, timer)
+
+    const current = state.typingByScope.get(scopeKey)
+    if (current?.has(userId)) {
+      // Already typing here — only the timer refreshed; leave the set alone.
+      return { typingTimers: nextTimers }
+    }
+    const nextByScope = new Map(state.typingByScope)
+    nextByScope.set(scopeKey, new Set(current ?? []).add(userId))
+    return { typingByScope: nextByScope, typingTimers: nextTimers }
   })
 }
 
 /**
- * Immediately remove userId from `typingUsers` and cancel its pending timer.
- * Called when the user sends a message — sending is an implicit typing.stop,
- * and waiting for the 8s timeout leaves a ghost indicator hanging under the
- * message that just arrived.
+ * Immediately remove userId from a scope's typing set and cancel its pending
+ * timer. Called when the user sends a message — sending is an implicit
+ * typing.stop, and waiting for the 8s timeout leaves a ghost indicator hanging
+ * under the message that just arrived.
  */
-function clearTypingIndicator(userId: string) {
+function clearTypingIndicator(scopeKey: string, userId: string) {
   useCommunityStore.setState((state) => {
-    const existing = state.typingTimers.get(userId)
-    if (!existing && !state.typingUsers.includes(userId)) return {}
+    const tKey = timerKey(scopeKey, userId)
+    const existing = state.typingTimers.get(tKey)
+    if (!existing && !state.typingByScope.get(scopeKey)?.has(userId)) return {}
     if (existing) clearTimeout(existing)
-    const nextTimers = new Map(state.typingTimers)
-    nextTimers.delete(userId)
-    return {
-      typingUsers: state.typingUsers.filter((id) => id !== userId),
-      typingTimers: nextTimers,
-    }
+    return removeTypingUser(state, scopeKey, userId)
   })
+}
+
+/**
+ * Pure state patch: drop userId from `scopeKey`'s set (deleting the scope key
+ * when it empties, to avoid unbounded Map growth) and its `(scope, user)`
+ * timer. Shared by the auto-expire timer and the explicit clear.
+ */
+function removeTypingUser(
+  state: { typingByScope: Map<string, Set<string>>; typingTimers: Map<string, ReturnType<typeof setTimeout>> },
+  scopeKey: string,
+  userId: string,
+): Partial<{ typingByScope: Map<string, Set<string>>; typingTimers: Map<string, ReturnType<typeof setTimeout>> }> {
+  const nextTimers = new Map(state.typingTimers)
+  nextTimers.delete(timerKey(scopeKey, userId))
+  const current = state.typingByScope.get(scopeKey)
+  if (!current?.has(userId)) return { typingTimers: nextTimers }
+  const nextSet = new Set(current)
+  nextSet.delete(userId)
+  const nextByScope = new Map(state.typingByScope)
+  if (nextSet.size === 0) nextByScope.delete(scopeKey)
+  else nextByScope.set(scopeKey, nextSet)
+  return { typingByScope: nextByScope, typingTimers: nextTimers }
 }
 

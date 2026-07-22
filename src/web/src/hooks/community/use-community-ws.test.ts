@@ -1095,7 +1095,11 @@ describe("useCommunityWs — typing.start honours focus (no DM leak)", () => {
     }
     capturedOnMessage!(event)
 
-    expect(useCommunityStore.getState().typingUsers).toEqual([])
+    // Focus is on ch_1, so the DM-only typing.start is dropped entirely — no
+    // scope gains a typer.
+    const state = useCommunityStore.getState()
+    expect(state.typingByScope.get("dm:dm_other")).toBeUndefined()
+    expect(state.typingByScope.get("ch:ch_1")).toBeUndefined()
   })
 
   it("does surface a channel typing.start when the viewer is focused on that channel", async () => {
@@ -1114,7 +1118,113 @@ describe("useCommunityWs — typing.start honours focus (no DM leak)", () => {
     }
     capturedOnMessage!(event)
 
-    expect(useCommunityStore.getState().typingUsers).toEqual(["u_other"])
+    expect([...(useCommunityStore.getState().typingByScope.get("ch:ch_1") ?? [])]).toEqual([
+      "u_other",
+    ])
+  })
+})
+
+// ── Typing scope isolation (per-conversation, no cross-leak) ────────────────
+describe("useCommunityWs — typing state is scoped per conversation", () => {
+  it("a DM typer lands only in the DM scope, never in a channel scope", async () => {
+    await mountHook({ viewerUserId: "u_me" })
+    const { useCommunityStore } = await import("@/stores/community")
+    // Viewer is focused on the DM when the peer starts typing.
+    useCommunityStore.getState().subscribe({ dmConversationId: "dm_1" })
+    refCounter = 0
+    stateCounter = 0
+    callbackCounter = 0
+    await mountHook({ viewerUserId: "u_me" })
+
+    capturedOnMessage!({
+      type: "community:dm.typing",
+      dmConversationId: "dm_1",
+      userId: "u_peer",
+    })
+
+    const state = useCommunityStore.getState()
+    // The typer is confined to dm:dm_1 — a channel view reading ch:* sees nothing.
+    expect([...(state.typingByScope.get("dm:dm_1") ?? [])]).toEqual(["u_peer"])
+    expect(state.typingByScope.get("ch:dm_1")).toBeUndefined()
+    // The 8s timer is keyed by (scope, user), not user alone.
+    expect(state.typingTimers.has("dm:dm_1|u_peer")).toBe(true)
+  })
+
+  it("bot DM reply (message.create carrying dmConversationId) clears the DM pill, not ch:undefined", async () => {
+    await mountHook({ viewerUserId: "u_me" })
+    const { useCommunityStore } = await import("@/stores/community")
+    useCommunityStore.getState().subscribe({ dmConversationId: "dm_bot" })
+    refCounter = 0
+    stateCounter = 0
+    callbackCounter = 0
+    await mountHook({ viewerUserId: "u_me" })
+
+    // Bot is "typing" in the DM.
+    capturedOnMessage!({
+      type: "community:dm.typing",
+      dmConversationId: "dm_bot",
+      userId: "u_bot",
+    })
+    expect([...(useCommunityStore.getState().typingByScope.get("dm:dm_bot") ?? [])]).toEqual([
+      "u_bot",
+    ])
+
+    // Its reply arrives as message.create WITH dmConversationId (no channelId) —
+    // the dual-axis case. The scope key must resolve to dm:dm_bot, clearing the
+    // pill. A regression (hardcoded ch:) would target ch:undefined and leave it.
+    capturedOnMessage!({
+      type: "community:message.create",
+      dmConversationId: "dm_bot",
+      message: {
+        id: "m_bot_reply",
+        authorId: "u_bot",
+        authorName: "bot",
+        content: "done",
+        createdAt: "2026-07-03T00:00:00.000Z",
+      },
+    } as CommunityMessageCreate)
+
+    const state = useCommunityStore.getState()
+    expect(state.typingByScope.get("dm:dm_bot")).toBeUndefined()
+    expect(state.typingByScope.get("ch:undefined")).toBeUndefined()
+    expect(state.typingTimers.has("dm:dm_bot|u_bot")).toBe(false)
+  })
+})
+
+// ── channel.delete invalidates the parent forum list (post deletion) ────────
+describe("useCommunityWs — channel.delete refreshes the parent forum feed", () => {
+  it("invalidates the parent's forumPosts + threads lists when parentChannelId is present", async () => {
+    await mountHook()
+    const invalidateSpy = vi.spyOn(capturedQueryClient, "invalidateQueries")
+
+    const event: CommunityChannelDelete = {
+      type: "community:channel.delete",
+      serverId: "srv_1",
+      channelId: "post_1",
+      parentChannelId: "forum_1",
+    }
+    capturedOnMessage!(event)
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey))
+    expect(invalidatedKeys).toContain(JSON.stringify(communityKeys.forumPosts("forum_1")))
+    expect(invalidatedKeys).toContain(JSON.stringify(communityKeys.threads("forum_1")))
+  })
+
+  it("does not throw and still evicts own caches when parentChannelId is absent (legacy event)", async () => {
+    await mountHook()
+    // Seed the deleted channel's own caches so we can assert eviction.
+    capturedQueryClient.setQueryData(communityKeys.forumPosts("post_1"), { posts: [] })
+    const removeSpy = vi.spyOn(capturedQueryClient, "removeQueries")
+
+    const event: CommunityChannelDelete = {
+      type: "community:channel.delete",
+      serverId: "srv_1",
+      channelId: "post_1",
+    }
+    expect(() => capturedOnMessage!(event)).not.toThrow()
+
+    const removedKeys = removeSpy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey))
+    expect(removedKeys).toContain(JSON.stringify(communityKeys.forumPosts("post_1")))
   })
 })
 

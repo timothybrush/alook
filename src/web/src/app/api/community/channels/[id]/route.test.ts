@@ -340,4 +340,62 @@ describe("DELETE /channels/[id]", () => {
     expect(mockBroadcastToUserSafe).toHaveBeenCalledTimes(2)
     expect(mockFanOutToServerMembers).not.toHaveBeenCalled()
   })
+
+  it("admin deletes any forum_post → 204 and broadcasts", async () => {
+    mockResolveChannelAccessContext.mockResolvedValue(
+      accessCtx({ role: "admin", canManage: true, creatorId: "someone_else" }),
+    )
+    const res = await DELETE(delReq(), ctx)
+    expect(res.status).toBe(204)
+    expect(mockDeleteChannel).toHaveBeenCalled()
+    expect(mockFanOutToServerMembers).toHaveBeenCalled()
+  })
+
+  it("a PUBLIC forum_post's creator (no canManage) can delete it via the carve-out", async () => {
+    mockResolveChannelAccessContext.mockResolvedValue(forumPostCtx({ isCreator: true }))
+    const res = await DELETE(delReq(), ctx)
+    expect(res.status).toBe(204)
+    expect(mockDeleteChannel).toHaveBeenCalledWith(expect.anything(), "c1")
+  })
+
+  it("a private forum_post's creator can delete it (canManage already true)", async () => {
+    // Private post creator: canManage = isPrivate && isCreator → true anyway.
+    mockResolveChannelAccessContext.mockResolvedValue({
+      ...forumPostCtx({ isCreator: true }),
+      isPrivate: true,
+    })
+    mockIsChannelPrivate.mockResolvedValue(true)
+    mockGetPrivateChannelAudienceUserIds.mockResolvedValue(["u1"])
+    const res = await DELETE(delReq(), ctx)
+    expect(res.status).toBe(204)
+    expect(mockDeleteChannel).toHaveBeenCalled()
+  })
+
+  it("a non-creator non-admin cannot delete a forum_post → 403", async () => {
+    mockResolveChannelAccessContext.mockResolvedValue(forumPostCtx({ isCreator: false }))
+    const res = await DELETE(delReq(), ctx)
+    expect(res.status).toBe(403)
+    expect(mockDeleteChannel).not.toHaveBeenCalled()
+  })
+
+  it("the broadcast CHANNEL_DELETE payload carries parentChannelId", async () => {
+    mockResolveChannelAccessContext.mockResolvedValue(forumPostCtx({ isCreator: true }))
+    const res = await DELETE(delReq(), ctx)
+    expect(res.status).toBe(204)
+    const event = mockFanOutToServerMembers.mock.calls[0]?.[1]
+    expect(event).toMatchObject({
+      type: "community:channel.delete",
+      channelId: "c1",
+      parentChannelId: "forum_1",
+    })
+  })
+
+  it("the carve-out does NOT let a non-creator delete a normal (non-forum_post) channel", async () => {
+    // canManage=false + type="text" + not creator → still 403 (carve-out is
+    // scoped to forum_post only).
+    mockResolveChannelAccessContext.mockResolvedValue(accessCtx({ canManage: false }))
+    const res = await DELETE(delReq(), ctx)
+    expect(res.status).toBe(403)
+    expect(mockDeleteChannel).not.toHaveBeenCalled()
+  })
 })

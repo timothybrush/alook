@@ -168,8 +168,16 @@ export const DELETE = withAuth(async (_req: NextRequest, ctx) => {
   const db = getDb(ctx.env.DB)
   const access = await requireChannelAccess(db, channelId, ctx.userId)
   if (!access.ok) return writeError(access.error, access.status)
-  if (!access.value.canManage) return writeError("forbidden", 403)
   const channel = access.value.channel
+  // A forum post's creator may delete their own post even without full
+  // `canManage` (a PUBLIC post's creator has `canManage === false`; a private
+  // post's creator already passes it via `isPrivate && isCreator`). Mirrors the
+  // PATCH tag carve-out. `access.value.isCreator` is the vetted post-own-creator
+  // flag (NOT the forum creator). Scoped to `forum_post` so normal-channel and
+  // thread creators are not granted delete.
+  const canDeletePost =
+    channel.type === "forum_post" && access.value.isCreator
+  if (!access.value.canManage && !canDeletePost) return writeError("forbidden", 403)
 
   // Resolve the private-channel audience BEFORE deleting (the member rows
   // cascade away with the channel row), so the delete event still reaches
@@ -186,6 +194,7 @@ export const DELETE = withAuth(async (_req: NextRequest, ctx) => {
     type: WS_EVENTS.CHANNEL_DELETE,
     serverId: channel.serverId,
     channelId,
+    parentChannelId: channel.parentChannelId,
   } as const
   if (audience) {
     await Promise.all(audience.map((userId) => broadcastToUserSafe(userId, event)))

@@ -14,6 +14,7 @@ import {
   useCommunityStore,
   useCurrentChannelId,
   useUiHandlers,
+  useTypingUsersForScope,
 } from "@/stores/community"
 import { useOnlineUserIds, useCommunityWsStore } from "@/stores/community/ws"
 import { tid } from "@/lib/community/testids"
@@ -172,7 +173,7 @@ function DmView() {
   }, [latestSeq, readSnapshot])
 
 
-  const typingUsers = useCommunityStore((s) => s.typingUsers)
+  const typingUsers = useTypingUsersForScope(`dm:${dmId}`)
   const sendDmMessage = useSendDmMessage()
   const toggleReaction = useToggleReactionApi()
   const uploadFile = useUploadFile()

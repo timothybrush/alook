@@ -25,6 +25,7 @@ import {
   useCurrentChannelId,
   useCurrentChannelMeta,
   useUiHandlers,
+  useTypingUsersForScope,
 } from "@/stores/community"
 import { useCurrentUser } from "@/contexts/community/current-user"
 import { useServer } from "@/hooks/community/use-servers"
@@ -50,6 +51,7 @@ import {
   useCreateThread,
   useCreateForumPost,
   useUpdatePostTags,
+  useDeleteForumPost,
   useSetMemberRole,
   useKickMember,
   useSetChannelNotif,
@@ -394,7 +396,7 @@ function ChannelView() {
   const { pins: pinned, isLoading: pinnedLoading } = usePins(channelId)
   const notifs = useNotificationSettings()
   const channelNotif = notifs.channel
-  const typingUsers = useCommunityStore((s) => s.typingUsers)
+  const typingUsers = useTypingUsersForScope(`ch:${channelId}`)
 
   // Mutations
   const sendMessageMut = useSendMessage()
@@ -404,6 +406,7 @@ function ChannelView() {
   const createThreadMut = useCreateThread()
   const createForumPostMut = useCreateForumPost()
   const updatePostTagsMut = useUpdatePostTags()
+  const deleteForumPostMut = useDeleteForumPost()
   const setMemberRoleMut = useSetMemberRole()
   const kickMemberMut = useKickMember()
   const setChannelNotifMut = useSetChannelNotif()
@@ -981,6 +984,14 @@ function ChannelView() {
               updatePostTagsMut.mutate(
                 { forumChannelId: channelId, postId, tags },
                 { onError: (e) => toastApiError(e, "Failed to save tags") },
+              )
+            }}
+            canDeletePost={(post) => canManage || post.authorId === currentUser.id}
+            deletingPost={deleteForumPostMut.isPending ? deleteForumPostMut.variables?.postId ?? null : null}
+            onDeletePost={(post) => {
+              deleteForumPostMut.mutate(
+                { forumChannelId: channelId, postId: post.id },
+                { onError: (e) => toastApiError(e, "Failed to delete post") },
               )
             }}
           />

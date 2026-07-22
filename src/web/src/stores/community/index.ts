@@ -1,6 +1,7 @@
 "use client"
 
 import { create } from "zustand"
+import { useShallow } from "zustand/react/shallow"
 import type React from "react"
 
 /**
@@ -81,8 +82,11 @@ export type CommunityStoreState = {
   currentChannelId: string | null
   currentChannelMeta: CurrentChannelMeta | null
 
-  // Typing indicators (viewer-facing set + timers to auto-expire)
-  typingUsers: string[]
+  // Typing indicators, keyed by conversation scope so a DM typer never leaks
+  // into a channel view (and vice versa). `scopeKey` is `dm:<id>` / `ch:<id>`
+  // (see `use-community-ws.ts`). Each scope maps to the set of userIds typing
+  // there right now; `typingTimers` auto-expires each `(scope, user)` pair.
+  typingByScope: Map<string, Set<string>>
   typingTimers: Map<string, Timer>
   // Rate-limit for typing.start emissions the viewer sends outbound; keyed
   // by channelId/dmId so switching contexts doesn't cross-throttle.
@@ -120,7 +124,7 @@ const initialState = (): Pick<
   | "currentServerId"
   | "currentChannelId"
   | "currentChannelMeta"
-  | "typingUsers"
+  | "typingByScope"
   | "typingTimers"
   | "lastTypingSent"
   | "reactionTimers"
@@ -131,7 +135,7 @@ const initialState = (): Pick<
   currentServerId: null,
   currentChannelId: null,
   currentChannelMeta: null,
-  typingUsers: [],
+  typingByScope: new Map(),
   typingTimers: new Map(),
   lastTypingSent: new Map(),
   reactionTimers: new Map(),
@@ -227,3 +231,21 @@ export const useUiHandlers = () => stableUiHandlers
 
 export const usePendingMachineTokenId = () =>
   useCommunityStore((s) => s.pendingMachineTokenId)
+
+// Module-scoped stable empty array — avoids allocating a fresh `[]` on every
+// selector run for the common no-typing case.
+const EMPTY_TYPING: string[] = []
+
+/**
+ * The userIds currently typing in a given conversation scope (`dm:<id>` /
+ * `ch:<id>`), or an empty array. `useShallow` compares the returned array
+ * element-wise, so a page only re-renders when THIS scope's membership
+ * changes — typing activity in other conversations doesn't churn it.
+ */
+export const useTypingUsersForScope = (scopeKey: string) =>
+  useCommunityStore(
+    useShallow((s) => {
+      const set = s.typingByScope.get(scopeKey)
+      return set ? Array.from(set) : EMPTY_TYPING
+    }),
+  )

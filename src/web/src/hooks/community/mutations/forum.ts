@@ -79,3 +79,35 @@ export function useUpdatePostTags() {
     },
   })
 }
+
+export type DeleteForumPostArgs = {
+  // The parent forum channel — the cache key the post list lives under.
+  forumChannelId: string
+  // The post channel being deleted.
+  postId: string
+}
+
+/**
+ * Delete a single forum post. A post IS a `forum_post` child channel, so this
+ * DELETEs the channel (creator or manager gated server-side — see the DELETE
+ * route's forum_post carve-out). On success (204) the post is filtered out of
+ * the forum's cached list so the card disappears without a refetch; the
+ * server-side WS `channel.delete` also invalidates for other clients.
+ */
+export function useDeleteForumPost() {
+  const queryClient = useQueryClient()
+  return useMutation<void, Error, DeleteForumPostArgs>({
+    mutationFn: async ({ postId }) => {
+      await apiFetch(`/api/community/channels/${postId}`, { method: "DELETE" })
+    },
+    onSuccess: (_data, args) => {
+      queryClient.setQueryData<ForumPostsResponse | undefined>(
+        communityKeys.forumPosts(args.forumChannelId),
+        (prev) =>
+          prev
+            ? { ...prev, posts: prev.posts.filter((p) => p.id !== args.postId) }
+            : prev,
+      )
+    },
+  })
+}

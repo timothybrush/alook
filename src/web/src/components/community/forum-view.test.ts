@@ -29,6 +29,23 @@ function render(posts: ForumPost[]): string {
   )
 }
 
+// Render with the delete affordance wired. `canDeletePost` decides per-post
+// visibility; `deletingPost` is the in-flight post id (button disabled).
+function renderWithDelete(
+  posts: ForumPost[],
+  opts: { canDeletePost?: (p: ForumPost) => boolean; deletingPost?: string | null } = {},
+): string {
+  return renderToStaticMarkup(
+    createElement(ForumView, {
+      posts,
+      onOpenPost: () => {},
+      onDeletePost: () => {},
+      canDeletePost: opts.canDeletePost ?? (() => true),
+      deletingPost: opts.deletingPost ?? null,
+    })
+  )
+}
+
 describe("ForumView post card header", () => {
   it("solo post renders the creator name and no participant AvatarGroup", () => {
     const html = render([makePost()])
@@ -72,5 +89,41 @@ describe("ForumView post card header", () => {
     ])
     expect(withOthers).toContain("· ")
     expect(withOthers).toContain(tid.forumPostAvatars("p1"))
+  })
+})
+
+describe("ForumView post delete button", () => {
+  it("renders the delete button (with aria-label + testid) when canDeletePost is true", () => {
+    const html = renderWithDelete([makePost()], { canDeletePost: () => true })
+    expect(html).toContain(tid.forumPostDeleteBtn("p1"))
+    expect(html).toContain('aria-label="Delete post"')
+  })
+
+  it("does not render the delete button when canDeletePost is false", () => {
+    const html = renderWithDelete([makePost()], { canDeletePost: () => false })
+    expect(html).not.toContain(tid.forumPostDeleteBtn("p1"))
+  })
+
+  it("does not render the delete button when onDeletePost is absent", () => {
+    // render() wires onOpenPost only — no delete handler → no button.
+    const html = render([makePost()])
+    expect(html).not.toContain(tid.forumPostDeleteBtn("p1"))
+  })
+
+  it("disables the delete button for the post whose delete is in flight", () => {
+    const html = renderWithDelete([makePost()], { deletingPost: "p1" })
+    // The disabled attribute rides on the button carrying the delete testid.
+    const btnIdx = html.indexOf(tid.forumPostDeleteBtn("p1"))
+    expect(btnIdx).toBeGreaterThanOrEqual(0)
+    // renderToStaticMarkup emits a bare `disabled` attribute for disabled={true}.
+    const around = html.slice(Math.max(0, btnIdx - 200), btnIdx + 200)
+    expect(around).toContain("disabled")
+  })
+
+  it("does NOT render the ConfirmDialog until the delete button is clicked", () => {
+    // Static markup can't fire a click, so the confirm dialog (state-gated) is
+    // absent on first paint — proves clicking, not rendering, opens it.
+    const html = renderWithDelete([makePost()])
+    expect(html).not.toContain("Delete post?")
   })
 })
