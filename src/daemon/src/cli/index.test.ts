@@ -143,6 +143,54 @@ describe("inbox pull", () => {
     expect(ackSpy).not.toHaveBeenCalled();
     expect(env.success.acked).toBe(0);
   });
+
+  it("surfaces ackError instead of poisoning the whole pull when ack throws", async () => {
+    // Regression guard for Mellicent's dead-loop: ack failing on ONE cursor
+    // used to collapse the whole envelope to `{"error":"forbidden"}`, wiping
+    // the messages the agent needed to see. The pull envelope must retain
+    // its messages AND report `ackError` distinctly.
+    const ackSpy = vi.fn(async () => {
+      throw new Error("forbidden");
+    });
+    setApiForTesting(
+      stubApi({
+        inboxPull: async () => ({
+          messages: [
+            { seq: "#2", channel: "/s/general", sender: "@x", content: { text: "hi" }, time: "" },
+            { seq: "#3", channel: "/s/general", sender: "@x", content: { text: "bye" }, time: "" },
+          ],
+          hasMore: false,
+        }),
+        ack: ackSpy,
+      }),
+    );
+    await main(["inbox", "pull"]);
+    const env = parseEnvelope(cap.lines()) as {
+      success: { acked: number; messages: unknown[]; ackError?: string };
+    };
+    expect(ackSpy).toHaveBeenCalledOnce();
+    expect(env.success.messages).toHaveLength(2);
+    expect(env.success.acked).toBe(0);
+    expect(env.success.ackError).toBe("forbidden");
+  });
+
+  it("does NOT include ackError when the ack succeeds", async () => {
+    setApiForTesting(
+      stubApi({
+        inboxPull: async () => ({
+          messages: [{ seq: "#2", channel: "/s/general", sender: "@x", content: { text: "yo" }, time: "" }],
+          hasMore: false,
+        }),
+        ack: async () => undefined,
+      }),
+    );
+    await main(["inbox", "pull"]);
+    const env = parseEnvelope(cap.lines()) as {
+      success: { acked: number; ackError?: string };
+    };
+    expect(env.success.acked).toBe(1);
+    expect(env.success.ackError).toBeUndefined();
+  });
 });
 
 describe("server list", () => {
@@ -614,5 +662,19 @@ describe("channel subscribe removed", () => {
     const env = parseEnvelope(cap.lines());
     expect("error" in env).toBe(true);
     expect(env.error).toContain("unknown command");
+  });
+});
+
+describe("import side effects", () => {
+  it("importing ./index does not invoke main() — guard evaluates false under vitest", async () => {
+    const commander = await import("commander");
+    const parseSpy = vi.spyOn(commander.Command.prototype, "parseAsync");
+    vi.resetModules();
+    try {
+      await import("./index");
+      expect(parseSpy).not.toHaveBeenCalled();
+    } finally {
+      parseSpy.mockRestore();
+    }
   });
 });

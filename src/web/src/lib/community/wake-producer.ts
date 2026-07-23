@@ -100,7 +100,35 @@ async function doEnqueueBotWakes(env: Env, opts: EnqueueBotWakesOpts): Promise<v
   })
   if (candidates.length === 0) return
 
-  const payloads: WakePayload[] = candidates.map((c) => ({
+  // Defense-in-depth visibility + participation gate. `findWakeCandidates`
+  // starts from the fanout recipient set, which for well-behaved audience
+  // helpers already excludes non-visible / non-participating bots — but a
+  // future regression in a helper (or a new caller) could leak a bot in.
+  // Re-check per candidate against the same wake gate the consumer uses
+  // (`canBotReadWakeScope`), so this producer path is belt-and-suspenders.
+  //
+  // `allSettled` (not `all`): a transient D1 blip on ONE candidate's gate
+  // check must not collapse the whole batch's enqueue. Rejected legs are
+  // treated as "gate indeterminate" — we drop just that candidate (the
+  // queue consumer re-runs the same gate at consume time anyway) rather
+  // than losing every wake for the message.
+  const scope: { channelId?: string; dmConversationId?: string } = channelId
+    ? { channelId }
+    : { dmConversationId: dmConversationId! }
+  const gateResults = await Promise.allSettled(
+    candidates.map((c) => queries.communityMember.canBotReadWakeScope(db, c.botUserId, scope))
+  )
+  const gated = candidates.filter((c, i) => {
+    const r = gateResults[i]!
+    if (r.status === "rejected") {
+      log.warn("wake_gate_check_failed", { botUserId: c.botUserId, err: String(r.reason) })
+      return false
+    }
+    return r.value
+  })
+  if (gated.length === 0) return
+
+  const payloads: WakePayload[] = gated.map((c) => ({
     messageId: messageRow.id,
     botUserId: c.botUserId,
   }))

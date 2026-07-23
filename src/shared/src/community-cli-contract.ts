@@ -611,7 +611,18 @@ export type AgentActivityState = "idle" | "starting" | "running" | "stopping";
 export type BotAuditEventPayload =
   | { kind: "cli_invocation"; payload: { subcommand: string } }
   | { kind: "tool_call"; payload: { name: string; target?: string } }
-  | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } };
+  | { kind: "thinking"; payload: { text: string; truncated: boolean; chars: number } }
+  | {
+      kind: "wake_trigger";
+      payload: {
+        messageId: string;
+        channel: ChannelRef;
+        seq: Seq;
+        senderId: string;
+        senderHandle: string;
+        reason: "unread" | "mention";
+      };
+    };
 
 export interface HostBotAuditEventFrame {
   type: "bot_audit_event";

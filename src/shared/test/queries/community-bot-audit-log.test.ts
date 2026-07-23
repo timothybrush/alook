@@ -13,6 +13,7 @@ describe("community/bot-audit-log exports", () => {
     expect(typeof q.insertBotActivityEventStatement).toBe("function")
     expect(typeof q.pruneBotActivityEventsStatement).toBe("function")
     expect(typeof q.insertBotActivityEventAndPrune).toBe("function")
+    expect(typeof q.insertBotAuditWakeTrigger).toBe("function")
   })
 
   it("exposes a reader", () => {
@@ -47,6 +48,62 @@ describe("BotAuditEventSchema — payload discriminated union", () => {
       payload: { text: "hmm", truncated: false, chars: 3 },
     })
     expect(r.success).toBe(true)
+  })
+  it("accepts a wake_trigger payload with the six required fields", () => {
+    const r = BotAuditEventSchema.safeParse({
+      kind: "wake_trigger",
+      payload: {
+        messageId: "msg_1",
+        channel: "/srv_1/general",
+        seq: 12,
+        senderId: "u_human",
+        senderHandle: "@gustavo#0042",
+        reason: "unread",
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+  it("accepts wake_trigger with reason=mention", () => {
+    const r = BotAuditEventSchema.safeParse({
+      kind: "wake_trigger",
+      payload: {
+        messageId: "msg_1",
+        channel: "/srv_1/general",
+        seq: 12,
+        senderId: "u_human",
+        senderHandle: "@gustavo#0042",
+        reason: "mention",
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+  it("rejects wake_trigger with a missing required field", () => {
+    const r = BotAuditEventSchema.safeParse({
+      kind: "wake_trigger",
+      payload: {
+        // messageId missing
+        channel: "/srv_1/general",
+        seq: 12,
+        senderId: "u_human",
+        senderHandle: "@gustavo#0042",
+        reason: "unread",
+      },
+    })
+    expect(r.success).toBe(false)
+  })
+  it("rejects wake_trigger with an unknown reason", () => {
+    const r = BotAuditEventSchema.safeParse({
+      kind: "wake_trigger",
+      payload: {
+        messageId: "msg_1",
+        channel: "/srv_1/general",
+        seq: 12,
+        senderId: "u_human",
+        senderHandle: "@gustavo#0042",
+        reason: "shouted",
+      },
+    })
+    expect(r.success).toBe(false)
   })
   it("rejects a kind/payload mismatch", () => {
     const r = BotAuditEventSchema.safeParse({

@@ -17,7 +17,6 @@ import {
   communityServer,
   communityReadState,
   communityMessageSeq,
-  communityServerMember,
 } from "../../community-schema";
 import { user } from "../../schema";
 import type { Database } from "../../index";
@@ -31,6 +30,9 @@ import {
   type ChannelRef,
 } from "../../../community-cli-contract";
 import { formatHandle } from "../../../lib/discriminator";
+import { listVisibleChannelIdsForUser } from "./channel";
+import { listParticipatingThreadIds } from "./thread";
+import { isThread, isForumPost } from "../../../utils/community-roles";
 
 type RawAgentMessage = {
   id: string;
@@ -330,30 +332,63 @@ export async function getLatestSeqForScope(db: Database, scopeKey: string): Prom
 }
 
 /**
+ * Effective allowed channel-id set for a bot: visible channels MINUS
+ * thread/forum_post channels the bot isn't a participant of. Pushes the
+ * thread-participation narrowing into a pre-computed set so it can join the
+ * message SQL as a single `inArray` predicate — the old shape did the
+ * narrowing as a JS post-filter AFTER `.limit(max)`, which silently
+ * collapsed a page of non-participating rows to `[]` (breaking `hasMore` in
+ * `inboxPull`) and could return `null` from `getLatestUnreadMessageForAgent`
+ * when older participating unread existed outside the top-N-by-createdAt
+ * candidate window.
+ */
+async function listAgentAllowedChannelIds(db: Database, botUserId: string): Promise<string[]> {
+  const visibleChannelIds = await listVisibleChannelIdsForUser(db, botUserId);
+  if (visibleChannelIds.length === 0) return [];
+  const typeRows = await db
+    .select({ id: communityChannel.id, type: communityChannel.type })
+    .from(communityChannel)
+    .where(inArray(communityChannel.id, visibleChannelIds));
+  const narrowIds = typeRows
+    .filter((r) => isThread(r.type) || isForumPost(r.type))
+    .map((r) => r.id);
+  const participating =
+    narrowIds.length > 0
+      ? new Set(await listParticipatingThreadIds(db, narrowIds, botUserId))
+      : new Set<string>();
+  const narrowSet = new Set(narrowIds);
+  return visibleChannelIds.filter((id) => !narrowSet.has(id) || participating.has(id));
+}
+
+/**
  * Cross-channel unread fill for `inboxPull`, grouped by channel/DM (not
  * global seq order — `seq` is a per-scope counter, comparing raw values
  * across scopes is meaningless, see plan §7 v4). Always drains one channel's
  * unread completely (in seq order) before starting the next. Excludes the
- * bot's own authored messages. Never mutates
- * read state. Scope checks happen in SQL before returning rows: channel
- * messages require server membership, and DM messages require participation.
+ * bot's own authored messages. Never mutates read state.
+ *
+ * Visibility rule: same as the human unread path (`listUnreadChannels`) —
+ * (1) channel messages restricted to `listVisibleChannelIdsForUser(botUserId)`
+ * (respects private-category rosters and private-forum-post narrowness), and
+ * (2) thread / forum_post channels additionally require a
+ * `community_thread_participant` row for the bot. Both dimensions are folded
+ * into ONE `inArray` predicate up front so `.limit(max)` operates on
+ * already-visible rows — post-filtering after `limit` (the earlier shape)
+ * could silently collapse a page to `[]` and break `hasMore`.
  */
 export async function listUnreadMessagesForAgent(
   db: Database,
   botUserId: string,
   opts: { max: number }
 ): Promise<RawAgentMessage[]> {
+  const allowedChannelIds = await listAgentAllowedChannelIds(db, botUserId);
+
   const rows = await db
     .select({
       ...AGENT_MESSAGE_COLUMNS,
       lastReadSeq: sql<number>`COALESCE(${communityReadState.lastReadSeq}, 0)`,
     })
     .from(communityMessage)
-    .leftJoin(communityChannel, eq(communityChannel.id, communityMessage.channelId))
-    .leftJoin(
-      communityServerMember,
-      and(eq(communityServerMember.serverId, communityChannel.serverId), eq(communityServerMember.userId, botUserId))
-    )
     .leftJoin(communityDmConversation, eq(communityDmConversation.id, communityMessage.dmConversationId))
     .leftJoin(
       communityReadState,
@@ -370,7 +405,12 @@ export async function listUnreadMessagesForAgent(
         ne(communityMessage.authorId, botUserId),
         sql`${communityMessage.seq} > COALESCE(${communityReadState.lastReadSeq}, 0)`,
         or(
-          and(isNotNull(communityMessage.channelId), eq(communityServerMember.userId, botUserId)),
+          and(
+            isNotNull(communityMessage.channelId),
+            allowedChannelIds.length > 0
+              ? inArray(communityMessage.channelId, allowedChannelIds)
+              : sql`1 = 0`
+          ),
           and(
             isNotNull(communityMessage.dmConversationId),
             or(eq(communityDmConversation.user1Id, botUserId), eq(communityDmConversation.user2Id, botUserId))
@@ -396,12 +436,21 @@ export type InboxSnapshotRow = {
 
 /**
  * Per-channel/DM unread summary for `inboxSnapshot` — non-consuming, no read-
- * state mutation. One row per scope with pending unread. Scope checks happen
- * in SQL before aggregation. `hasMention` powers
- * the `InboxRow.flags` "mention" flag: true iff any of the scope's PENDING
- * (still-unread) messages carries a `kind: "mention"` row for this bot.
+ * state mutation. One row per scope with pending unread.
+ *
+ * Visibility rule mirrors `listUnreadMessagesForAgent`: (1) channel scopes
+ * restricted to `listVisibleChannelIdsForUser(botUserId)`, and (2) scopes of
+ * type `thread` or `forum_post` additionally require a
+ * `community_thread_participant` row for the bot (post-filter). Because the
+ * outer `WHERE` is `inArray(channelId, visibleChannelIds)` and non-participated
+ * thread rows are dropped in the post-filter, `hasMention` (a correlated
+ * sub-select keyed on the surviving row's `channel_id`) can never inherit a
+ * mention from an invisible or non-participated thread — do NOT try to
+ * sub-select mentions independently or the leak reopens on this axis.
  */
 export async function getInboxSnapshotForAgent(db: Database, botUserId: string): Promise<InboxSnapshotRow[]> {
+  const allowedChannelIds = await listAgentAllowedChannelIds(db, botUserId);
+
   const rows = await db
     .select({
       channelId: communityMessage.channelId,
@@ -419,11 +468,6 @@ export async function getInboxSnapshotForAgent(db: Database, botUserId: string):
           AND m3.seq > COALESCE(${communityReadState.lastReadSeq}, 0))`,
     })
     .from(communityMessage)
-    .leftJoin(communityChannel, eq(communityChannel.id, communityMessage.channelId))
-    .leftJoin(
-      communityServerMember,
-      and(eq(communityServerMember.serverId, communityChannel.serverId), eq(communityServerMember.userId, botUserId))
-    )
     .leftJoin(communityDmConversation, eq(communityDmConversation.id, communityMessage.dmConversationId))
     .leftJoin(
       communityReadState,
@@ -440,7 +484,12 @@ export async function getInboxSnapshotForAgent(db: Database, botUserId: string):
         ne(communityMessage.authorId, botUserId),
         sql`${communityMessage.seq} > COALESCE(${communityReadState.lastReadSeq}, 0)`,
         or(
-          and(isNotNull(communityMessage.channelId), eq(communityServerMember.userId, botUserId)),
+          and(
+            isNotNull(communityMessage.channelId),
+            allowedChannelIds.length > 0
+              ? inArray(communityMessage.channelId, allowedChannelIds)
+              : sql`1 = 0`
+          ),
           and(
             isNotNull(communityMessage.dmConversationId),
             or(eq(communityDmConversation.user1Id, botUserId), eq(communityDmConversation.user2Id, botUserId))
@@ -452,7 +501,9 @@ export async function getInboxSnapshotForAgent(db: Database, botUserId: string):
 
   if (rows.length === 0) return [];
 
-  const senderIds = [...new Set(rows.map((r) => r.latestSenderId).filter(Boolean))];
+  const filtered = rows;
+
+  const senderIds = [...new Set(filtered.map((r) => r.latestSenderId).filter(Boolean))];
   const users = senderIds.length
     ? await db
       .select({ id: user.id, name: user.name, discriminator: user.discriminator })
@@ -461,7 +512,7 @@ export async function getInboxSnapshotForAgent(db: Database, botUserId: string):
     : [];
   const userById = new Map(users.map((u) => [u.id, u]));
 
-  return rows.map((r) => {
+  return filtered.map((r) => {
     const sender = userById.get(r.latestSenderId);
     return {
       channelId: r.channelId,
@@ -520,22 +571,27 @@ export async function toInboxRows(
  * `getInboxSnapshotForAgent`'s per-scope aggregation, which has no single
  * message id to hand back). "Most recent" is by `createdAt`, since `seq` is a
  * per-scope counter and isn't comparable across scopes (see
- * `listUnreadMessagesForAgent`'s doc comment). Same scope/membership/
- * exclude-self-authored predicates as `listUnreadMessagesForAgent`. Returns
- * `null` when the bot has no unread anywhere.
+ * `listUnreadMessagesForAgent`'s doc comment).
+ *
+ * Visibility rule identical to `listUnreadMessagesForAgent`: the bot must be
+ * able to see the channel (`listVisibleChannelIdsForUser`) AND, for thread /
+ * forum_post scopes, hold a `community_thread_participant` row. Both
+ * dimensions are folded into the SQL WHERE via `listAgentAllowedChannelIds`
+ * so `LIMIT 1` returns the newest allowed row directly — an earlier shape
+ * used a bounded post-filter window that could return `null` when older
+ * allowed unread existed outside the top-N-by-createdAt slice.
  */
 export async function getLatestUnreadMessageForAgent(
   db: Database,
   botUserId: string
 ): Promise<{ messageId: string } | null> {
+  const allowedChannelIds = await listAgentAllowedChannelIds(db, botUserId);
+
   const rows = await db
-    .select({ id: communityMessage.id })
+    .select({
+      id: communityMessage.id,
+    })
     .from(communityMessage)
-    .leftJoin(communityChannel, eq(communityChannel.id, communityMessage.channelId))
-    .leftJoin(
-      communityServerMember,
-      and(eq(communityServerMember.serverId, communityChannel.serverId), eq(communityServerMember.userId, botUserId))
-    )
     .leftJoin(communityDmConversation, eq(communityDmConversation.id, communityMessage.dmConversationId))
     .leftJoin(
       communityReadState,
@@ -552,7 +608,12 @@ export async function getLatestUnreadMessageForAgent(
         ne(communityMessage.authorId, botUserId),
         sql`${communityMessage.seq} > COALESCE(${communityReadState.lastReadSeq}, 0)`,
         or(
-          and(isNotNull(communityMessage.channelId), eq(communityServerMember.userId, botUserId)),
+          and(
+            isNotNull(communityMessage.channelId),
+            allowedChannelIds.length > 0
+              ? inArray(communityMessage.channelId, allowedChannelIds)
+              : sql`1 = 0`
+          ),
           and(
             isNotNull(communityMessage.dmConversationId),
             or(eq(communityDmConversation.user1Id, botUserId), eq(communityDmConversation.user2Id, botUserId))
@@ -563,7 +624,8 @@ export async function getLatestUnreadMessageForAgent(
     .orderBy(desc(communityMessage.createdAt))
     .limit(1);
 
-  return rows[0] ? { messageId: rows[0].id } : null;
+  const r = rows[0];
+  return r ? { messageId: r.id } : null;
 }
 
 /**

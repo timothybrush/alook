@@ -143,6 +143,30 @@ export function markChannelMentionsReadBuilder(
     .where(inArray(communityMention.id, matchingMentionIds));
 }
 
+/**
+ * True when the given user is `@`-mentioned on the given message (`kind =
+ * "mention"`). Used by wake_trigger audit rows to record `reason: "mention"`
+ * vs the default `"unread"`.
+ */
+export async function hasMentionForMessage(
+  db: Database,
+  messageId: string,
+  userId: string
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: communityMention.id })
+    .from(communityMention)
+    .where(
+      and(
+        eq(communityMention.messageId, messageId),
+        eq(communityMention.userId, userId),
+        eq(communityMention.kind, "mention")
+      )
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function deleteMention(db: Database, userId: string, mentionId: string) {
   const rows = await db
     .delete(communityMention)

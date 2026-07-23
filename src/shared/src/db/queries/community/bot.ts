@@ -292,7 +292,15 @@ export type BotWakeContext =
   | { state: "bot_missing" }
   | { state: "bot_deleted" }
   | { state: "bot_unbound" }
-  | { state: "ready"; botUserId: string; name: string; discriminator: string; machineId: string; runtime: string };
+  | {
+      state: "ready";
+      botUserId: string;
+      name: string;
+      discriminator: string;
+      machineId: string;
+      runtime: string;
+      ownerUserId: string | null;
+    };
 
 export async function getBotWakeContext(db: Database, botUserId: string): Promise<BotWakeContext> {
   const rows = await db
@@ -302,6 +310,7 @@ export async function getBotWakeContext(db: Database, botUserId: string): Promis
       discriminator: user.discriminator,
       isBot: user.isBot,
       deletedAt: user.deletedAt,
+      ownerUserId: user.ownerUserId,
       machineId: communityBotBinding.machineId,
       runtime: communityBotBinding.runtime,
     })
@@ -320,6 +329,7 @@ export async function getBotWakeContext(db: Database, botUserId: string): Promis
     discriminator: r.discriminator,
     machineId: r.machineId,
     runtime: r.runtime,
+    ownerUserId: r.ownerUserId,
   };
 }
 

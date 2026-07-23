@@ -122,4 +122,21 @@ describe("POST /api/community/daemon/resync-wakes", () => {
     const res = await POST(req({ Authorization: "Bearer cmk_bad" }));
     expect(res.status).toBe(401);
   });
+
+  it("Mellicent regression: bot on a server whose only unread lives in a non-participated forum_post — feeder returns null → woken: 0", async () => {
+    // Post-fix behaviour: `getLatestUnreadMessageForAgent` applies the
+    // thread-participation post-filter (`plans/agent-unread-visibility-unify.md`),
+    // so a message in a forum_post the bot isn't a participant of no longer
+    // surfaces. The feeder returns null → resync-wakes reports woken: 0 and
+    // never touches the wake dispatcher.
+    mockListBotsForMachine.mockResolvedValue([
+      { id: "bot_Y", name: "Mellicent", description: "" },
+    ]);
+    mockGetLatestUnreadMessageForAgent.mockResolvedValue(null);
+
+    const res = await POST(req({ Authorization: "Bearer cmk_ok" }));
+
+    expect(await res.json()).toEqual({ woken: 0 });
+    expect(mockDispatchOneUnreadWake).not.toHaveBeenCalled();
+  });
 });

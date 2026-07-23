@@ -10,6 +10,21 @@ vi.mock("../../src/db/queries/community/bot", () => ({
   getBotWakeContext: (...a: unknown[]) => mockGetBotWakeContext(...a),
 }));
 
+const mockHasMentionForMessage = vi.fn();
+vi.mock("../../src/db/queries/community/mention", () => ({
+  hasMentionForMessage: (...a: unknown[]) => mockHasMentionForMessage(...a),
+}));
+
+const mockInsertBotAuditWakeTrigger = vi.fn();
+vi.mock("../../src/db/queries/community/bot-audit-log", () => ({
+  insertBotAuditWakeTrigger: (...a: unknown[]) => mockInsertBotAuditWakeTrigger(...a),
+}));
+
+const mockGetUsersByIds = vi.fn();
+vi.mock("../../src/db/queries/user", () => ({
+  getUsersByIds: (...a: unknown[]) => mockGetUsersByIds(...a),
+}));
+
 const mockCanBotReadWakeScope = vi.fn();
 vi.mock("../../src/db/queries/community/member", () => ({
   canBotReadWakeScope: (...a: unknown[]) => mockCanBotReadWakeScope(...a),
@@ -38,13 +53,22 @@ const MESSAGE_CHANNEL = {
   dmConversationId: null,
 };
 
-const BOT_READY = {
-  state: "ready" as const,
+const BOT_READY: {
+  state: "ready";
+  botUserId: string;
+  name: string;
+  discriminator: string;
+  machineId: string;
+  runtime: string;
+  ownerUserId: string | null;
+} = {
+  state: "ready",
   botUserId: "bot_1",
   name: "zoe",
   discriminator: "0042",
   machineId: "machine_1",
   runtime: "claude",
+  ownerUserId: "owner_1",
 };
 
 function seedHappyPath(overrides?: {
@@ -61,6 +85,10 @@ function seedHappyPath(overrides?: {
   mockResolveUnreadNoticeChannel.mockResolvedValue(
     overrides?.channel === undefined ? "/srv_1/general" : overrides.channel,
   );
+  // Audit path best-effort defaults — happy replies so the wake still fires.
+  mockGetUsersByIds.mockResolvedValue([{ id: "u_human", name: "gustavo", discriminator: "0042" }]);
+  mockHasMentionForMessage.mockResolvedValue(false);
+  mockInsertBotAuditWakeTrigger.mockResolvedValue({ id: "evt_1", createdAt: "2026-07-23T00:00:00.000Z" });
 }
 
 describe("buildUnreadWakeCommand", () => {
@@ -233,5 +261,102 @@ describe("buildUnreadWakeCommand", () => {
     await expect(
       buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" }),
     ).rejects.toThrow("D1_ERROR");
+  });
+
+  it("writes a wake_trigger audit row with the correct payload after the gate passes", async () => {
+    seedHappyPath();
+
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result.state).toBe("ready");
+    expect(mockInsertBotAuditWakeTrigger).toHaveBeenCalledTimes(1);
+    const [, args] = mockInsertBotAuditWakeTrigger.mock.calls[0]!;
+    expect(args).toMatchObject({
+      botId: "bot_1",
+      payload: {
+        messageId: "msg_1",
+        channel: "/srv_1/general",
+        seq: 7,
+        senderId: "u_human",
+        senderHandle: "@gustavo#0042",
+        reason: "unread",
+      },
+    });
+  });
+
+  it("audit reason is 'mention' when the message carries a mention row for the bot", async () => {
+    seedHappyPath();
+    mockHasMentionForMessage.mockResolvedValue(true);
+
+    await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    const [, args] = mockInsertBotAuditWakeTrigger.mock.calls[0]!;
+    expect(args.payload.reason).toBe("mention");
+  });
+
+  it("NEVER writes an audit row when the wake was skipped (bot_not_in_scope)", async () => {
+    seedHappyPath({ canRead: false });
+
+    await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(mockInsertBotAuditWakeTrigger).not.toHaveBeenCalled();
+  });
+
+  it("wake still fires when the audit insert throws (best-effort, MUST NOT gate the wake)", async () => {
+    seedHappyPath();
+    mockInsertBotAuditWakeTrigger.mockRejectedValue(new Error("d1 blip"));
+
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result.state).toBe("ready");
+  });
+
+  it("wake still fires when the sender lookup fails — audit is skipped silently", async () => {
+    seedHappyPath();
+    mockGetUsersByIds.mockRejectedValue(new Error("d1 blip"));
+
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result.state).toBe("ready");
+    expect(mockInsertBotAuditWakeTrigger).not.toHaveBeenCalled();
+  });
+
+  it("audit is skipped silently when the bot has no owner (unbound owner column)", async () => {
+    seedHappyPath({ bot: { ownerUserId: null } });
+
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" });
+    expect(result.state).toBe("ready");
+    expect(mockInsertBotAuditWakeTrigger).not.toHaveBeenCalled();
+    expect(mockGetUsersByIds).not.toHaveBeenCalled();
+  });
+
+  it("calls the ws-do internal broadcast route with the shape ws-durable.ts emits for daemon frames (when env is provided)", async () => {
+    seedHappyPath();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const env = { WS_DO_WORKER: { fetch: fetchMock } };
+
+    await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" }, env);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toContain("/internal/broadcast-bot-audit-event");
+    expect(init?.method).toBe("POST");
+    const body = JSON.parse(init!.body as string);
+    expect(body).toMatchObject({
+      botId: "bot_1",
+      ownerUserId: "owner_1",
+      id: "evt_1",
+      kind: "wake_trigger",
+      payload: {
+        messageId: "msg_1",
+        channel: "/srv_1/general",
+        seq: 7,
+        reason: "unread",
+      },
+    });
+  });
+
+  it("wake still fires when the ws-do broadcast fetch throws — broadcast is best-effort", async () => {
+    seedHappyPath();
+    const fetchMock = vi.fn(async () => { throw new Error("network down") });
+    const env = { WS_DO_WORKER: { fetch: fetchMock } };
+
+    const result = await buildUnreadWakeCommand(fakeDb, { messageId: "msg_1", botUserId: "bot_1" }, env);
+    expect(result.state).toBe("ready");
   });
 });

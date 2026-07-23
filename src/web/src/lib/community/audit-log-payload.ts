@@ -2,6 +2,7 @@ import {
   AuditLogCliInvocationPayloadSchema,
   AuditLogToolCallPayloadSchema,
   AuditLogThinkingPayloadSchema,
+  AuditLogWakeTriggerPayloadSchema,
 } from "@alook/shared"
 
 /**
@@ -31,6 +32,10 @@ export function parseAuditLogPayload(
     }
     case "thinking": {
       const r = AuditLogThinkingPayloadSchema.safeParse(json)
+      return r.success ? r.data : null
+    }
+    case "wake_trigger": {
+      const r = AuditLogWakeTriggerPayloadSchema.safeParse(json)
       return r.success ? r.data : null
     }
     default:

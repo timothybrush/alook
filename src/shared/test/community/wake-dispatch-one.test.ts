@@ -10,6 +10,21 @@ vi.mock("../../src/db/queries/community/bot", () => ({
   getBotWakeContext: (...a: unknown[]) => mockGetBotWakeContext(...a),
 }));
 
+const mockHasMentionForMessage = vi.fn();
+vi.mock("../../src/db/queries/community/mention", () => ({
+  hasMentionForMessage: (...a: unknown[]) => mockHasMentionForMessage(...a),
+}));
+
+const mockInsertBotAuditWakeTrigger = vi.fn();
+vi.mock("../../src/db/queries/community/bot-audit-log", () => ({
+  insertBotAuditWakeTrigger: (...a: unknown[]) => mockInsertBotAuditWakeTrigger(...a),
+}));
+
+const mockGetUsersByIds = vi.fn();
+vi.mock("../../src/db/queries/user", () => ({
+  getUsersByIds: (...a: unknown[]) => mockGetUsersByIds(...a),
+}));
+
 const mockCanBotReadWakeScope = vi.fn();
 vi.mock("../../src/db/queries/community/member", () => ({
   canBotReadWakeScope: (...a: unknown[]) => mockCanBotReadWakeScope(...a),
@@ -45,6 +60,7 @@ const BOT_READY = {
   discriminator: "0042",
   machineId: "machine_1",
   runtime: "claude",
+  ownerUserId: "owner_1",
 };
 
 function seedReady() {
@@ -53,6 +69,9 @@ function seedReady() {
   mockCanBotReadWakeScope.mockResolvedValue(true);
   mockGetWakeReadSeq.mockResolvedValue(0);
   mockResolveUnreadNoticeChannel.mockResolvedValue("/srv_1/general");
+  mockGetUsersByIds.mockResolvedValue([{ id: "u_human", name: "gustavo", discriminator: "0042" }]);
+  mockHasMentionForMessage.mockResolvedValue(false);
+  mockInsertBotAuditWakeTrigger.mockResolvedValue({ id: "evt_1", createdAt: "2026-07-23T00:00:00.000Z" });
 }
 
 function makeEnv(fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) {

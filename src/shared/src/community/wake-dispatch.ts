@@ -7,6 +7,9 @@ import * as bot from "../db/queries/community/bot";
 import * as member from "../db/queries/community/member";
 import * as readState from "../db/queries/community/read-state";
 import * as agentInbox from "../db/queries/community/agent-inbox";
+import * as mention from "../db/queries/community/mention";
+import * as botAuditLog from "../db/queries/community/bot-audit-log";
+import { getUsersByIds } from "../db/queries/user";
 import type { Database } from "../db/index";
 
 /**
@@ -19,6 +22,10 @@ import type { Database } from "../db/index";
  */
 interface FetcherLike {
   fetch(input: string, init?: RequestInit): Promise<Response>;
+}
+
+interface WakeDispatchEnv {
+  WS_DO_WORKER: FetcherLike;
 }
 
 /**
@@ -110,10 +117,17 @@ export type BuildUnreadWakeResult =
  * Every `skip` reason here is a PERMANENT current-state miss — the caller
  * `ack()`s the queue message. D1 exceptions propagate (thrown, not
  * returned) so the caller can `retry()` instead.
+ *
+ * When `env` is provided, also writes a `wake_trigger` audit row and asks
+ * ws-do to fan the resulting `community:bot.audit_event` frame to the
+ * owner's WS — both best-effort (wrapped in try/catch, MUST NOT block or
+ * fail the wake). Callers that don't run in a Workers env (unit tests
+ * exercising just the command-building) may omit `env`.
  */
 export async function buildUnreadWakeCommand(
   db: Database,
-  input: { messageId: string; botUserId: string }
+  input: { messageId: string; botUserId: string },
+  env?: WakeDispatchEnv
 ): Promise<BuildUnreadWakeResult> {
   const msg = await message.getWakeMessageScopeById(db, input.messageId);
   if (!msg) return { state: "skip", reason: "message_missing" };
@@ -160,7 +174,102 @@ export async function buildUnreadWakeCommand(
     launchId: nanoid(),
     unreadNotice,
   };
+
+  // Audit trail (best-effort) — commit that this wake fired for a specific
+  // trigger message. MUST NOT block or fail the wake: on retry (D1 blip) a
+  // second row is preferable to a silently-lost wake. See "Audit write
+  // failure policy" in plans/agent-unread-visibility-unify.md.
+  try {
+    await writeWakeTriggerAudit(db, env, {
+      botUserId: input.botUserId,
+      ownerUserId: botCtx.ownerUserId,
+      launchId: command.launchId,
+      messageId: msg.id,
+      channel,
+      seq: msg.seq,
+      authorId: msg.authorId,
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("wake_trigger_audit_failed", {
+      botUserId: input.botUserId,
+      messageId: msg.id,
+      err: String(err),
+    });
+  }
+
   return { state: "ready", machineId: botCtx.machineId, command };
+}
+
+async function writeWakeTriggerAudit(
+  db: Database,
+  env: WakeDispatchEnv | undefined,
+  input: {
+    botUserId: string;
+    ownerUserId: string | null;
+    launchId: string;
+    messageId: string;
+    channel: string;
+    seq: number;
+    authorId: string;
+  }
+): Promise<void> {
+  // Owner is already known from `getBotWakeContext` — no second D1 hit.
+  // Resolve sender handle in parallel with the mention check. Every lookup is
+  // best-effort — a missing sender / D1 exception short-circuits the audit
+  // write and MUST NOT surface as a wake failure. `allSettled` (not `all`) so
+  // one rejected leg can't unhandled-reject the parallel legs before the
+  // outer catch reaches them.
+  if (!input.ownerUserId) return;
+  const [senderRes, mentionRes] = await Promise.allSettled([
+    getUsersByIds(db, [input.authorId]),
+    mention.hasMentionForMessage(db, input.messageId, input.botUserId),
+  ]);
+  if (senderRes.status !== "fulfilled") return;
+  const sender = senderRes.value[0];
+  const isMention = mentionRes.status === "fulfilled" ? mentionRes.value : false;
+  if (!sender) return;
+
+  const payload = {
+    messageId: input.messageId,
+    channel: input.channel,
+    seq: input.seq,
+    senderId: input.authorId,
+    senderHandle: `@${formatHandle(sender.name, sender.discriminator)}`,
+    reason: (isMention ? "mention" : "unread") as "unread" | "mention",
+  };
+  const inserted = await botAuditLog.insertBotAuditWakeTrigger(db, {
+    botId: input.botUserId,
+    launchId: input.launchId,
+    payload,
+  });
+  if (!inserted || !env) return;
+
+  // ws-do live broadcast — best-effort, must not block the wake. `catch`
+  // swallows any transport failure; owner still sees the row on next UI
+  // refresh via the D1 row that already landed above.
+  try {
+    await env.WS_DO_WORKER.fetch("http://internal/internal/broadcast-bot-audit-event", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        botId: input.botUserId,
+        ownerUserId: input.ownerUserId,
+        id: inserted.id,
+        kind: "wake_trigger",
+        payload,
+        createdAt: inserted.createdAt,
+        launchId: input.launchId,
+      }),
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("wake_trigger_broadcast_failed", {
+      botUserId: input.botUserId,
+      messageId: input.messageId,
+      err: String(err),
+    });
+  }
 }
 
 /** Outcome of resolving ONE wake candidate — what every caller (the real queue consumer, and the dev-only inline stand-in) needs to decide what to log. */
@@ -186,7 +295,7 @@ export async function dispatchOneUnreadWake(
   env: { WS_DO_WORKER: FetcherLike },
   input: { messageId: string; botUserId: string }
 ): Promise<DispatchOneWakeResult> {
-  const result = await buildUnreadWakeCommand(db, input);
+  const result = await buildUnreadWakeCommand(db, input, env);
   if (result.state === "skip") return { outcome: "skip", reason: result.reason };
   const { sent } = await sendWakeToMachine(env, result.machineId, result.command);
   return sent ? { outcome: "sent" } : { outcome: "delivered_nowhere", machineId: result.machineId };

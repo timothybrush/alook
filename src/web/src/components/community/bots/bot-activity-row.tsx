@@ -55,6 +55,7 @@ function KindTag({ kind }: { kind: AuditKind }) {
 function kindMeta(kind: AuditKind): { label: string; tone: string } {
   if (kind === "cli_invocation") return { label: "daemon", tone: "text-foreground/70" }
   if (kind === "tool_call") return { label: "tool", tone: "text-muted-foreground" }
+  if (kind === "wake_trigger") return { label: "wake", tone: "text-foreground/70" }
   return { label: "think", tone: "text-muted-foreground/70" }
 }
 
@@ -94,6 +95,25 @@ function RowBody({
       )
     }
     return <span className="font-mono text-[13px] text-foreground">{name}</span>
+  }
+  if (event.kind === "wake_trigger") {
+    const p = event.payload as {
+      channel?: string
+      seq?: number
+      senderHandle?: string
+      reason?: "unread" | "mention"
+    } | null
+    const sender = p?.senderHandle ?? "@unknown"
+    const channel = p?.channel ?? "/unknown"
+    const seqLabel = p?.seq != null ? `#${p.seq}` : ""
+    const verb = p?.reason === "mention" ? "Mentioned by" : "Woken by"
+    return (
+      <div className="truncate font-mono text-[13px] text-foreground">
+        <span className="text-muted-foreground">{verb}</span> {sender}{" "}
+        <span className="text-muted-foreground">in</span> {channel}
+        {seqLabel ? <span className="text-muted-foreground/70"> {seqLabel}</span> : null}
+      </div>
+    )
   }
   const p = event.payload as { text?: string; truncated?: boolean; chars?: number } | null
   const text = p?.text ?? ""

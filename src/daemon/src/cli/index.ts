@@ -15,6 +15,8 @@
  * the sole result channel.
  */
 import { Command, CommanderError } from "commander";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import type { ServerApi, Cursor, Message } from "../server/contract.js";
 import { parseRef } from "../server/contract.js";
 import { proxyServerApiFromEnv } from "./proxyServerApi.js";
@@ -267,6 +269,7 @@ async function cmdInboxPull(opts: Record<string, unknown>): Promise<unknown> {
   const pulledAt = nowLocalISO();
 
   let acked = 0;
+  let ackError: string | undefined;
   if (opts.ack !== false && messages.length > 0) {
     const latest = new Map<string, Cursor>();
     for (const m of messages) {
@@ -274,11 +277,27 @@ async function cmdInboxPull(opts: Record<string, unknown>): Promise<unknown> {
       const cur = latest.get(m.channel);
       if (!cur || seqN > cur.seq) latest.set(m.channel, { channel: m.channel, seq: seqN });
     }
-    await api.ack({ agentId: agent, cursors: [...latest.values()] });
-    acked = latest.size;
+    try {
+      await api.ack({ agentId: agent, cursors: [...latest.values()] });
+      acked = latest.size;
+    } catch (err) {
+      // Do NOT rethrow: the pull already succeeded, and if ack fails on a
+      // single scope (e.g. a stale visibility mismatch) the whole envelope
+      // would otherwise collapse to a bare error, wiping the messages the
+      // agent needs. Surface the ack failure separately so the agent (or a
+      // human debugging) sees BOTH the delivered messages AND that the
+      // waterline didn't move.
+      ackError = err instanceof Error ? err.message : String(err);
+    }
   }
 
-  return { messages: messagesInLocalTime(messages), hasMore, acked, pulledAt };
+  return {
+    messages: messagesInLocalTime(messages),
+    hasMore,
+    acked,
+    pulledAt,
+    ...(ackError ? { ackError } : {}),
+  };
 }
 
 async function cmdServerList(opts: Record<string, unknown>): Promise<unknown> {
@@ -620,13 +639,17 @@ function getHelpText(program: Command, argv: string[]): string {
   return cmd.helpInformation();
 }
 
-// Run when invoked directly (not when imported via test/vitest).
-const invokedDirectly =
-  typeof process !== "undefined" &&
-  process.argv[1] &&
-  /(?:^|[\\/])(?:cli[\\/]index\.[jt]s|alook)$/.test(process.argv[1]) &&
-  !process.argv[1].includes("vitest") &&
-  !process.argv[1].includes("node_modules");
-if (invokedDirectly) {
+let isMainModule = false;
+try {
+  if (typeof process !== "undefined" && process.argv[1]) {
+    isMainModule =
+      import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  }
+} catch {
+  // Any realpath failure (argv[1] not a real file — worker threads, `node --eval`,
+  // exotic sandboxes; or EACCES/EIO/ELOOP on a real path) falls through to not-main.
+}
+
+if (isMainModule) {
   main().then((code) => process.exit(code));
 }

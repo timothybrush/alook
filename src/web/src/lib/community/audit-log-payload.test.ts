@@ -38,6 +38,17 @@ describe("parseAuditLogPayload", () => {
     )
     expect(p).toEqual({ text: "hmm", truncated: false, chars: 3 })
   })
+  it("parses a well-shaped wake_trigger payload", () => {
+    const payload = {
+      messageId: "m_1",
+      channel: "/srv/general",
+      seq: 42,
+      senderId: "u_1",
+      senderHandle: "@alice#1234",
+      reason: "unread" as const,
+    }
+    expect(parseAuditLogPayload("wake_trigger", JSON.stringify(payload))).toEqual(payload)
+  })
   it("returns null on invalid JSON — the whole page must not 500", () => {
     expect(parseAuditLogPayload("cli_invocation", "{not-json")).toBe(null)
   })

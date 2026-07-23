@@ -30,8 +30,22 @@ export type BotActivityEventInput = {
   botId: string;
   sessionId?: string | null;
   launchId?: string | null;
-  kind: "cli_invocation" | "tool_call" | "thinking";
+  kind: "cli_invocation" | "tool_call" | "thinking" | "wake_trigger";
   payload: string;
+};
+
+/**
+ * Typed payload for a `wake_trigger` audit row (matches
+ * `AuditLogWakeTriggerPayloadSchema` in schemas.ts). Frozen at wake time —
+ * a subsequent rename does NOT rewrite past rows.
+ */
+export type WakeTriggerPayload = {
+  messageId: string;
+  channel: string;
+  seq: number;
+  senderId: string;
+  senderHandle: string;
+  reason: "unread" | "mention";
 };
 
 /**
@@ -156,4 +170,31 @@ export async function listBotActivityEvents(
     .limit(limit);
 
   return rows;
+}
+
+/**
+ * Wake-trigger audit write — thin wrapper around
+ * `insertBotActivityEventAndPrune` for the wake-worker's write path
+ * (`buildUnreadWakeCommand`). Serializes the typed `WakeTriggerPayload` into
+ * the existing opaque `payload` text column and runs the same rolling-500
+ * prune atomically. Distinct entry point so wake-worker callers can't
+ * accidentally construct a shape that fails `BotAuditEventSchema` at read
+ * time.
+ */
+export async function insertBotAuditWakeTrigger(
+  db: Database,
+  data: {
+    botId: string;
+    sessionId?: string | null;
+    launchId?: string | null;
+    payload: WakeTriggerPayload;
+  }
+): Promise<{ id: string; createdAt: string } | null> {
+  return insertBotActivityEventAndPrune(db, {
+    botId: data.botId,
+    sessionId: data.sessionId ?? null,
+    launchId: data.launchId ?? null,
+    kind: "wake_trigger",
+    payload: JSON.stringify(data.payload),
+  });
 }

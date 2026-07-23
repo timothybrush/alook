@@ -1257,11 +1257,35 @@ export const AuditLogThinkingPayloadSchema = z.object({
   truncated: z.boolean(),
   chars: z.number().int().nonnegative(),
 });
+/**
+ * `wake_trigger` — one row per wake we ATTEMPTED to deliver. Written from
+ * `buildUnreadWakeCommand` right before the `HostCommand` is returned to the
+ * caller — the delivery hop (`sendWakeToMachine`) hasn't run yet. That
+ * ordering is deliberate: on retry (transient D1/network blip) a second
+ * audit row is preferable to a silently-lost wake, so audit-before-delivery
+ * is the safer trade-off. Callers reading the audit log should treat rows as
+ * "we tried this" not "the daemon received this" — the daemon-facing
+ * delivery is best-effort. See "Audit write failure policy" in
+ * plans/agent-unread-visibility-unify.md. The `messageId` is the trigger;
+ * `channel`/`seq` are denormalized for click-to-jump so the owner UI can
+ * render without a second D1 fetch. `senderHandle` is frozen at wake time
+ * (renaming after the fact does NOT rewrite past rows).
+ */
+export const AuditLogWakeTriggerPayloadSchema = z.object({
+  messageId: z.string().min(1),
+  channel: z.string().min(1),
+  seq: CommunityAgentPositiveSeqSchema,
+  senderId: z.string().min(1),
+  senderHandle: z.string().min(1),
+  reason: z.enum(["unread", "mention"]),
+});
+export type AuditLogWakeTriggerPayload = z.infer<typeof AuditLogWakeTriggerPayloadSchema>;
 
 export const BotAuditEventSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cli_invocation"), payload: AuditLogCliInvocationPayloadSchema }),
   z.object({ kind: z.literal("tool_call"), payload: AuditLogToolCallPayloadSchema }),
   z.object({ kind: z.literal("thinking"), payload: AuditLogThinkingPayloadSchema }),
+  z.object({ kind: z.literal("wake_trigger"), payload: AuditLogWakeTriggerPayloadSchema }),
 ]);
 export type BotAuditEvent = z.infer<typeof BotAuditEventSchema>;
 
@@ -1269,6 +1293,7 @@ export const BotAuditEventKindSchema = z.enum([
   "cli_invocation",
   "tool_call",
   "thinking",
+  "wake_trigger",
 ]);
 export type BotAuditEventKind = z.infer<typeof BotAuditEventKindSchema>;
 

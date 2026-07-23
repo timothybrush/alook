@@ -32,6 +32,33 @@ describe("community/mention exports", () => {
   it("exports markChannelMentionsReadBuilder", () => {
     expect(typeof mentionQueries.markChannelMentionsReadBuilder).toBe("function");
   });
+  it("exports hasMentionForMessage", () => {
+    expect(typeof mentionQueries.hasMentionForMessage).toBe("function");
+  });
+});
+
+describe("hasMentionForMessage", () => {
+  function createSelectMock(rows: unknown[]) {
+    const chain: any = {};
+    chain.from = vi.fn(() => chain);
+    chain.where = vi.fn(() => chain);
+    chain.limit = vi.fn(() => Promise.resolve(rows));
+    return {
+      select: vi.fn(() => chain),
+    };
+  }
+  it("returns true when a mention row exists", async () => {
+    const db = createSelectMock([{ id: "mention_1" }]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await mentionQueries.hasMentionForMessage(db as any, "msg_1", "u_1");
+    expect(result).toBe(true);
+  });
+  it("returns false when no mention row exists", async () => {
+    const db = createSelectMock([]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await mentionQueries.hasMentionForMessage(db as any, "msg_1", "u_1");
+    expect(result).toBe(false);
+  });
 });
 
 describe("markChannelMentionsReadBuilder", () => {

@@ -10,6 +10,7 @@ vi.mock("@opennextjs/cloudflare", () => ({
 }))
 
 const mockFindWakeCandidates = vi.fn()
+const mockCanBotReadWakeScope = vi.fn()
 const mockWarn = vi.fn()
 const mockInfo = vi.fn()
 
@@ -26,6 +27,9 @@ vi.mock("@alook/shared", async () => {
     queries: {
       communityBot: {
         findWakeCandidates: (...a: unknown[]) => mockFindWakeCandidates(...a),
+      },
+      communityMember: {
+        canBotReadWakeScope: (...a: unknown[]) => mockCanBotReadWakeScope(...a),
       },
     },
   }
@@ -59,6 +63,9 @@ describe("enqueueBotWakes", () => {
     vi.clearAllMocks()
     mockQueueSend.mockResolvedValue(undefined)
     mockDevHttpSend.mockResolvedValue(undefined)
+    // Default: every candidate passes the wake gate. Tests that need to
+    // exercise gate-filtering override this per case.
+    mockCanBotReadWakeScope.mockResolvedValue(true)
   })
 
   it("no-ops when recipients is empty — never queries or picks a transport", async () => {
@@ -97,6 +104,62 @@ describe("enqueueBotWakes", () => {
       { messageId: "msg_1", botUserId: "bot1" },
       { messageId: "msg_1", botUserId: "bot2" },
     ])
+  })
+
+  it("drops candidates that fail the wake gate (visibility / participation) before sending", async () => {
+    mockFindWakeCandidates.mockResolvedValue([
+      { botUserId: "bot_visible", name: "zoe", machineId: "m1", runtime: "claude" },
+      { botUserId: "bot_hidden", name: "kai", machineId: "m2", runtime: "codex" },
+    ])
+    mockCanBotReadWakeScope.mockImplementation(async (_db: unknown, botId: string) =>
+      botId === "bot_visible",
+    )
+
+    await enqueueBotWakes({ recipients: ["bot_visible", "bot_hidden"], channelId: "c1", messageRow })
+
+    expect(mockQueueSend).toHaveBeenCalledTimes(1)
+    const [payloads] = mockQueueSend.mock.calls[0]!
+    expect(payloads).toEqual([{ messageId: "msg_1", botUserId: "bot_visible" }])
+  })
+
+  it("drops (does NOT throw or collapse the batch) when a single candidate's gate check rejects", async () => {
+    // Regression guard: a transient D1 blip on ONE candidate's gate check
+    // must not wipe every wake for the message — `allSettled`, not `all`.
+    mockFindWakeCandidates.mockResolvedValue([
+      { botUserId: "bot_ok_1", name: "a", machineId: "m1", runtime: "claude" },
+      { botUserId: "bot_flaky", name: "b", machineId: "m2", runtime: "codex" },
+      { botUserId: "bot_ok_2", name: "c", machineId: "m3", runtime: "claude" },
+    ])
+    mockCanBotReadWakeScope.mockImplementation(async (_db: unknown, botId: string) => {
+      if (botId === "bot_flaky") throw new Error("d1 blip")
+      return true
+    })
+
+    await enqueueBotWakes({
+      recipients: ["bot_ok_1", "bot_flaky", "bot_ok_2"],
+      channelId: "c1",
+      messageRow,
+    })
+
+    expect(mockQueueSend).toHaveBeenCalledTimes(1)
+    const [payloads] = mockQueueSend.mock.calls[0]!
+    expect(payloads).toEqual([
+      { messageId: "msg_1", botUserId: "bot_ok_1" },
+      { messageId: "msg_1", botUserId: "bot_ok_2" },
+    ])
+  })
+
+  it("no-ops when every candidate fails the gate — never picks a transport", async () => {
+    mockFindWakeCandidates.mockResolvedValue([
+      { botUserId: "bot_a", name: "a", machineId: "m1", runtime: "claude" },
+      { botUserId: "bot_b", name: "b", machineId: "m2", runtime: "codex" },
+    ])
+    mockCanBotReadWakeScope.mockResolvedValue(false)
+
+    await enqueueBotWakes({ recipients: ["bot_a", "bot_b"], channelId: "c1", messageRow })
+
+    expect(mockQueueSend).not.toHaveBeenCalled()
+    expect(mockCreateQueueWakeTransport).not.toHaveBeenCalled()
   })
 
   it("chunks into 100-candidate slices for large fanouts", async () => {
