@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as http from "http";
 import * as fs from "fs";
-import { CredentialBroker, startCredentialProxy, type RunningProxy } from "./credentialProxy";
+import { CredentialBroker, DEFAULT_CAPABILITY_RESOLVER, startCredentialProxy, type RunningProxy } from "./credentialProxy";
 
 const REAL_KEY = "sk_real_SUPER_SECRET";
 
@@ -45,6 +45,13 @@ async function post(url: string, voucher: string, path: string) {
   });
   return { status: res.status, body: await res.text() };
 }
+
+describe("DEFAULT_CAPABILITY_RESOLVER", () => {
+  it("maps /api/reactAdd to the `send` capability (a read-only voucher must not react)", () => {
+    expect(DEFAULT_CAPABILITY_RESOLVER("POST", "/api/reactAdd")).toBe("send");
+    expect(DEFAULT_CAPABILITY_RESOLVER("POST", "/api/community/agent/reactAdd")).toBe("send");
+  });
+});
 
 describe("CredentialBroker", () => {
   it("requires upstreamBaseUrl; mint requires a runnerKey", () => {

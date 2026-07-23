@@ -320,6 +320,11 @@ export type SendResponse =
   | { state: "sent"; message: Message }
   | { state: "blocked"; reason: "unaligned"; unreadCount: number; latestSeq: Seq };
 
+export interface CommunityAgentReactAddResponse {
+  ok: true;
+  duplicate?: boolean;
+}
+
 export interface ReadRequest {
   agentId: AgentId;
   channel: ChannelRef;
@@ -459,6 +464,9 @@ export interface ServerApi {
 
   /** Download an attachment by id, writing to `destPath` (atomic temp-then-rename). */
   attachmentDownload(req: AttachmentDownloadRequest): Promise<AgentAttachmentDownloadResult>;
+
+  /** React to a message with a single emoji. Duplicates are idempotent (`duplicate:true`, no fan-out). */
+  reactAdd(req: { channel: ChannelRef; seq: Seq; emoji: string }): Promise<CommunityAgentReactAddResponse>;
 }
 
 /* ------------------------------------------------------------------ */

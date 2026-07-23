@@ -274,6 +274,7 @@ export {
   CommunityAgentListMembersRequestSchema,
   CommunityAgentChannelMemberRequestSchema,
   CommunityAgentJoinServerRequestSchema,
+  CommunityAgentReactAddRequestSchema,
   CommunityAgentAttachmentUploadResponseSchema,
   CommunityAgentAttachmentDownloadRequestSchema,
   BotAuditEventSchema,
@@ -357,6 +358,7 @@ export type {
   CommunityAgentListMembersRequest,
   CommunityAgentChannelMemberRequest,
   CommunityAgentJoinServerRequest,
+  CommunityAgentReactAddRequest,
   BotAuditEvent,
   BotAuditEventKind,
 } from "./schemas";
@@ -394,6 +396,7 @@ export type {
   AckRequest as CommunityCliAckRequest,
   SendRequest as CommunityCliSendRequest,
   SendResponse as CommunityCliSendResponse,
+  CommunityAgentReactAddResponse,
   ReadRequest as CommunityCliReadRequest,
   ResolveRequest as CommunityCliResolveRequest,
   ListChannelsRequest as CommunityCliListChannelsRequest,

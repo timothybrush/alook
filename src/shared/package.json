@@ -7,6 +7,7 @@
     "./crypto": "./src/utils/crypto.ts",
     "./browser": "./src/browser/index.ts",
     "./community-cli-contract": "./src/community-cli-contract.ts",
+    "./constants/community": "./src/constants/community.ts",
     "./runtime-config": "./src/runtime-config.ts",
     "./utils/community-roles": "./src/utils/community-roles.ts",
     "./lib/discriminator": "./src/lib/discriminator.ts",

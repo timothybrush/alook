@@ -37,9 +37,11 @@ import type {
   ChannelGroup,
   ChannelMemberResult,
   ChannelRef,
+  CommunityAgentReactAddResponse,
   ServerMember,
   Page,
   Message,
+  Seq,
   Server,
   AgentId,
 } from "../server/contract.js";
@@ -196,5 +198,7 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
     joinServer: (r: { agentId: AgentId; invite: string }) => call<{ server: Server }>("joinServer", r),
     attachmentUpload: callUpload,
     attachmentDownload: callDownload,
+    reactAdd: (r: { channel: ChannelRef; seq: Seq; emoji: string }) =>
+      call<CommunityAgentReactAddResponse>("reactAdd", r),
   };
 }

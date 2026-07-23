@@ -31,6 +31,7 @@ function stubApi(over: Partial<ServerApi> = {}): ServerApi {
     resolve: async () => null,
     listMembers: async () => ({ members: [] }),
     joinServer: async () => ({ server: { id: "s", name: "s" } }),
+    reactAdd: async () => ({ ok: true, duplicate: false }),
     ...over,
   } as ServerApi;
 }
@@ -513,6 +514,96 @@ describe("channel history", () => {
     await main(["channel", "history", "--channel", "/s/nope"]);
     const env = parseEnvelope(cap.lines());
     expect(env).toEqual({ error: "channel not found: /s/nope" });
+  });
+});
+
+describe("message emoji", () => {
+  it("channel ref — calls reactAdd with (channel, seq, emoji) and prints success envelope", async () => {
+    const reactAddSpy = vi.fn(async () => ({ ok: true as const, duplicate: false }));
+    setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
+    await main(["message", "emoji", "--target", "/demo/general#42", "--emoji", "👍"]);
+    expect(reactAddSpy).toHaveBeenCalledWith({ channel: "/demo/general", seq: 42, emoji: "👍" });
+    const env = parseEnvelope(cap.lines());
+    expect(env).toEqual({ success: { target: "/demo/general#42", emoji: "👍", duplicate: false } });
+  });
+
+  it("DM ref — calls reactAdd with the DM channel + seq split out", async () => {
+    const reactAddSpy = vi.fn(async () => ({ ok: true as const, duplicate: false }));
+    setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
+    await main(["message", "emoji", "--target", "/.dm/peer#0001#7", "--emoji", "🙏"]);
+    expect(reactAddSpy).toHaveBeenCalledWith({ channel: "/.dm/peer#0001", seq: 7, emoji: "🙏" });
+  });
+
+  it("proxy error surfaces .hint alongside .error and reactAdd throws propagate", async () => {
+    setApiForTesting(
+      stubApi({
+        reactAdd: async () => {
+          const err = new Error("not a member of #general");
+          (err as { hint?: string }).hint = "join the channel first";
+          throw err;
+        },
+      }),
+    );
+    await main(["message", "emoji", "--target", "/demo/general#42", "--emoji", "👍"]);
+    const env = parseEnvelope(cap.lines());
+    expect(env).toEqual({ error: "not a member of #general", hint: "join the channel first" });
+  });
+
+  it("thread ref (no message seq) → error envelope, reactAdd never called", async () => {
+    const reactAddSpy = vi.fn(async () => ({ ok: true as const, duplicate: false }));
+    setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
+    await main(["message", "emoji", "--target", "/demo/general/#5", "--emoji", "👍"]);
+    const env = parseEnvelope(cap.lines());
+    expect(env.error).toMatch(/thread/);
+    expect(env.hint).toMatch(/top-level channel or DM/);
+    expect(reactAddSpy).not.toHaveBeenCalled();
+  });
+
+  it("bare channel ref (no #N) → error envelope with seq hint, reactAdd never called", async () => {
+    const reactAddSpy = vi.fn(async () => ({ ok: true as const, duplicate: false }));
+    setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
+    await main(["message", "emoji", "--target", "/demo/general", "--emoji", "👍"]);
+    const env = parseEnvelope(cap.lines());
+    expect(env.error).toMatch(/needs a ref with a seq/);
+    expect(env.hint).toMatch(/#N/);
+    expect(reactAddSpy).not.toHaveBeenCalled();
+  });
+
+  it("missing --target → commander error, reactAdd never called", async () => {
+    const reactAddSpy = vi.fn(async () => ({ ok: true as const, duplicate: false }));
+    setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
+    await main(["message", "emoji", "--emoji", "👍"]);
+    const env = parseEnvelope(cap.lines());
+    expect("error" in env).toBe(true);
+    expect(reactAddSpy).not.toHaveBeenCalled();
+  });
+
+  it("missing --emoji → commander error, reactAdd never called", async () => {
+    const reactAddSpy = vi.fn(async () => ({ ok: true as const, duplicate: false }));
+    setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
+    await main(["message", "emoji", "--target", "/demo/general#42"]);
+    const env = parseEnvelope(cap.lines());
+    expect("error" in env).toBe(true);
+    expect(reactAddSpy).not.toHaveBeenCalled();
+  });
+
+  it("oversize emoji → error envelope, reactAdd never called", async () => {
+    const reactAddSpy = vi.fn(async () => ({ ok: true as const, duplicate: false }));
+    setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
+    const big = "🎉".repeat(20);
+    await main(["message", "emoji", "--target", "/demo/general#42", "--emoji", big]);
+    const env = parseEnvelope(cap.lines());
+    expect(env.error).toMatch(/too long/);
+    expect(env.hint).toMatch(/single emoji/);
+    expect(reactAddSpy).not.toHaveBeenCalled();
+  });
+
+  it("duplicate — envelope surfaces duplicate:true, exit code still 0", async () => {
+    setApiForTesting(stubApi({ reactAdd: async () => ({ ok: true as const, duplicate: true }) }));
+    const code = await main(["message", "emoji", "--target", "/demo/general#42", "--emoji", "👍"]);
+    expect(code).toBe(0);
+    const env = parseEnvelope(cap.lines()) as { success: { duplicate: boolean } };
+    expect(env.success.duplicate).toBe(true);
   });
 });
 

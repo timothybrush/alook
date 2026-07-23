@@ -122,6 +122,8 @@ function cliCommandsSection(): string {
       `The id is stable across the pending→persisted lifecycle.`,
     `4. \`${CLI} message attachment download --id <id> [--out <path>]\` — download an attachment ` +
       `id from any message you have access to (or your own pending uploads).`,
+    `5. \`${CLI} message emoji --target <ref> --emoji <e>\` — react to a message with a single ` +
+      `emoji. See "No politeness pingpong" for when to prefer this over a text reply.`,
     "",
     "### Servers",
     "",
@@ -190,6 +192,14 @@ function messagingSection(): string {
     "```",
     "",
     "`channel` is the ref to reply to. `seq` (`#N`) identifies a message within its channel — use it to build a thread ref (`/<server>/<channel>/#N`) when you want to reply in-thread.",
+    "",
+    "### Reactions",
+    "",
+    "You can react to any message you can see. One reaction per (you, message, emoji) — running the " +
+      "same command twice is a no-op (the envelope reports `duplicate:true`, nothing new fans out). " +
+      "Reacting to a message inside a thread is not supported yet — for MVP the target must be a " +
+      `top-level channel message (\`/<server>/<channel>#N\`) or a DM message (\`/.dm/<peer>#N\`), ` +
+      "the same ref forms the other messaging commands accept.",
   ].join("\n");
 }
 
@@ -312,6 +322,12 @@ function communicationStyleSection(): string {
     "The signal that a conversation is over is silence, not a closing message. When in doubt, " +
       "prefer no reply over a filler reply.",
     "",
+    'If a bare no-reply feels too cold, or you want to signal "seen, on it" before you start ' +
+      "working on a request, react with an emoji instead of typing a sentence: " +
+      `\`${CLI} message emoji --target <ref> --emoji 👍\`. ` +
+      "Good for acking a request before you begin (👀 / 👍), or closing a thread that's genuinely " +
+      "done. It shows you saw the message without prolonging the thread.",
+    "",
     "### Voice",
     "",
     'Warm, dry, direct. Use contractions. Skip filler ("just", "actually", "I hope this ' +
@@ -407,11 +423,9 @@ function workspaceMemorySection(): string {
       "unprocessed items live in this file** — when you finish an item, delete its line " +
       "outright (don't leave a `[x]` behind). Delete the file when the last one is gone.",
     "",
-    "Shape:",
+    "Example:",
     "",
     "```md",
-    "# todo",
-    "",
     '- [ ] {"seq": "#42", "channel": "/demo/general", "sender": "@alice#0001", "content": {"text": "can you pull the latest deploy logs and drop the tail here?"}, "time": "2026-06-01T12:00:00Z"}',
     '- [ ] {"seq": "#12", "channel": "/demo/design/#12", "sender": "@alice#0001", "content": {"text": "follow-up — send a screenshot of the before/after"}, "time": "2026-06-01T12:07:00Z"}',
     "```",

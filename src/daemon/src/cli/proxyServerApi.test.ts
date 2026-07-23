@@ -106,6 +106,27 @@ describe("createProxyServerApi — parseJsonResponse via call<T>", () => {
   });
 });
 
+describe("createProxyServerApi — reactAdd", () => {
+  it("POSTs to /api/reactAdd with Bearer voucher and JSON body (no agentId)", async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl: FetchLike = vi.fn(async (url: string, init?: RequestInit) => {
+      seen.push({ url, init });
+      return jsonBody(JSON.stringify({ ok: true, duplicate: false }), { status: 200 });
+    });
+    const api = createProxyServerApi({ ...cfg, fetchImpl: fetchImpl as typeof fetch });
+    const res = await api.reactAdd({ channel: "/demo/general", seq: 42, emoji: "👍" });
+    expect(res).toEqual({ ok: true, duplicate: false });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url).toBe("http://proxy.test/api/reactAdd");
+    expect(seen[0].init?.method).toBe("POST");
+    const headers = seen[0].init?.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer vch_test");
+    const body = JSON.parse(String(seen[0].init?.body ?? "{}"));
+    expect(body).toEqual({ channel: "/demo/general", seq: 42, emoji: "👍" });
+    expect(body.agentId).toBeUndefined();
+  });
+});
+
 describe("createProxyServerApi — callUpload via parseJsonResponse", () => {
   it("throws 'non-JSON body' on empty 500", async () => {
     const fetchImpl: FetchLike = vi.fn(async () => jsonBody("", { status: 500 }));

@@ -43,6 +43,7 @@ export type {
   AckRequest,
   SendRequest,
   SendResponse,
+  CommunityAgentReactAddResponse,
   ReadRequest,
   ResolveRequest,
   ListChannelsRequest,

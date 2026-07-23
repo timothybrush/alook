@@ -1197,6 +1197,15 @@ export type CommunityAgentJoinServerRequest = z.infer<
   typeof CommunityAgentJoinServerRequestSchema
 >;
 
+export const CommunityAgentReactAddRequestSchema = z.object({
+  channel: z.string().min(1),
+  seq: CommunityAgentPositiveSeqSchema,
+  emoji: z.string().min(1),
+});
+export type CommunityAgentReactAddRequest = z.infer<
+  typeof CommunityAgentReactAddRequestSchema
+>;
+
 // ---------------------------------------------------------------------------
 // Bot activity audit log — event payload
 // ---------------------------------------------------------------------------

@@ -436,6 +436,7 @@ describe("deriveAuditLogSubcommand", () => {
     expect(deriveAuditLogSubcommand("/api/listMembers")).toBe("listMembers");
     expect(deriveAuditLogSubcommand("/api/joinServer")).toBe("joinServer");
     expect(deriveAuditLogSubcommand("/api/resolve")).toBe("resolve");
+    expect(deriveAuditLogSubcommand("/api/reactAdd")).toBe("reactAdd");
   });
 
   it("maps the rewritten /api/community/agent/* pathnames identically", () => {
@@ -444,6 +445,7 @@ describe("deriveAuditLogSubcommand", () => {
     // derive to the same subcommand string.
     expect(deriveAuditLogSubcommand("/api/community/agent/send")).toBe("send");
     expect(deriveAuditLogSubcommand("/api/community/agent/inboxPull")).toBe("inboxPull");
+    expect(deriveAuditLogSubcommand("/api/community/agent/reactAdd")).toBe("reactAdd");
   });
 
   it("returns null for `ack` (dropped — paired with inboxPull, no user intent)", () => {

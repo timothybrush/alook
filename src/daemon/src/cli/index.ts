@@ -16,9 +16,11 @@
  */
 import { Command, CommanderError } from "commander";
 import type { ServerApi, Cursor, Message } from "../server/contract.js";
+import { parseRef } from "../server/contract.js";
 import { proxyServerApiFromEnv } from "./proxyServerApi.js";
 import { daemonStart, daemonStop, daemonList } from "./daemonStart.js";
 import { parseInviteToken } from "@alook/shared/lib/invite-link";
+import { MAX_EMOJI_BYTES } from "@alook/shared/constants/community";
 import { nowLocalISO, toLocalISO } from "../util/localTime.js";
 
 /**
@@ -152,6 +154,41 @@ async function cmdMessageSend(opts: Record<string, unknown>): Promise<unknown> {
     );
   }
   return { sent: `${res.message.channel}${res.message.seq}` };
+}
+
+async function cmdMessageEmoji(opts: Record<string, unknown>): Promise<unknown> {
+  const api = getApi();
+  const target = opts.target as string;
+  const emoji = opts.emoji as string;
+  if (!target) throw new CliError("message emoji: --target <ref> is required (e.g. /demo/general#42)");
+  if (!emoji) throw new CliError("message emoji: --emoji <string> is required");
+
+  let parsed: ReturnType<typeof parseRef>;
+  try {
+    parsed = parseRef(target);
+  } catch (err) {
+    throw new CliError(`message emoji: ${(err as Error).message}`);
+  }
+
+  if (parsed.threadRootSeq !== undefined && parsed.seq === undefined) {
+    const err = new CliError("reacting to messages inside a thread is not supported yet");
+    (err as { hint?: string }).hint = "react to a top-level channel or DM message instead";
+    throw err;
+  }
+  if (parsed.seq === undefined) {
+    const err = new CliError(`message emoji needs a ref with a seq (e.g. ${target}#42)`);
+    (err as { hint?: string }).hint = "pass --target /<server>/<channel>#N or /.dm/<peer>#N";
+    throw err;
+  }
+  if (Buffer.byteLength(emoji, "utf8") > MAX_EMOJI_BYTES) {
+    const err = new CliError("emoji is too long");
+    (err as { hint?: string }).hint = "use a single emoji, not a phrase";
+    throw err;
+  }
+
+  const channel = `/${parsed.server}/${parsed.channel}`;
+  const res = await api.reactAdd({ channel, seq: parsed.seq, emoji });
+  return { target, emoji, duplicate: res.duplicate === true };
 }
 
 async function cmdAttachmentUpload(opts: Record<string, unknown>): Promise<unknown> {
@@ -339,6 +376,20 @@ function buildProgram(): Command {
       const localOpts = this.opts();
       const globalOpts = program.opts();
       const result = await cmdMessageSend({ ...globalOpts, ...localOpts });
+      printEnvelope({ success: result });
+    });
+
+  message
+    .command("emoji")
+    .description("react to a message with a single emoji")
+    .requiredOption("--target <ref>", "message ref (path-style, e.g. /demo/general#42 or /.dm/peer#7)")
+    .requiredOption("--emoji <string>", "single emoji character")
+    .exitOverride()
+    .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+    .action(async function (this: Command) {
+      const localOpts = this.opts();
+      const globalOpts = program.opts();
+      const result = await cmdMessageEmoji({ ...globalOpts, ...localOpts });
       printEnvelope({ success: result });
     });
 
