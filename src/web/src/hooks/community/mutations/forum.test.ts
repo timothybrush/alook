@@ -85,6 +85,70 @@ function makePost(id: string): ForumPost {
   }
 }
 
+describe("useCreateForumPost", () => {
+  it("POSTs JSON with name + content only when no attachments/mentionType are provided", async () => {
+    const { useCreateForumPost } = await load()
+    useCreateForumPost()
+    const created = makePost("p_new")
+    apiFetchMock.mockResolvedValueOnce({ post: created })
+
+    await runMutation({ channelId: "forum_1", name: "hi", content: "body" })
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    const [path, init] = apiFetchMock.mock.calls[0]
+    expect(path).toBe("/api/community/channels/forum_1/posts")
+    expect((init as { method?: string }).method).toBe("POST")
+    const body = JSON.parse((init as { body: string }).body)
+    expect(body.name).toBe("hi")
+    expect(body.content).toBe("body")
+    // Non-present fields serialize as `undefined` → dropped by JSON.stringify.
+    expect(body.attachments).toBeUndefined()
+    expect(body.mentionType).toBeUndefined()
+  })
+
+  it("threads attachments + mentionType through to the request body", async () => {
+    const { useCreateForumPost } = await load()
+    useCreateForumPost()
+    apiFetchMock.mockResolvedValueOnce({ post: makePost("p_new") })
+
+    const attachments = [{
+      url: "/api/community/media/abc.png",
+      filename: "abc.png",
+      contentType: "image/png",
+      size: 100,
+      width: 10,
+      height: 10,
+    }]
+    await runMutation({
+      channelId: "forum_1",
+      name: "heads up",
+      content: "Heads up @everyone",
+      attachments,
+      mentionType: "everyone",
+    })
+
+    const [, init] = apiFetchMock.mock.calls[0]
+    const body = JSON.parse((init as { body: string }).body)
+    expect(body.attachments).toEqual(attachments)
+    expect(body.mentionType).toBe("everyone")
+  })
+
+  it("prepends the fresh post to the forum's cached list on success", async () => {
+    const { useCreateForumPost } = await load()
+    useCreateForumPost()
+    capturedQc.setQueryData<ForumPostsResponse>(communityKeys.forumPosts("forum_1"), {
+      posts: [makePost("p_old")],
+    })
+    const fresh = makePost("p_new")
+    apiFetchMock.mockResolvedValueOnce({ post: fresh })
+
+    await runMutation({ channelId: "forum_1", name: "n", content: "c" })
+
+    const cache = capturedQc.getQueryData<ForumPostsResponse>(communityKeys.forumPosts("forum_1"))
+    expect(cache?.posts.map((p) => p.id)).toEqual(["p_new", "p_old"])
+  })
+})
+
 describe("useDeleteForumPost", () => {
   it("DELETEs the post channel and removes it from the forum's cached list on success", async () => {
     const { useDeleteForumPost } = await load()

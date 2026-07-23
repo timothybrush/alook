@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { MessagesSquare, ListChevronsUpDown, Plus, Tag, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { formatRelativeTime } from "./format-time"
@@ -13,7 +13,7 @@ import { CreateForumPost, type NewForumPost } from "./create-forum-post"
 import { PostTagDialog } from "./post-tag-dialog"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { tid } from "@/lib/community/testids"
-import type { ForumPost } from "./_types"
+import type { ForumPost, Member } from "./_types"
 
 // Max member avatars shown in a post card's AvatarGroup before collapsing to a
 // "+N" bubble. Creator is always first.
@@ -25,13 +25,22 @@ const MAX_AVATARS = 4
 // forum-level tag vocabulary. Per-post tags are edited from a hover icon on each
 // card (creator + server managers), not a forum-wide manage mode.
 export function ForumView({
+  forumChannelId,
+  members,
+  onSearchMembers,
   posts, loading, onOpenPost, onCreatePost, onEditPostTags, canEditPostTags, savingTagsFor,
   onDeletePost, canDeletePost, deletingPost,
 }: {
+  forumChannelId: string
+  members: Member[]
+  onSearchMembers?: (query: string) => void
   posts: ForumPost[]
   loading?: boolean
   onOpenPost: (id: string) => void
-  onCreatePost?: (post: NewForumPost) => void
+  // Async — page owns the mutation + `enterThread` navigation and either
+  // resolves or rejects. `CreateForumPost` catches rejection to toast and
+  // preserve composer state for retry.
+  onCreatePost?: (post: NewForumPost) => Promise<void>
   // Save handler for a single post's tags. Absent → tag editing disabled.
   onEditPostTags?: (postId: string, tags: string[]) => void
   // Whether the current user may edit a given post's tags (creator or manager).
@@ -49,46 +58,63 @@ export function ForumView({
   const [composing, setComposing] = useState(false)
   const [editingTagsFor, setEditingTagsFor] = useState<ForumPost | null>(null)
   const [deletingFor, setDeletingFor] = useState<ForumPost | null>(null)
+  const newPostTriggerRef = useRef<HTMLButtonElement>(null)
 
   // Deduped union of every post's tags — the forum's tag list is derived, not
   // stored. Only rendered when non-empty.
   const allTags = [...new Set(posts.flatMap((p) => p.tags))].sort()
 
   const filtered = tag === "All" ? posts : posts.filter((p) => p.tags.includes(tag))
+
+  const closeCompose = () => {
+    setComposing(false)
+    // Focus returns to the trigger so keyboard/screen-reader users don't lose
+    // their place. `queueMicrotask` so the trigger has re-rendered before we
+    // reach for its ref.
+    queueMicrotask(() => newPostTriggerRef.current?.focus())
+  }
+
   return (
     <>
-      {composing && (
+      {/* Composer OR filter bar in the same slot — swapping (not stacking)
+          keeps the post list below anchored. */}
+      {composing ? (
         <CreateForumPost
-          onCancel={() => setComposing(false)}
-          onPost={(post) => { onCreatePost?.(post); setComposing(false) }}
+          forumChannelId={forumChannelId}
+          members={members}
+          onSearchMembers={onSearchMembers}
+          onCancel={closeCompose}
+          onCreatePost={async (post) => {
+            if (!onCreatePost) return
+            await onCreatePost(post)
+            closeCompose()
+          }}
         />
+      ) : (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            {allTags.length > 0 && (
+              <>
+                <Badge variant={tag === "All" ? "default" : "secondary"} className="shrink-0 cursor-pointer" render={<button onClick={() => setTag("All")} />}>All</Badge>
+                {allTags.map((t) => (
+                  <Badge
+                    key={t}
+                    variant={tag === t ? "default" : "secondary"}
+                    className="shrink-0 cursor-pointer"
+                    data-testid={tid.forumTagChip(t)}
+                    render={<button onClick={() => setTag(t)} />}
+                  >
+                    {`#${t}`}
+                  </Badge>
+                ))}
+              </>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button size="sm" ref={newPostTriggerRef} onClick={() => setComposing(true)}><Plus className="size-4" /> New Post</Button>
+          </div>
+        </div>
       )}
-
-      {/* filter bar — derived tag chips on the left (hidden when there are no
-          tags anywhere), New Post on the right. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          {allTags.length > 0 && (
-            <>
-              <Badge variant={tag === "All" ? "default" : "secondary"} className="shrink-0 cursor-pointer" render={<button onClick={() => setTag("All")} />}>All</Badge>
-              {allTags.map((t) => (
-                <Badge
-                  key={t}
-                  variant={tag === t ? "default" : "secondary"}
-                  className="shrink-0 cursor-pointer"
-                  data-testid={tid.forumTagChip(t)}
-                  render={<button onClick={() => setTag(t)} />}
-                >
-                  {`#${t}`}
-                </Badge>
-              ))}
-            </>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" onClick={() => setComposing(true)}><Plus className="size-4" /> New Post</Button>
-        </div>
-      </div>
 
       <main className="flex-1 overflow-y-auto thin-scrollbar p-4">
         {loading && posts.length === 0 ? (
@@ -159,7 +185,7 @@ export function ForumView({
                       <Badge key={t} variant="secondary">#{t}</Badge>
                     ))}
                     <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-                      <MessagesSquare className="size-3.5" /> {p.messageCount}
+                      <MessagesSquare className="size-3.5" /> {Math.max(0, p.messageCount)}
                     </span>
                   </div>
                 </div>

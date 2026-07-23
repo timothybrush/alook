@@ -49,6 +49,19 @@ vi.mock("@alook/shared", async () => {
       communityMention: {
         createMentions: vi.fn(async () => []),
       },
+      communityAttachment: {
+        createAttachment: vi.fn(async (_db: unknown, args: Record<string, unknown>) => ({
+          id: "att_1",
+          filename: args.filename,
+          r2Key: args.r2Key,
+          contentType: args.contentType,
+          size: args.size,
+          width: args.width,
+          height: args.height,
+        })),
+        listByMessageIds: vi.fn(async () => []),
+        unreserveAttachments: vi.fn(async () => {}),
+      },
       communityThread: {
         addThreadParticipants: vi.fn(async () => {}),
         listParticipantsForChannels: (...a: unknown[]) => mockListParticipantsForChannels(...a),
@@ -149,6 +162,79 @@ describe("POST /api/community/channels/[id]/posts — name normalization", () =>
     const res = await POST(postReq({ name: "///", content: "hello" }), ctx)
     expect(res.status).toBe(400)
     expect(mockCreateChannel).not.toHaveBeenCalled()
+  })
+
+  it("returns messageCount 0 in the response (body IS the first message, not a reply)", async () => {
+    mockCreateChannel.mockResolvedValue({
+      id: "post1",
+      name: "solo",
+      createdAt: "2026-07-02T00:00:00.000Z",
+    })
+    const res = await POST(postReq({ name: "solo", content: "hi" }), ctx)
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    expect(body.post.messageCount).toBe(0)
+  })
+})
+
+describe("POST /api/community/channels/[id]/posts — content + attachments contract", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockGetChannelForMember.mockResolvedValue({ id: "ch1", serverId: "s1", type: "forum", tags: [] })
+    mockCreateMessage.mockResolvedValue({ id: "m1", createdAt: "2026-07-02T00:00:00.000Z" })
+    mockGetMessage.mockResolvedValue({
+      id: "m1",
+      authorId: "u1",
+      authorName: "Alice",
+      authorImage: null,
+      content: "",
+      type: "default",
+      mentionType: null,
+      replyToId: null,
+      embeds: null,
+      channelId: "post1",
+      dmConversationId: null,
+      seq: 1,
+      createdAt: "2026-07-02T00:00:00.000Z",
+    })
+    mockGetUserSelf.mockResolvedValue({ id: "u1", name: "Alice", image: null })
+    mockGetUserInternal.mockResolvedValue({ id: "u1", name: "Alice", isBot: false })
+    mockFanOutToChannel.mockResolvedValue(undefined)
+    mockCreateChannel.mockResolvedValue({
+      id: "post1",
+      name: "my-post",
+      createdAt: "2026-07-02T00:00:00.000Z",
+    })
+  })
+
+  it("empty content + zero attachments returns 400", async () => {
+    const res = await POST(postReq({ name: "my post", content: "" }), ctx)
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBe("post is empty")
+    expect(mockCreateChannel).not.toHaveBeenCalled()
+  })
+
+  it("empty content + one valid attachment creates the post (attachments-only path)", async () => {
+    const attachments = [
+      { url: "/api/community/media/abc.png", filename: "abc.png", contentType: "image/png", size: 100, width: 10, height: 10 },
+    ]
+    const res = await POST(postReq({ name: "img", content: "", attachments }), ctx)
+    expect(res.status).toBe(201)
+    // Route passes attachments through to createCommunityMessage.
+    expect(mockCreateChannel).toHaveBeenCalled()
+  })
+
+  it("threads mentionType through to createCommunityMessage / first message", async () => {
+    const res = await POST(
+      postReq({ name: "heads up", content: "Heads up @everyone", mentionType: "everyone" }),
+      ctx,
+    )
+    expect(res.status).toBe(201)
+    // The mock records the createMessage call — the pipeline lifts mentionType
+    // out of `body` and lands it on the row.
+    const call = mockCreateMessage.mock.calls[0]?.[1]
+    expect(call?.mentionType).toBe("everyone")
   })
 })
 

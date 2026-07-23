@@ -5,23 +5,32 @@ import { apiFetch } from "@/lib/api/client"
 import { communityKeys } from "@/lib/query-keys"
 import type { ForumPost } from "@/components/community/_types"
 import type { ForumPostsResponse } from "@/hooks/community/use-channel-panels"
+import type { UploadedAttachment } from "@/hooks/community/mutations/uploads"
+import type { MentionType } from "@alook/shared"
 
 export type CreateForumPostArgs = {
   channelId: string
   name: string
   content: string
+  // Pre-uploaded R2 URLs (not raw files) — the client uploads via
+  // `useUploadFile` before firing this mutation, and the server persists them
+  // as `community_message_attachment` rows on the post's first message.
+  attachments?: UploadedAttachment[]
+  // Propagated to the first message so `@everyone`/`@here` audience broadcast
+  // fires end-to-end.
+  mentionType?: MentionType
 }
 export type CreateForumPostResult = { post: ForumPost }
 
 export function useCreateForumPost() {
   const queryClient = useQueryClient()
   return useMutation<CreateForumPostResult, Error, CreateForumPostArgs>({
-    mutationFn: async ({ channelId, name, content }) => {
+    mutationFn: async ({ channelId, name, content, attachments, mentionType }) => {
       return apiFetch<CreateForumPostResult>(
         `/api/community/channels/${channelId}/posts`,
         {
           method: "POST",
-          body: JSON.stringify({ name, content }),
+          body: JSON.stringify({ name, content, attachments, mentionType }),
         },
       )
     },

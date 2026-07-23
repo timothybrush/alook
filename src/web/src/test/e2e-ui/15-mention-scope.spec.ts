@@ -162,23 +162,25 @@ test.describe.serial("mentions — candidate scope", () => {
     await expect(opt.carol).toHaveCount(0)
   })
 
-  test("new forum post composer has no @ autocomplete (plain textarea)", async ({ asUser }) => {
+  test("new forum post composer supports @-mentions like the chat composer", async ({ asUser }) => {
     const { page } = await asUser("alice")
     await page.goto(`/c/channels/${serverId}/${privateForumId}`)
     await page.waitForURL(new RegExp(privateForumId), { timeout: 20_000, waitUntil: "commit" })
 
     // Open the create-post form.
     await page.getByRole("button", { name: "New Post" }).click()
-    const body = page.getByPlaceholder("Enter a message…")
+    // Body is the shared community <Composer> — a ProseMirror contenteditable,
+    // NOT a plain <textarea>. Locate via the composer's testid, since Tiptap
+    // exposes its placeholder as `data-placeholder` (a ProseMirror decoration)
+    // rather than the HTML `placeholder` attribute Playwright's
+    // `getByPlaceholder` matches.
+    const body = composerEditable(page)
     await expect(body).toBeVisible({ timeout: 10_000 })
-    // It's a real <textarea>, not a TipTap contenteditable.
-    expect(await body.evaluate((el) => el.tagName)).toBe("TEXTAREA")
 
-    // Typing @ yields no mention popup options at all.
+    // Typing @ opens the same mention popup the chat composer uses.
     await body.click()
     await body.pressSequentially("@bob")
-    await expect(page.getByTestId(tid.mentionOption(bob.id))).toHaveCount(0)
-    await expect(page.getByTestId(tid.mentionOption("everyone"))).toHaveCount(0)
+    await expect(page.getByTestId(tid.mentionOption(bob.id))).toBeVisible({ timeout: 15_000 })
   })
 
   test("1:1 DM composer has no @ popup at all (no members, no everyone/here)", async ({ asUser }) => {

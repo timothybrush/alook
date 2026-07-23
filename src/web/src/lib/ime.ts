@@ -20,7 +20,10 @@ export function onEnterSubmit(
   return (e: EnterKeyEvent) => {
     if (isImeConfirming(e)) return
     if (e.key === "Escape") {
-      opts?.onEscape?.()
+      if (opts?.onEscape) {
+        e.preventDefault()
+        opts.onEscape()
+      }
       return
     }
     if (e.key === "Enter") {

@@ -25,7 +25,12 @@ function makePost(over: Partial<ForumPost> = {}): ForumPost {
 
 function render(posts: ForumPost[]): string {
   return renderToStaticMarkup(
-    createElement(ForumView, { posts, onOpenPost: () => {} })
+    createElement(ForumView, {
+      forumChannelId: "cha_forum",
+      members: [],
+      posts,
+      onOpenPost: () => {},
+    })
   )
 }
 
@@ -37,6 +42,8 @@ function renderWithDelete(
 ): string {
   return renderToStaticMarkup(
     createElement(ForumView, {
+      forumChannelId: "cha_forum",
+      members: [],
       posts,
       onOpenPost: () => {},
       onDeletePost: () => {},
@@ -125,5 +132,26 @@ describe("ForumView post delete button", () => {
     // absent on first paint — proves clicking, not rendering, opens it.
     const html = renderWithDelete([makePost()])
     expect(html).not.toContain("Delete post?")
+  })
+})
+
+describe("ForumView filter bar / composer swap", () => {
+  it("shows the New Post trigger by default (not the composer)", () => {
+    const html = render([makePost()])
+    // The trigger button renders on first paint, in the filter bar slot.
+    expect(html).toContain("New Post")
+    // The composer's aria-label region only exists in composing mode.
+    expect(html).not.toContain('aria-label="Create post"')
+  })
+})
+
+describe("ForumView post card messageCount guard", () => {
+  it("clamps a negative messageCount to 0 on render", () => {
+    // Simulates a stale/cached response where the server hadn't yet subtracted
+    // the body message. The defensive Math.max(0, …) guard keeps the badge
+    // non-negative.
+    const html = render([makePost({ messageCount: -3 })])
+    // No "-3" anywhere in the rendered badge.
+    expect(html).not.toContain(">-3<")
   })
 })

@@ -10,6 +10,7 @@ import { ChannelHeader, ChannelHeaderSkeleton, type ChannelNotifLevel } from "@/
 import { MessageList } from "@/components/community/message-list"
 import { Composer, ComposerSkeleton, type SendAttachment } from "@/components/community/composer"
 import { ForumView, ForumViewSkeleton } from "@/components/community/forum-view"
+import type { NewForumPost } from "@/components/community/create-forum-post"
 import { CommunityPanelSheet } from "@/components/community/community-panel-sheet"
 import { ThreadOpener } from "@/components/community/thread-opener"
 import { AddMembersDialog } from "@/components/community/add-members-dialog"
@@ -682,15 +683,17 @@ function ChannelView() {
     communityWsSendTyping({ channelId })
   }
 
-  const createForumPost = async (post: { name: string; content: string }) => {
-    try {
-      const data = await createForumPostMut.mutateAsync({ channelId, ...post })
-      // A post is its own child channel — open it, same as clicking a post row.
-      enterThread(data.post.id)
-    } catch (e) {
-      toastApiError(e, "Failed to create post")
-    }
-  }
+  const createForumPost = useCallback(async (post: NewForumPost) => {
+    const data = await createForumPostMut.mutateAsync({
+      channelId,
+      name: post.name,
+      content: post.content,
+      attachments: post.attachments,
+      mentionType: post.mentionType,
+    })
+    // A post is its own child channel — open it, same as clicking a post row.
+    enterThread(data.post.id)
+  }, [channelId, createForumPostMut, enterThread])
 
   const myRole = members.find((m) => m.userId === currentUser.id)?.role
   // The unit's creator (thread/channel/post) — drives the manage-context
@@ -971,6 +974,9 @@ function ChannelView() {
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ForumView
+            forumChannelId={channelId}
+            members={composerMembers}
+            onSearchMembers={membersHook.searchMembers}
             posts={forumPosts}
             loading={forumPostsLoading}
             onOpenPost={enterThread}

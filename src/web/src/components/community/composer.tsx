@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { AtSign, FileIcon, ImageIcon, PlusCircle, Smile, Upload, Users, X } from "lucide-react"
 import { useEditor, EditorContent } from "@tiptap/react"
@@ -46,12 +46,19 @@ export function pendingFilesToSendAttachments(pendingFiles: PendingFile[]): Send
   return pendingFiles.map((pf) => ({ file: pf.file, width: pf.width, height: pf.height }))
 }
 
-// Composer — plain-text TipTap editor with a chat-style @-mention popover.
-// Users type raw markdown which MessageBody/Streamdown renders on display.
-// Enter sends, Shift+Enter adds a newline; while the mention popover is open
-// Enter/Tab/Arrow keys drive selection instead. @everyone / @here are virtual
-// candidates in channel + thread contexts (hidden in DM).
-export function Composer({ channel, context, members, onSearchMembers, channelRefCandidates = [], onSend, onTyping, replyingTo, onCancelReply, autoFocus = false }: {
+type ComposerMode = "chat" | "forumPostBody"
+
+export type ComposerHandle = {
+  focusEditor: () => void
+  submitNow: () => void
+  resetAfterSubmit: () => void
+  isEmpty: () => boolean
+  // Trigger the hidden file input's picker. Used by consumers that render
+  // their own attach button outside the composer's absolute-positioned frame.
+  openFilePicker: () => void
+}
+
+export type ComposerProps = {
   channel: string
   context: MentionContext
   members: Member[]
@@ -73,7 +80,52 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
   // Auto-focus the editor on mount and on channel change. Desktop only —
   // callers pass `bp !== "mobile"` to avoid unexpected soft-keyboard pop-up.
   autoFocus?: boolean
-}) {
+  // `"chat"` (default) — Enter sends, Shift+Enter newline, `send()` clears.
+  // `"forumPostBody"` — inverted: Enter newline, Shift+Enter submits; `send()`
+  // does NOT clear so the parent can await mutation success before resetting.
+  mode?: ComposerMode
+  // Placeholder override — used by `forumPostBody` to swap the chat-composer
+  // relic string. Falls back to the mode-derived default when absent.
+  placeholder?: string
+  // Hide the composer's built-in emoji-picker button (bottom-right). Used by
+  // the forum-post composer, where emoji is dropped from the compose surface.
+  hideEmoji?: boolean
+  // Hide the composer's built-in attach button (bottom-left). Used by the
+  // forum-post composer, which renders its own attach button in the footer
+  // row and drives it through `ComposerHandle.openFilePicker()`.
+  hideAttach?: boolean
+  // Fires only on emptiness-state transitions (`hasContent` flips), not every
+  // keystroke. Used by the forum-post orchestrator to drive the footer button's
+  // `disabled` state without mirroring editor content in parent React state.
+  onDirty?: (hasContent: boolean) => void
+}
+
+// Composer — plain-text TipTap editor with a chat-style @-mention popover.
+// Users type raw markdown which MessageBody/Streamdown renders on display.
+// In `mode="chat"` (default) Enter sends, Shift+Enter adds a newline. In
+// `mode="forumPostBody"` the mapping is inverted (Enter = newline,
+// Shift+Enter = submit) to match /w's issue-sheet convention. While the
+// mention popover is open Enter/Tab/Arrow keys drive selection instead.
+// @everyone / @here are virtual candidates in channel + thread contexts
+// (hidden in DM).
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer({
+  channel,
+  context,
+  members,
+  onSearchMembers,
+  channelRefCandidates = [],
+  onSend,
+  onTyping,
+  replyingTo,
+  onCancelReply,
+  autoFocus = false,
+  mode = "chat",
+  placeholder,
+  hideEmoji = false,
+  hideAttach = false,
+  onDirty,
+}, ref) {
+  const isForumPostBody = mode === "forumPostBody"
   const {
     pendingFiles,
     setPendingFiles,
@@ -204,14 +256,14 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
         listItem: false,
         listKeymap: false,
       }),
-      Placeholder.configure({ placeholder: context === "channel" ? `Message /${channel}` : `Message ${channel}` }),
+      Placeholder.configure({ placeholder: placeholder ?? (context === "channel" ? `Message /${channel}` : `Message ${channel}`) }),
       mentionExtension,
       channelRefExtension,
     ],
     editorProps: {
       attributes: {
         class: "outline-none",
-        enterkeyhint: "send",
+        enterkeyhint: isForumPostBody ? "enter" : "send",
       },
       handleKeyDown: (_view, event) => {
         // editorProps.handleKeyDown runs BEFORE the suggestion plugin's keymap,
@@ -224,6 +276,15 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
         const channelRefOpen =
           channelRefPopupRef.current.items.length > 0 && channelRefPopupRef.current.command !== null
         if (mentionOpen || channelRefOpen) return false
+
+        if (isForumPostBody) {
+          if (event.key === "Enter" && event.shiftKey && !event.isComposing) {
+            event.preventDefault()
+            send()
+            return true
+          }
+          return false
+        }
 
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
           event.preventDefault()
@@ -248,8 +309,31 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
     },
     onUpdate: () => {
       fireTyping()
+      emitDirtyTransition()
     },
   })
+
+  // Emitted-emptiness ref — used by the onDirty transition logic below to fire
+  // only when the boolean flips. Initialized to false because the editor mounts
+  // empty and no attachments exist yet.
+  const prevHasContentRef = useRef<boolean>(false)
+  const onDirtyRef = useRef(onDirty)
+  useEffect(() => { onDirtyRef.current = onDirty }, [onDirty])
+  const emitDirtyTransition = () => {
+    if (!editor) return
+    const next = !editor.isEmpty || pendingFiles.length > 0
+    if (next === prevHasContentRef.current) return
+    prevHasContentRef.current = next
+    onDirtyRef.current?.(next)
+  }
+  // Attachment-side emptiness flips (drops, picker, removal) also feed onDirty.
+  useEffect(() => {
+    emitDirtyTransition()
+    // emitDirtyTransition reads editor + pendingFiles by closure, so bind to
+    // both. It's a stable inner closure — the dependency list is intentionally
+    // the observed state, not the function.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFiles, editor])
 
   const send = () => {
     if (!editor || (editor.isEmpty && pendingFiles.length === 0)) return
@@ -261,19 +345,42 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
     const markdown = editor.isEmpty ? "" : editor.getText({ blockSeparator: "\n\n" }).trim()
     const mentionType = detectMentionType(markdown)
     onSend?.(markdown, pendingFilesToSendAttachments(pendingFiles), mentionType)
+    // In forumPostBody mode the parent needs to await mutation success before
+    // clearing — otherwise a failed create wipes the user's typed content.
+    // Reset is delegated to the parent via `resetAfterSubmit()` on the ref.
+    if (isForumPostBody) return
     editor.commands.clearContent()
     setPendingFiles([])
     setMentionPopup(EMPTY_MENTION_STATE)
     setChannelRefPopup(EMPTY_CHANNEL_REF_STATE)
   }
 
+  useImperativeHandle(ref, () => ({
+    focusEditor: () => { editor?.commands.focus("end") },
+    submitNow: () => {
+      if (!editor || (editor.isEmpty && pendingFiles.length === 0)) return
+      send()
+    },
+    resetAfterSubmit: () => {
+      if (!editor) return
+      editor.commands.clearContent()
+      setPendingFiles([])
+      setMentionPopup(EMPTY_MENTION_STATE)
+      setChannelRefPopup(EMPTY_CHANNEL_REF_STATE)
+    },
+    isEmpty: () => !editor || (editor.isEmpty && pendingFiles.length === 0),
+    openFilePicker: () => { fileInputRef.current?.click() },
+  }))
+
   // Auto-focus on mount + on channel switch. `<Composer>` is not remounted
   // per channel (only `<MessageList>` is keyed by channelId), so keying this
   // effect on `channel` is what refocuses when the user navigates channels.
+  // Skipped in forumPostBody mode — the parent controls focus (starts on the
+  // title, jumps to the body on Enter).
   useEffect(() => {
-    if (!autoFocus || !editor) return
+    if (!autoFocus || !editor || isForumPostBody) return
     editor.commands.focus("end")
-  }, [autoFocus, editor, channel])
+  }, [autoFocus, editor, channel, isForumPostBody])
 
   // Refocus editor after a drop so the user can start typing without
   // clicking. The drop landed on the composer container — the intent is
@@ -285,7 +392,7 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
 
   return (
     <div
-      className="relative px-3 pb-3 pt-0"
+      className={isForumPostBody ? "relative" : "relative px-3 pb-3 pt-0"}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -326,7 +433,7 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
         </div>
       )}
 
-      <div className={`relative bg-muted shadow-(--e1) ring-1 ring-border/40 transition-shadow focus-within:ring-2 focus-within:ring-ring/60 ${replyingTo || pendingFiles.length > 0 ? "rounded-b-xl" : "rounded-xl"}`}>
+      <div className={`relative ${isForumPostBody ? "bg-transparent ring-0" : "bg-muted shadow-(--e1) ring-1 ring-border/40 transition-shadow focus-within:ring-2 focus-within:ring-ring/60"} ${replyingTo || pendingFiles.length > 0 ? "rounded-b-xl" : "rounded-xl"}`}>
         {dragging && (
           <div
             className={`pointer-events-none absolute inset-0 z-10 grid place-items-center border-2 border-dashed border-ring bg-background/80 ${replyingTo || pendingFiles.length > 0 ? "rounded-b-xl" : "rounded-xl"}`}
@@ -348,30 +455,34 @@ export function Composer({ channel, context, members, onSearchMembers, channelRe
           onChange={handleFileSelect}
           className="hidden"
         />
-        <div className="chat-composer relative px-12 py-3" data-testid={tid.composerInput}>
-          <EditorContent editor={editor} className="max-h-40 overflow-y-auto thin-scrollbar text-base chat-input-line-height outline-none" />
+        <div className={`chat-composer relative py-3 ${isForumPostBody ? "px-2" : "px-12"}`} data-testid={tid.composerInput}>
+          <EditorContent editor={editor} className={`${isForumPostBody ? "max-h-60" : "max-h-40"} overflow-y-auto thin-scrollbar text-base chat-input-line-height outline-none`} />
         </div>
         {/* Attach button — fixed bottom-left */}
-        <DropdownMenu onOpenChange={(open) => { if (!open) editor?.commands.focus() }}>
-          <DropdownMenuTrigger
-            render={<button data-testid={tid.composerAttach} className="absolute left-2 bottom-2 grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground" aria-label="Add" />}
-          >
-            <PlusCircle className="size-5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" className="w-44">
-            <DropdownMenuItem onClick={() => { fileInputRef.current?.click(); editor?.commands.focus() }}><Upload className="size-4" /> Upload a File</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {!hideAttach && (
+          <DropdownMenu onOpenChange={(open) => { if (!open) editor?.commands.focus() }}>
+            <DropdownMenuTrigger
+              render={<button data-testid={tid.composerAttach} className="absolute left-2 bottom-2 grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground" aria-label="Add" />}
+            >
+              <PlusCircle className="size-5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-44">
+              <DropdownMenuItem onClick={() => { fileInputRef.current?.click(); editor?.commands.focus() }}><Upload className="size-4" /> Upload a File</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {/* Emoji button — fixed bottom-right */}
-        <EmojiPickerPopover side="top" align="end" onPick={(e) => editor?.chain().focus().insertContent(e).run()}>
-          <button className="absolute right-2 bottom-2 grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground" aria-label="Emoji picker">
-            <Smile className="size-5" />
-          </button>
-        </EmojiPickerPopover>
+        {!hideEmoji && (
+          <EmojiPickerPopover side="top" align="end" onPick={(e) => editor?.chain().focus().insertContent(e).run()}>
+            <button className="absolute right-2 bottom-2 grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground" aria-label="Emoji picker">
+              <Smile className="size-5" />
+            </button>
+          </EmojiPickerPopover>
+        )}
       </div>
     </div>
   )
-}
+})
 
 // Loading placeholder for <Composer>. Same outer footprint (px-3 pb-3 pt-0 +
 // rounded surface) so the message list above stays anchored across channel

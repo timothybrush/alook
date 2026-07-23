@@ -42,12 +42,22 @@ describe("onEnterSubmit", () => {
     expect(e.preventDefault).toHaveBeenCalled()
   })
 
-  it("calls onEscape on Escape", () => {
+  it("calls onEscape on Escape and prevents default", () => {
     const fn = vi.fn()
     const onEscape = vi.fn()
-    onEnterSubmit(fn, { onEscape })(key({ key: "Escape" }))
+    const e = key({ key: "Escape" })
+    onEnterSubmit(fn, { onEscape })(e)
     expect(onEscape).toHaveBeenCalledOnce()
     expect(fn).not.toHaveBeenCalled()
+    expect(e.preventDefault).toHaveBeenCalled()
+  })
+
+  it("Escape without onEscape does NOT prevent default and fires no callback", () => {
+    const fn = vi.fn()
+    const e = key({ key: "Escape" })
+    onEnterSubmit(fn)(e)
+    expect(fn).not.toHaveBeenCalled()
+    expect(e.preventDefault).not.toHaveBeenCalled()
   })
 
   it("ignores Shift+Enter by default but honors allowShift", () => {

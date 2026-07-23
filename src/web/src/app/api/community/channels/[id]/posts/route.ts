@@ -96,7 +96,9 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
     return {
       id: t.id,
       name: t.name,
-      messageCount: t.messageCount ?? 0,
+      // Excludes the body message — the body IS the first message; the badge
+      // shows reply count, not total message count.
+      messageCount: Math.max(0, (t.messageCount ?? 0) - 1),
       lastMessageAt: t.lastMessageAt ?? t.createdAt,
       parent: { authorName, text: preview },
       authorId: t.creatorId ?? "",
@@ -124,7 +126,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeError("channel is not a forum", 400)
   }
 
-  let body: { name?: string; content?: string }
+  let body: { name?: string; content?: string; attachments?: unknown; mentionType?: unknown }
   try {
     body = await req.json()
   } catch {
@@ -143,10 +145,13 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeError("name is required", 400)
   }
 
-  if (!body.content || typeof body.content !== "string" || body.content.trim().length === 0) {
-    return writeError("content is required", 400)
+  const content = typeof body.content === "string" ? body.content : ""
+  const hasContent = content.trim().length > 0
+  const hasAttachments = Array.isArray(body.attachments) && body.attachments.length > 0
+  if (!hasContent && !hasAttachments) {
+    return writeError("post is empty", 400)
   }
-  if (body.content.length > MAX_MESSAGE_CONTENT_LENGTH) {
+  if (hasContent && content.length > MAX_MESSAGE_CONTENT_LENGTH) {
     return writeError(`content must be ≤ ${MAX_MESSAGE_CONTENT_LENGTH} characters`, 400)
   }
 
@@ -181,7 +186,7 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     db,
     authorId: ctx.userId,
     target: { kind: "channel", channelId: postChannel.id, serverId: channel.serverId },
-    body: { content: body.content },
+    body: { content, attachments: body.attachments, mentionType: body.mentionType },
   })
   if (!created.ok) return writeError(created.error, created.status)
   const message = created.row
@@ -207,13 +212,15 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     post: {
       id: postChannel.id,
       name: postChannel.name,
-      messageCount: 1,
+      // Excludes the body message — the body IS the first message; the badge
+      // shows reply count, so a freshly created post reads 0.
+      messageCount: 0,
       lastMessageAt: message.createdAt,
-      parent: { authorName, text: body.content.slice(0, MESSAGE_PREVIEW_LENGTH) },
+      parent: { authorName, text: content.slice(0, MESSAGE_PREVIEW_LENGTH) },
       authorId: ctx.userId,
       authorAvatar,
       tags: [],
-      preview: body.content.slice(0, MESSAGE_PREVIEW_LENGTH),
+      preview: content.slice(0, MESSAGE_PREVIEW_LENGTH),
       // A fresh post's only participant is its creator (just enrolled above).
       participants: [{ id: ctx.userId, name: authorName, avatar: authorAvatar }],
     },
