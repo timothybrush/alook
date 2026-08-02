@@ -196,6 +196,90 @@ function isAwaited(call) {
   return call.parent && ts.isAwaitExpression(call.parent)
 }
 
+/**
+ * SELF-ARMORED COMPOSITE query fns (the 4th cross-boundary false-positive, Simone
+ * #343). `useInvite` is a multi-statement query fn in `db/queries/**` that OWNS
+ * its retry unit internally: `withD1Retry(() => db.batch([insert, uses+1]))` (my
+ * ★2 #244 atomic-batch fix). The route calls `queries.communityInvite.useInvite(
+ * db, …)`; census classifies that as a "queries" exec point (root=queries,
+ * first-arg=db), but the armor is INSIDE useInvite's body — invisible to
+ * `enclosingCarrier` (which only walks lexical ancestors of the call). Same
+ * "armor in another frame" family as class-1/2, but the fix differs:
+ *   - carrier-name registration (class-1) does NOT apply — that matches a call
+ *     whose args CONTAIN the point; `useInvite(db)` isn't enclosing anything.
+ *   - relocate (class-2) does NOT apply — you can't hoist the retry to the route;
+ *     wrapping the whole fn re-runs the NON-atomic read→validate→batch sequence
+ *     and reintroduces the exact ★2 under-count bug. The retry MUST stay on the
+ *     internal atomic batch.
+ * So the call is armored-at-definition. Detection is DEFINITION-derived (scan the
+ * fn body), gated by the RED-LINE Aigneis #282/#345 insisted on to avoid a
+ * false-NEGATIVE: judge the call armored ONLY IF **every WRITE in the fn body is
+ * inside a carrier**. A body with an armored batch PLUS a bare write elsewhere is
+ * NOT self-armored — that bare write is a real exec point and must be fixed
+ * in-body, never hidden. (Bare READS in the body don't block: they're in the
+ * `queries/**` leaf zone, benign, and separately out of census scope.) Only
+ * `useInvite` qualifies today; a second one is caught automatically.
+ */
+let _selfArmoredCache = null
+function deriveSelfArmoredQueryFns(root) {
+  if (_selfArmoredCache) return _selfArmoredCache
+  const names = new Set()
+  const out = execFileSync("git", ["ls-files", "src/shared/src/db/queries"], {
+    cwd: root, encoding: "utf8",
+  })
+  for (const rel of out.trim().split("\n").filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))) {
+    const abs = `${root}/${rel}`
+    const sf = ts.createSourceFile(abs, readFileSync(abs, "utf8"), ts.ScriptTarget.Latest, true)
+    const visit = (node) => {
+      if (
+        (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) &&
+        node.name &&
+        node.body &&
+        node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) &&
+        isFullyArmoredComposite(node.body)
+      ) {
+        names.add(node.name.getText(sf))
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sf)
+  }
+  _selfArmoredCache = names
+  return names
+}
+
+/**
+ * A fn body with ≥1 carrier AND where EVERY `db.insert/update/delete` write sits
+ * inside a carrier (`enclosingCarrier` non-null). Reads are ignored (benign, leaf
+ * zone). Any bare write ⇒ false ⇒ the fn is NOT self-armored (red-line).
+ */
+function isFullyArmoredComposite(body) {
+  let sawCarrier = false
+  let bareWrite = false
+  const scan = (node) => {
+    if (ts.isCallExpression(node)) {
+      const n = ts.isIdentifier(node.expression)
+        ? node.expression.text
+        : ts.isPropertyAccessExpression(node.expression)
+          ? node.expression.name.text
+          : null
+      if (n && CARRIERS.includes(n)) sawCarrier = true
+      // A `db.<write>(…)` chain rooted on the handle.
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ["insert", "update", "delete"].includes(node.expression.name.text) &&
+        rootIdentifier(node.expression.expression) === "db" &&
+        !enclosingCarrier(node)
+      ) {
+        bareWrite = true
+      }
+    }
+    ts.forEachChild(node, scan)
+  }
+  scan(body)
+  return sawCarrier && !bareWrite
+}
+
 /** The carrier call `node` sits inside (as a descendant of its arguments), or null. */
 export function enclosingCarrier(node) {
   let cur = node.parent
@@ -229,31 +313,37 @@ export function execPoints(relPath, root) {
   const sf = ts.createSourceFile(abs, src, ts.ScriptTarget.Latest, /*setParentNodes*/ true)
   const points = []
   const builders = deriveStatementBuilders(root)
+  const selfArmored = deriveSelfArmoredQueryFns(root)
 
   const visit = (node) => {
     if (ts.isCallExpression(node)) {
       const kind = classifyCall(node)
+      const calleeName =
+        kind === "queries" && ts.isPropertyAccessExpression(node.expression)
+          ? node.expression.name.text
+          : null
       // Statement-builder composition (`queries.ns.buildX(db,…)` un-awaited) is
       // NOT an independent D1 exit — the exec unit is the batch that runs it.
       // See `deriveStatementBuilders`. Both facts required: the callee is a
       // derived pure builder AND this call isn't awaited (an awaited builder
       // call executes the thenable here and stays a real point).
-      if (
-        kind === "queries" &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        builders.has(node.expression.name.text) &&
-        !isAwaited(node)
-      ) {
+      if (kind === "queries" && builders.has(calleeName) && !isAwaited(node)) {
         ts.forEachChild(node, visit)
         return
       }
       if (kind) {
         const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf))
+        // A self-armored composite query fn (`useInvite` — see
+        // `deriveSelfArmoredQueryFns`) owns its retry internally; the call is a
+        // real D1 exit but armored at definition, which `enclosingCarrier` (a
+        // lexical-ancestor walk) can't see. Attribute the armor by definition.
+        const armored =
+          enclosingCarrier(node) ?? (selfArmored.has(calleeName) ? calleeName : null)
         points.push({
           file: relPath,
           line: line + 1, // 1-indexed
           kind,
-          armored: enclosingCarrier(node),
+          armored,
           text: node.getText(sf).split("\n")[0].slice(0, 80),
         })
       }
