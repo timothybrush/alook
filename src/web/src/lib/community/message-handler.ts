@@ -10,6 +10,7 @@ import {
   createLogger,
   isUniqueConstraintError,
   idempotentWrite,
+  withD1Retry,
 } from "@alook/shared"
 import type { MentionType } from "@alook/shared"
 import type { Database } from "@alook/shared"
@@ -374,10 +375,12 @@ export async function createCommunityMessage(params: {
   // first-sends both pass this check is caught at insert time by the
   // partial-unique-index handler below.
   {
-    const existing = await queries.communityMessage.getMessageByAuthorAndNonce(
-      db,
-      authorId,
-      effectiveNonce,
+    // `withD1Retry` (D1-armor state 2, P0): the nonce dedup pre-check — a
+    // transient false-miss here would let a duplicate send through (double-write,
+    // the 4a red line this whole effort protects). Retry to truth.
+    const existing = await withD1Retry(
+      () => queries.communityMessage.getMessageByAuthorAndNonce(db, authorId, effectiveNonce),
+      { route: "message-create/nonce-precheck" },
     )
     if (existing) {
       return { ok: true, row: existing, attachments: [], deduped: true }
@@ -406,9 +409,12 @@ export async function createCommunityMessage(params: {
     | Awaited<ReturnType<typeof queries.communityMessage.getMessageInScope>>
     | null = null
   if (rawReplyToId !== undefined) {
-    resolvedReplyMsg = await queries.communityMessage.getMessageInScope(db, rawReplyToId, {
-      channelId: target.channelId,
-    })
+    // `withD1Retry` (D1-armor state 2): reply-target validation read — a
+    // transient would reject a valid reply (mis-judged state); retry to truth.
+    resolvedReplyMsg = await withD1Retry(
+      () => queries.communityMessage.getMessageInScope(db, rawReplyToId, { channelId: target.channelId }),
+      { route: "message-create/reply-target" },
+    )
     if (!resolvedReplyMsg) {
       log.warn("reply_to_out_of_scope_dropped", {
         authorId,
@@ -490,10 +496,13 @@ export async function createCommunityMessage(params: {
     // is always set now (client nonce or srv: fingerprint), so the srv: fallback
     // gets the same insert-race recovery.
     if (isUniqueConstraintError(err)) {
-      const existing = await queries.communityMessage.getMessageByAuthorAndNonce(
-        db,
-        authorId,
-        effectiveNonce,
+      // `withD1Retry` (D1-armor state 2, P0): insert-race recovery re-fetch — the
+      // winner's row MUST be found to return the deduped replay; a transient
+      // false-miss here would rethrow and surface a spurious 500 on what is
+      // actually a successful dedup. Retry to truth.
+      const existing = await withD1Retry(
+        () => queries.communityMessage.getMessageByAuthorAndNonce(db, authorId, effectiveNonce),
+        { route: "message-create/nonce-race-recovery" },
       )
       if (existing) {
         return { ok: true, row: existing, attachments: [], deduped: true }
@@ -512,10 +521,15 @@ export async function createCommunityMessage(params: {
   if (reserveIds) {
     let reserved: string[]
     try {
-      reserved = await queries.communityAttachment.reserveAttachmentsForMessage(db, {
-        ids: reserveIds,
-        messageId: created.id,
-      })
+      // `withD1Retry` (D1-armor state 3): the reserve is an atomic
+      // `UPDATE … WHERE messageId IS NULL` — a transient throws before any
+      // commit, so retrying re-runs it cleanly (all-or-nothing per call, no
+      // partial-reserve from a retry). On exhaustion the catch below still
+      // compensates (hard-delete the orphan message).
+      reserved = await withD1Retry(
+        () => queries.communityAttachment.reserveAttachmentsForMessage(db, { ids: reserveIds, messageId: created.id }),
+        { route: "message-create/reserve-attachments" },
+      )
     } catch (err) {
       // Reserve threw (transient D1 / constraint / etc.). The message row
       // exists but has zero attachments reserved to it — hard-delete it so
@@ -524,7 +538,11 @@ export async function createCommunityMessage(params: {
       // recovering from), log both and re-throw the ORIGINAL reserve error —
       // it's the one the caller cares about; matches bots/route.ts:139's shape.
       try {
-        await queries.communityMessage.hardDeleteMessage(db, created.id)
+        // `withD1Retry` (D1-armor state 3): idempotent compensating delete
+        // (get-first → no-op if already gone); retry the rollback before giving up.
+        await withD1Retry(() => queries.communityMessage.hardDeleteMessage(db, created.id), {
+          route: "message-create/reserve-rollback",
+        })
       } catch (rollbackErr) {
         log.error("attachment_reserve_rollback_failed", {
           messageId: created.id,
@@ -544,10 +562,12 @@ export async function createCommunityMessage(params: {
       // throws we log but still return the 400 envelope — the caller-facing
       // shape doesn't depend on whether compensation succeeded.
       try {
-        await queries.communityAttachment.unreserveAttachments(db, {
-          ids: reserved,
-          messageId: created.id,
-        })
+        // `withD1Retry` (D1-armor state 3): idempotent compensating unreserve
+        // (scoped UPDATE); retry before falling through to the log.
+        await withD1Retry(
+          () => queries.communityAttachment.unreserveAttachments(db, { ids: reserved, messageId: created.id }),
+          { route: "message-create/partial-unreserve" },
+        )
       } catch (unreserveErr) {
         log.error("attachment_partial_reserve_unreserve_failed", {
           messageId: created.id,
@@ -555,7 +575,11 @@ export async function createCommunityMessage(params: {
         })
       }
       try {
-        await queries.communityMessage.hardDeleteMessage(db, created.id)
+        // `withD1Retry` (D1-armor state 3): idempotent compensating delete;
+        // retry the rollback before giving up.
+        await withD1Retry(() => queries.communityMessage.hardDeleteMessage(db, created.id), {
+          route: "message-create/partial-rollback",
+        })
       } catch (rollbackErr) {
         log.error("attachment_partial_reserve_rollback_failed", {
           messageId: created.id,
@@ -575,7 +599,12 @@ export async function createCommunityMessage(params: {
   // the pre-minted id, so no additional INSERT is needed here.
   let attachments: CreatedAttachment[] = []
   if (reserveIds) {
-    const rows = await queries.communityAttachment.listByMessageIds(db, [created.id])
+    // `withD1Retry` (D1-armor state 2): reads back the reserved attachments for
+    // the response — a transient false-empty would drop attachments from a
+    // successful send's response; retry to truth.
+    const rows = await withD1Retry(() => queries.communityAttachment.listByMessageIds(db, [created.id]), {
+      route: "message-create/list-attachments",
+    })
     attachments = rows.map((r) => ({
       id: r.id,
       filename: r.filename,
@@ -618,7 +647,12 @@ export async function createCommunityMessage(params: {
     )
   }
 
-  const row = await queries.communityMessage.getMessage(db, created.id)
+  // `withD1Retry` (D1-armor state 2): read-back of the just-inserted row for the
+  // response — a transient would spuriously throw "not found after insert" on a
+  // row that exists; retry to truth.
+  const row = await withD1Retry(() => queries.communityMessage.getMessage(db, created.id), {
+    route: "message-create/readback",
+  })
   if (!row) {
     // createMessage just inserted this row; getMessage returning null means
     // the DB is gone — surface that to the caller instead of inventing data.
@@ -632,7 +666,11 @@ export async function createCommunityMessage(params: {
   // the repo; this mirrors the check the daemon route did before its own
   // `logAudit` call was removed. Fire-and-forget — `logAudit` already
   // swallows its own errors.
-  const author = await queries.user.getUserInternal(db, authorId)
+  // `withD1Retry` (D1-armor state 2): author lookup gates the bot-audit write —
+  // a transient false-miss would skip a legit bot audit row; retry to truth.
+  const author = await withD1Retry(() => queries.user.getUserInternal(db, authorId), {
+    route: "message-create/author",
+  })
   if (author?.isBot === true) {
     logAudit(db, {
       serverId: isDmTarget(target) ? null : target.serverId,
@@ -697,14 +735,30 @@ export async function createCommunityMessage(params: {
     // each climb `parentChannelId` for a thread — two parent lookups per message
     // on the send path. Cheap (indexed id lookups) and not merged to keep both
     // helpers single-purpose; revisit only if the send path shows up hot.
-    const isPrivate = await queries.communityChannel.isChannelPrivate(db, target.channelId)
+    // `withD1Retry` (D1-armor state 2, P0): privacy + audience clamp the mention/
+    // fan-out set — a transient false-read would leak a private mention to the
+    // wrong set or drop legit recipients (missed delivery); retry to truth.
+    const isPrivate = await withD1Retry(
+      () => queries.communityChannel.isChannelPrivate(db, target.channelId),
+      { route: "message-create/is-private" },
+    )
     const audienceIds = isPrivate
-      ? new Set(await queries.communityChannel.getPrivateChannelAudienceUserIds(db, target.channelId))
+      ? new Set(
+          await withD1Retry(
+            () => queries.communityChannel.getPrivateChannelAudienceUserIds(db, target.channelId),
+            { route: "message-create/audience" },
+          ),
+        )
       : null
 
     const hasAtMention = typeof row.content === "string" && row.content.includes("@")
     if (hasAtMention) {
-      const allMembers = await queries.communityMember.listMembers(db, target.serverId)
+      // `withD1Retry` (D1-armor state 2, P0): member list resolves @mention
+      // candidates — a transient false-empty would drop legit mentions (missed
+      // notify); retry to truth.
+      const allMembers = await withD1Retry(() => queries.communityMember.listMembers(db, target.serverId), {
+        route: "message-create/mention-members",
+      })
       // Scope candidates to the audience when private.
       const members = audienceIds
         ? allMembers.filter((m) => audienceIds.has(m.userId))
@@ -726,7 +780,9 @@ export async function createCommunityMessage(params: {
     } else if (mentionType === "everyone") {
       const userIds = audienceIds
         ? [...audienceIds]
-        : await queries.communityMember.listMemberUserIds(db, target.serverId)
+        : await withD1Retry(() => queries.communityMember.listMemberUserIds(db, target.serverId), {
+            route: "message-create/everyone-members",
+          })
       for (const uid of userIds) {
         if (uid !== authorId) mentionTargets.add(uid)
       }
@@ -772,7 +828,11 @@ export async function createCommunityMessage(params: {
       if (id !== authorId) rows.push({ userId: id, source: PARTICIPANT_SOURCE.MENTION })
     }
     // One bulk insert (author + mentioned) instead of N+1 sequential inserts.
-    await queries.communityThread.addThreadParticipants(db, target.channelId, rows)
+    // `withD1Retry` (D1-armor state 3): idempotent (onConflictDoNothing on
+    // uq_channel_member) — a retry adds nothing already present.
+    await withD1Retry(() => queries.communityThread.addThreadParticipants(db, target.channelId, rows), {
+      route: "message-create/thread-participants",
+    })
   }
 
   // Mention/reply ROW writes are persistence, not broadcast — they run inline
@@ -884,9 +944,11 @@ export async function createCommunityMessage(params: {
 
     if (!isDmTarget(target)) {
       if (hasParentChannel(target) && !skipChildChannelUpdate) {
-        const updated = await queries.communityChannel.getChannel(
-          db,
-          target.channelId,
+        // `withD1Retry` (D1-armor state 2): read drives the CHILD_CHANNEL_UPDATE
+        // fan-out — a transient would miss the parent-sidebar update; retry.
+        const updated = await withD1Retry(
+          () => queries.communityChannel.getChannel(db, target.channelId),
+          { route: "message-create/child-channel-update" },
         )
         fanOutToChannel(
           target.parentChannelId,
