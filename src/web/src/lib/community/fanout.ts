@@ -35,9 +35,18 @@ type WakeOpts = { wakeMessageRow?: WakeMessageRow; mentionedUserIds?: string[] }
 
 /**
  * Resolves all member user IDs for a server.
+ *
+ * The D1 read is armored INSIDE the helper (D1-armor state 2, retry-to-truth):
+ * every caller resolves a recipient set whose loss is a silent missed delivery,
+ * so the retry belongs to the helper, not to caller discipline — a caller that
+ * forgets to wrap can't reintroduce the false-negative. Callers keep their own
+ * observable try/catch for the exhaustion/logic-error case (never-reject
+ * contract); this only moves the retry boundary inward.
  */
 async function getServerMemberUserIds(db: Database, serverId: string): Promise<string[]> {
-  return queries.communityMember.listMemberUserIds(db, serverId)
+  return withD1Retry(() => queries.communityMember.listMemberUserIds(db, serverId), {
+    route: "fanout/server-members",
+  })
 }
 
 /**
@@ -59,17 +68,29 @@ async function getServerMemberUserIds(db: Database, serverId: string): Promise<s
  * The split lives here so fan-out and bot-wake use the same recipient set.
  */
 async function getChannelRecipientUserIds(db: Database, channelId: string): Promise<string[]> {
-  const rows = await queries.communityChannel.getChannelType(db, channelId)
-  if (isThread(rows) || isForumPost(rows)) {
-    return queries.communityThread.listThreadParticipantUserIds(db, channelId)
-  }
-  if (isDm(rows)) {
-    return queries.communityChannel.listChannelMemberUserIds(db, channelId)
-  }
-  return queries.communityMembersResolver.resolveScopeMemberUserIds(db, {
-    scope: "channel",
-    scopeId: channelId,
-  })
+  // Armored INSIDE the helper (D1-armor state 2). The whole type-branch read is
+  // one retry unit — the branch reads are all recipient lookups whose loss is a
+  // silent missed delivery, and blind-retrying the branch is idempotent. This
+  // matters because `getChannelRecipientUserIds` is reached by TWO paths — the
+  // `fanOutToChannel` fan-out AND (via `resolveChannelRecipients`) the
+  // message-handler notify pipeline — so putting the retry here armors both,
+  // instead of relying on each caller to wrap (message-handler's path did NOT).
+  return withD1Retry(
+    async () => {
+      const rows = await queries.communityChannel.getChannelType(db, channelId)
+      if (isThread(rows) || isForumPost(rows)) {
+        return queries.communityThread.listThreadParticipantUserIds(db, channelId)
+      }
+      if (isDm(rows)) {
+        return queries.communityChannel.listChannelMemberUserIds(db, channelId)
+      }
+      return queries.communityMembersResolver.resolveScopeMemberUserIds(db, {
+        scope: "channel",
+        scopeId: channelId,
+      })
+    },
+    { route: "fanout/channel-recipients" },
+  )
 }
 
 /**
@@ -94,25 +115,22 @@ export async function fanOutToChannel(
   // Phase 1 — resolve the recipient set. This D1 read is the FALSE-NEGATIVE
   // risk (read-500 triage / swallow-class): with no recipient list we can
   // neither broadcast nor enqueue wakes, so a silent failure here = a message
-  // that reaches nobody with no signal. `withD1Retry` retries the transient
-  // whitelist to the true list; a still-escaping error (retry-exhausted or a
-  // logic error) is surfaced OBSERVABLY (`log.error` + its own category)
-  // instead of riding the broadcast's best-effort warn. The human-WS side
-  // self-heals on reconnect-refetch (use-community-ws.ts `handleReconnect`),
-  // so this stays observe-only — the function keeps its never-reject contract
-  // for its fire-and-forget callers.
+  // that reaches nobody with no signal. The transient retry lives INSIDE
+  // `getChannelRecipientUserIds` (armor state 2, retry-to-truth); a
+  // still-escaping error (retry-exhausted or a logic error) is surfaced
+  // OBSERVABLY here (`log.error` + its own category) instead of riding the
+  // broadcast's best-effort warn. The human-WS side self-heals on
+  // reconnect-refetch (use-community-ws.ts `handleReconnect`), so this stays
+  // observe-only — the function keeps its never-reject contract for its
+  // fire-and-forget callers.
   let userIds: string[]
   try {
     const { env } = getCloudflareContext()
     const db = getDb((env as Env).DB)
     // Reuse a pre-resolved recipient set when the caller already resolved it
     // (message-handler shares one set between fan-out and the notify pipeline),
-    // else resolve here (retry-armored).
-    userIds =
-      opts?.recipients ??
-      (await withD1Retry(() => getChannelRecipientUserIds(db, channelId), {
-        route: "fanout/channel-recipients",
-      }))
+    // else resolve here (the helper is retry-armored internally).
+    userIds = opts?.recipients ?? (await getChannelRecipientUserIds(db, channelId))
   } catch (err) {
     log.error("fanout_channel_recipients_failed", {
       category: "fanout_channel_recipients_failed",
@@ -227,11 +245,19 @@ function maybeEnqueueWakes(
  * but it's built from the same two shared query functions used here.
  */
 async function getProfileAudience(db: Database, userId: string): Promise<string[]> {
-  const [coMembers, friends] = await Promise.all([
-    queries.communityMember.getCoMemberUserIds(db, userId),
-    queries.communityFriendship.getFriendUserIds(db, userId),
-  ])
-  return [...new Set([...coMembers, ...friends])]
+  // Armored INSIDE the helper (D1-armor state 2, retry-to-truth): the two reads
+  // resolve a status-update audience whose loss silently drops the broadcast.
+  // The `Promise.all` pair is one retry unit — both are idempotent reads.
+  return withD1Retry(
+    async () => {
+      const [coMembers, friends] = await Promise.all([
+        queries.communityMember.getCoMemberUserIds(db, userId),
+        queries.communityFriendship.getFriendUserIds(db, userId),
+      ])
+      return [...new Set([...coMembers, ...friends])]
+    },
+    { route: "fanout/status-audience" },
+  )
 }
 
 /**
@@ -246,14 +272,13 @@ export async function fanOutStatusUpdate(
   statusEmoji: string | null,
   statusText: string | null,
 ): Promise<void> {
-  // Phase 1 — resolve the audience (retry-armored, observable on failure).
+  // Phase 1 — resolve the audience (helper is retry-armored internally;
+  // observable here on exhaustion/logic error).
   let audience: string[]
   try {
     const { env } = getCloudflareContext()
     const db = getDb((env as Env).DB)
-    audience = await withD1Retry(() => getProfileAudience(db, userId), {
-      route: "fanout/status-audience",
-    })
+    audience = await getProfileAudience(db, userId)
   } catch (err) {
     log.error("fanout_status_audience_failed", {
       category: "fanout_status_audience_failed",
@@ -284,14 +309,13 @@ export async function fanOutToServerMembers(
   event: BroadcastableEvent,
   opts?: { excludeUserId?: string }
 ): Promise<void> {
-  // Phase 1 — resolve the member set (retry-armored, observable on failure).
+  // Phase 1 — resolve the member set (helper is retry-armored internally;
+  // observable here on exhaustion/logic error).
   let userIds: string[]
   try {
     const { env } = getCloudflareContext()
     const db = getDb((env as Env).DB)
-    userIds = await withD1Retry(() => getServerMemberUserIds(db, serverId), {
-      route: "fanout/server-members",
-    })
+    userIds = await getServerMemberUserIds(db, serverId)
   } catch (err) {
     log.error("fanout_server_members_failed", {
       category: "fanout_server_members_failed",
