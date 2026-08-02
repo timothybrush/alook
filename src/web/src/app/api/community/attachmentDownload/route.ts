@@ -74,11 +74,25 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
       // Persisted row — resolve target scope, then run the standard membership
       // gate. Rewrite any non-2xx to a generic 404 so a prober can't tell
       // "not a member" from "row doesn't exist".
-      const message = await queries.communityMessage.getMessage(db, row.messageId)
-      if (!message) {
+      // Capture the else-branch-narrowed (non-null) messageId — the withD1Retry
+      // arrow closure otherwise loses the `row.messageId === null` narrowing.
+      const rowMessageId = row.messageId
+      // `withD1Retry` (D1-armor state 2): resolve the attachment's message +
+      // channel type to run the access gate — a transient would 404 a real
+      // attachment (mis-judged access state); retry to truth.
+      const message = await withD1Retry(() => queries.communityMessage.getMessage(db, rowMessageId), {
+        route: "attachmentDownload/message",
+      })
+      if (!message || !message.channelId) {
         return NextResponse.json({ error: "attachment not found" }, { status: 404 })
       }
-      const channelType = await queries.communityChannel.getChannelType(db, message.channelId)
+      // Capture the narrowed (non-null) channelId — the withD1Retry arrow
+      // closure below otherwise loses the `!message.channelId` narrowing.
+      const messageChannelId = message.channelId
+      const channelType = await withD1Retry(
+        () => queries.communityChannel.getChannelType(db, messageChannelId),
+        { route: "attachmentDownload/channel-type" },
+      )
       if (channelType === "dm") {
         const gate = await requireDMAccess(db, message.channelId, botUserId)
         if (!gate.ok) return NextResponse.json({ error: "attachment not found" }, { status: 404 })

@@ -94,9 +94,17 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
     // Broadcast the new name to every server the user belongs to, so open
     // member lists update without a refresh (previously nothing fired
     // MEMBER_UPDATE for a self-rename — only role changes did).
-    const serverIds = await queries.communityMember.listMemberServerIds(db, ctx.userId)
+    // `withD1Retry` (D1-armor state 2): these reads drive the MEMBER_UPDATE
+    // fan-out on a self-profile change — a transient false-empty would silently
+    // skip the fan-out (stale member lists elsewhere); retry to truth.
+    const serverIds = await withD1Retry(() => queries.communityMember.listMemberServerIds(db, ctx.userId), {
+      route: "users/profile/member-servers",
+    })
     if (serverIds.length > 0) {
-      const memberships = await queries.communityMember.getMemberships(db, ctx.userId, serverIds)
+      const memberships = await withD1Retry(
+        () => queries.communityMember.getMemberships(db, ctx.userId, serverIds),
+        { route: "users/profile/memberships" },
+      )
       for (const membership of memberships) {
         fanOutToServerMembers(membership.serverId, {
           type: WS_EVENTS.MEMBER_UPDATE,

@@ -117,15 +117,20 @@ export const DELETE = withAuth(async (_req, ctx) => {
   // Kick semantics differ by target type:
   //   - Kicking a bot: remove ONLY that bot's member row. No owner cascade.
   //   - Kicking a human: cascade removes owner's live bots that are members.
-  const targetInternal = await queries.user.getUserInternal(db, target.userId)
+  // `withD1Retry` (D1-armor state 2): bot-vs-human check decides the kick
+  // cascade — a transient false-read would take the wrong cascade branch; retry.
+  const targetInternal = await withD1Retry(() => queries.user.getUserInternal(db, target.userId), {
+    route: "servers/member-kick/target-internal",
+  })
   const targetIsBot = targetInternal?.isBot === true
 
   let botIdsToCascade: string[] = []
   if (!targetIsBot) {
-    botIdsToCascade = await queries.communityMember.listOwnerBotsInServer(
-      db,
-      serverId,
-      target.userId,
+    // `withD1Retry` (D1-armor state 2): the owner-bots list drives the human-kick
+    // cascade — a transient false-empty would skip cascading the owner's bots; retry.
+    botIdsToCascade = await withD1Retry(
+      () => queries.communityMember.listOwnerBotsInServer(db, serverId, target.userId),
+      { route: "servers/member-kick/owner-bots" },
     )
   }
 

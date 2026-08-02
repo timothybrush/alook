@@ -159,7 +159,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   // uniqueness is enforced here, mirroring top-level channel naming: `ideas`
   // → `ideas-2` → `ideas-3`. `name` is already slugified (no `/`/`#`/space),
   // so the anchor round-trips cleanly through parseRef/formatRef.
-  const uniqueName = await queries.communityChannel.dedupeChildChannelSlug(db, channelId, name)
+  // `withD1Retry` (D1-armor state 2): resolves a collision-free post slug — a
+  // transient could return a wrong/duplicate slug; retry to truth.
+  const uniqueName = await withD1Retry(
+    () => queries.communityChannel.dedupeChildChannelSlug(db, channelId, name),
+    { route: "posts/dedupe-slug" },
+  )
 
   // Create child channel for the forum post. Tags are NOT set at creation —
   // they're added afterward from the post card's tag dialog.
@@ -210,7 +215,11 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   const message = created.row
 
   // Resolve author info for response
-  const creator = await queries.user.getUserSelf(db, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): author info for the response — retry to
+  // truth (falls back to "" only on a genuine null).
+  const creator = await withD1Retry(() => queries.user.getUserSelf(db, ctx.userId), {
+    route: "posts/creator",
+  })
   const authorName = creator ? creator.name : ""
   const authorAvatar = creator?.image ?? avatarInitial(authorName)
 

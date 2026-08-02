@@ -31,10 +31,17 @@ async function authorizeReaction(
   messageId: string,
   userId: string,
 ): Promise<AccessOk | AccessErr> {
-  const message = await queries.communityMessage.getMessage(db, messageId)
+  // `withD1Retry` (D1-armor state 2): message + channel-type reads gate the
+  // react access check — a transient would 404 a real message; retry to truth.
+  const message = await withD1Retry(() => queries.communityMessage.getMessage(db, messageId), {
+    route: "reactions/access/message",
+  })
   if (!message) return { ok: false, status: 404, error: "message not found" }
 
-  const channelType = await queries.communityChannel.getChannelType(db, message.channelId)
+  const channelType = await withD1Retry(
+    () => queries.communityChannel.getChannelType(db, message.channelId),
+    { route: "reactions/access/channel-type" },
+  )
   const reactable = requireReactableSurface(channelType)
   if (!reactable.ok) return { ok: false, status: reactable.status, error: reactable.error }
   if (channelType === "dm") {
