@@ -38,7 +38,11 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
 
   // A DM is a `type=dm` channel — gate accordingly. Every other channel type
   // (including threads/forum posts) uses the server-scoped member gate.
-  const channelType = await queries.communityChannel.getChannelType(db, message.channelId)
+  // `withD1Retry` (D1-armor state 2): channel-type read drives the DM-vs-server
+  // access gate — a transient would misroute the gate; retry to truth.
+  const channelType = await withD1Retry(() => queries.communityChannel.getChannelType(db, message.channelId), {
+    route: "messages/get/channel-type",
+  })
   if (channelType === "dm") {
     const auth = await requireDMAccess(db, message.channelId, ctx.userId)
     if (!auth.ok) return writeError(auth.error, auth.status)

@@ -49,11 +49,17 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   // channel roster).
   const parentId = channel.parentChannelId
   if (!parentId) return writeError("thread has no parent channel", 400)
+  // `withD1Retry` (D1-armor state 2): no-fallback parent-audience read — a
+  // transient false-empty would mis-scope participants; retry to truth.
   const parentAudience = new Set(
-    await queries.communityMembersResolver.resolveScopeMemberUserIds(db, {
-      scope: "channel",
-      scopeId: parentId,
-    })
+    await withD1Retry(
+      () =>
+        queries.communityMembersResolver.resolveScopeMemberUserIds(db, {
+          scope: "channel",
+          scopeId: parentId,
+        }),
+      { route: "channels/participants/scope-members" },
+    )
   )
   if (!parentAudience.has(targetUserId)) {
     return writeError("user is not a member of the parent channel", 400)

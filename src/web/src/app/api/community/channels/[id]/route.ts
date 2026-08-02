@@ -78,7 +78,14 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
     if (!isAdmin) return writeError("admin permission required", 403)
     let targetPrivate = false
     if (body.categoryId !== null) {
-      const category = await queries.communityCategory.getCategory(db, body.categoryId)
+      // Capture the narrowed categoryId — the withD1Retry closure loses the
+      // `!== null` narrowing.
+      const categoryId = body.categoryId
+      // `withD1Retry` (D1-armor state 2): category existence/scope gate — a
+      // transient would 404 a real category; retry to truth.
+      const category = await withD1Retry(() => queries.communityCategory.getCategory(db, categoryId), {
+        route: "channels/patch/get-category",
+      })
       if (!category || category.serverId !== channel.serverId) {
         return writeError("category not found", 404)
       }

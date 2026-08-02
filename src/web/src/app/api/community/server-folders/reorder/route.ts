@@ -25,7 +25,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
 
   // Reorder query is already user-scoped, but pre-validate ownership so the
   // caller gets an error instead of silent no-ops when an unknown id leaks in.
-  const owned = await queries.communityServerFolder.listFolders(db, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): owned-folder list validates the reorder
+  // ids — a transient false-empty would wrongly 404 a real folder; retry.
+  const owned = await withD1Retry(() => queries.communityServerFolder.listFolders(db, ctx.userId), {
+    route: "server-folders/reorder/list",
+  })
   const ownedIds = new Set(owned.map((f) => f.id))
   const stranger = folderIds.find((id) => !ownedIds.has(id))
   if (stranger) {

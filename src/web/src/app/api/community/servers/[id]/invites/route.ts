@@ -78,7 +78,11 @@ export const POST = withAuth(async (req, ctx) => {
   }
 
   // Cap active invites per server to bound token-table growth + enumeration risk.
-  const existing = await queries.communityInvite.listServerInvites(db, serverId)
+  // `withD1Retry` (D1-armor state 2): the active-invite list gates the cap — a
+  // transient false-empty would wrongly allow past the cap; retry to truth.
+  const existing = await withD1Retry(() => queries.communityInvite.listServerInvites(db, serverId), {
+    route: "servers/invites/list",
+  })
   if (existing.length >= MAX_ACTIVE_INVITES_PER_SERVER) {
     return writeError(
       `server has reached the active invite cap (${MAX_ACTIVE_INVITES_PER_SERVER}); revoke an existing invite first`,

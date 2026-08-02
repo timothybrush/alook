@@ -15,7 +15,11 @@ export const DELETE = withAuth(async (_req: NextRequest, ctx) => {
 
   const db = getDb(ctx.env.DB)
 
-  const channel = await queries.communityChannel.getChannel(db, channelId)
+  // `withD1Retry` (D1-armor state 2): channel existence/type gate — a transient
+  // would 404 a real channel; retry to truth.
+  const channel = await withD1Retry(() => queries.communityChannel.getChannel(db, channelId), {
+    route: "channels/pin-delete/get-channel",
+  })
   if (!channel) return writeError("channel not found", 404)
 
   const pinnable = requirePinnableSurface(channel.type)

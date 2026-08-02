@@ -70,7 +70,11 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     if (!reactable.ok) return NextResponse.json({ error: reactable.error }, { status: reactable.status })
   }
 
-  const row = await queries.communityMessage.getMessageByChannelAndSeq(db, scopeTarget, body.seq)
+  // `withD1Retry` (D1-armor state 2): seq→message resolve gates the react — a
+  // transient would 404 a real message; retry to truth.
+  const row = await withD1Retry(() => queries.communityMessage.getMessageByChannelAndSeq(db, scopeTarget, body.seq), {
+    route: "reactAdd/message-by-seq",
+  })
   if (!row) {
     return NextResponse.json({ error: `no message with seq #${body.seq} in ${body.channel}` }, { status: 404 })
   }

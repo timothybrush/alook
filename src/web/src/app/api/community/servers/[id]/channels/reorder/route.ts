@@ -30,7 +30,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
     return writeError("channelIds must be unique", 400)
   }
 
-  const channels = await queries.communityChannel.getChannelsByIds(db, channelIds)
+  // `withD1Retry` (D1-armor state 2): validates the reorder id set (count +
+  // server scope) — a transient false-empty would wrongly 404; retry to truth.
+  const channels = await withD1Retry(() => queries.communityChannel.getChannelsByIds(db, channelIds), {
+    route: "servers/channels-reorder/get-channels",
+  })
   if (channels.length !== channelIds.length) {
     return writeError("one or more channels not found", 404)
   }

@@ -236,11 +236,12 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     size: a.size,
   }))
 
-  const message = await queries.communityAgentInbox.toAgentMessage(
-    db,
-    result.row,
-    botUserId,
-    orderedAttachments,
+  // `withD1Retry` (D1-armor state 2): builds the send response (enrichment reads
+  // inside toAgentMessages) — a transient would 500 a message that DID send; the
+  // caller's nonce-safe resend collapses onto the same message. Retry to truth.
+  const message = await withD1Retry(
+    () => queries.communityAgentInbox.toAgentMessage(db, result.row, botUserId, orderedAttachments),
+    { route: "send/to-agent-message" },
   )
   return NextResponse.json({ state: "sent", message, deduped: result.deduped })
 })

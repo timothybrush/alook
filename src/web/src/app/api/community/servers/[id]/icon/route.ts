@@ -43,7 +43,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   // Snapshot the previous key BEFORE upload so we can sweep it after the
   // update commits. The `startsWith` guard on cleanup skips legacy URL-shaped
   // rows that predate the migration.
-  const previousKey = (await queries.communityServer.getServer(db, serverId))?.icon ?? null
+  // `withD1Retry` (D1-armor state 2): reads the prior icon key for cleanup — a
+  // transient would skip deleting the old icon blob; retry to truth.
+  const previousKey =
+    (await withD1Retry(() => queries.communityServer.getServer(db, serverId), {
+      route: "servers/icon/get-server",
+    }))?.icon ?? null
 
   const result = await handleServerIconUpload(req, ctx.env, serverId)
   if (!result.ok) return result.response

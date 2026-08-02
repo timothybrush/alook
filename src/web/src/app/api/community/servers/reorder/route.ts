@@ -26,7 +26,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
     return writeError("serverIds must be unique", 400)
   }
 
-  const memberships = await queries.communityMember.getMemberships(db, ctx.userId, serverIds)
+  // `withD1Retry` (D1-armor state 2): membership check gates the reorder (403 if
+  // not a member of all) — a transient false-empty would wrongly 403; retry.
+  const memberships = await withD1Retry(() => queries.communityMember.getMemberships(db, ctx.userId, serverIds), {
+    route: "servers/reorder/memberships",
+  })
   if (memberships.length !== serverIds.length) {
     return writeError("not a member of all servers", 403)
   }

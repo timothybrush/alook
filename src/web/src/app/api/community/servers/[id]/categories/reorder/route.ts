@@ -30,7 +30,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
     return writeError("categoryIds must be unique", 400)
   }
 
-  const categories = await queries.communityCategory.getCategoriesByIds(db, categoryIds)
+  // `withD1Retry` (D1-armor state 2): validates the reorder id set (count +
+  // server scope) — a transient false-empty would wrongly 404; retry to truth.
+  const categories = await withD1Retry(() => queries.communityCategory.getCategoriesByIds(db, categoryIds), {
+    route: "servers/categories-reorder/get-categories",
+  })
   if (categories.length !== categoryIds.length) {
     return writeError("one or more categories not found", 404)
   }

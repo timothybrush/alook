@@ -3,6 +3,7 @@ import {
   DEFAULT_INBOX_PAGE_SIZE,
   MAX_INBOX_PAGE_SIZE,
   readOrStale,
+  withD1Retry,
 } from "@alook/shared"
 import { getDb } from "@/lib/db"
 import { withAuth } from "@/lib/middleware/auth"
@@ -125,7 +126,12 @@ export const GET = withAuth(async (req, ctx) => {
   // child rows (they joined `communityServer`).
   const missingParentIds = [...childrenByParent.keys()].filter((pid) => !parents.has(pid) && !mutedChannels.has(pid))
   if (missingParentIds.length > 0) {
-    const resolved = await queries.communityChannel.getChannelsByIds(db, missingParentIds)
+    // `withD1Retry` (D1-armor state 2): no-fallback parent-channel resolve for
+    // the unread rollup — a transient false-empty would drop parent rows from
+    // the inbox; retry to truth.
+    const resolved = await withD1Retry(() => queries.communityChannel.getChannelsByIds(db, missingParentIds), {
+      route: "inbox/unreads/parent-channels",
+    })
     const resolvedById = new Map(resolved.map((c) => [c.id, c]))
     for (const pid of missingParentIds) {
       const ch = resolvedById.get(pid)

@@ -61,7 +61,14 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   const isAdmin = canManageServer(member.role)
   let isPrivateCategory = false
   if (body.categoryId) {
-    const category = await queries.communityCategory.getCategory(db, body.categoryId)
+    // Capture the narrowed categoryId — the withD1Retry closure loses the
+    // `if (body.categoryId)` narrowing.
+    const categoryId = body.categoryId
+    // `withD1Retry` (D1-armor state 2): category existence/scope gate — a
+    // transient would 404 a real category; retry to truth.
+    const category = await withD1Retry(() => queries.communityCategory.getCategory(db, categoryId), {
+      route: "servers/channels/get-category",
+    })
     if (!category || category.serverId !== serverId) {
       return writeError("category not found", 404)
     }

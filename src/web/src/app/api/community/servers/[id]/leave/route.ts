@@ -24,10 +24,12 @@ export const POST = withAuth(async (_req, ctx) => {
 
   // Owner-leaves-server cascade: their live bots that are members of this
   // server are removed too. See §Owner-leaves-server cascade in plan.
-  const botIdsToCascade = await queries.communityMember.listOwnerBotsInServer(
-    db,
-    serverId,
-    ctx.userId,
+  // `withD1Retry` (D1-armor state 2): the owner-bots list drives the owner-leave
+  // cascade — a transient false-empty would skip cascading the owner's bots out;
+  // retry to truth.
+  const botIdsToCascade = await withD1Retry(
+    () => queries.communityMember.listOwnerBotsInServer(db, serverId, ctx.userId),
+    { route: "servers/leave/owner-bots" },
   )
 
   // `withD1Retry` (state 3): both are idempotent removes (delete-by-key /

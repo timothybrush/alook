@@ -36,8 +36,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
       return writeError("serverIds must be an array", 400)
     }
     if (body.serverIds.length > 0) {
+      // `withD1Retry` (D1-armor state 2): membership validation — a transient
+      // false-empty would wrongly reject a member's own servers; retry to truth.
       const memberServerIds = new Set(
-        await queries.communityMember.listMemberServerIds(db, ctx.userId),
+        await withD1Retry(() => queries.communityMember.listMemberServerIds(db, ctx.userId), {
+          route: "server-folders/create/member-servers",
+        }),
       )
       const stranger = body.serverIds.find((id) => !memberServerIds.has(id))
       if (stranger) {
