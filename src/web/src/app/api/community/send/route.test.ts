@@ -215,12 +215,16 @@ describe("POST /api/community/agent/send", () => {
     expect((await res.json()).state).toBe("sent")
   })
 
-  it("403 forbidden when resolution succeeds but channel membership gate fails", async () => {
+  it("404 (NOT 403) when resolution succeeds but channel membership gate fails — existence non-disclosure", async () => {
+    // Channel-membership 403 collapses to 404 in resolveTargetById's channel
+    // branch (Aigneis security invariant): a bot addressing a channel it isn't
+    // in can't tell "no access" from "doesn't exist". resolveErrorResponse
+    // returns 404 before the route's explicit membership gate is reached.
     mockGetChannelForMember.mockResolvedValue(null)
     const res = await POST(
       req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
   })
 

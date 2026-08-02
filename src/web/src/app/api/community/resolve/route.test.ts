@@ -110,10 +110,10 @@ describe("POST /api/community/agent/resolve", () => {
     expect(await res.json()).toEqual({ error: "channel not found: ch_missing" })
   })
 
-  it("403 forbidden when the channel resolves but the bot isn't actually a member", async () => {
+  it("404 (NOT 403) when the channel resolves but the bot isn't a member — existence non-disclosure", async () => {
     mockGetChannelForMember.mockResolvedValue(null)
     const res = await POST(req({ channelId: "ch_1", seq: 3 }, { Authorization: "Bearer crk_abc" }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
   })
 
   it("404 when the channel exists but has no message at that seq", async () => {

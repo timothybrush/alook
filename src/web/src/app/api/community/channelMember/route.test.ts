@@ -154,11 +154,13 @@ describe("POST /api/community/agent/channelMember", () => {
     expect(res.status).toBe(404)
   })
 
-  it("403 when the bot is not a member of the channel", async () => {
-    // getChannelForMember returns null for a non-member → requireChannelMember 403.
+  it("404 (NOT 403) when the bot is not a member of the channel — existence non-disclosure", async () => {
+    // Non-member → requireChannelMember 403, collapsed to 404 in
+    // resolveTargetById's channel branch so a bot can't distinguish a channel it
+    // can't see from one that doesn't exist (Aigneis security invariant).
     mockGetChannelForMember.mockResolvedValue(undefined)
     const res = await POST(req({ channelId: "ch_1" }, { Authorization: "Bearer crk_abc" }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
   })
 
   it("public top-level channel → { visibility:'public', hint } with the server's actual name substituted", async () => {

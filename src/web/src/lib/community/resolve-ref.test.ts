@@ -80,12 +80,16 @@ describe("resolveTargetById (id-first path, ref/id PR-2)", () => {
     expect(viaId).toEqual({ kind: "channel", channelId: "ch_1" })
   })
 
-  it("403 when a NON-member passes a channel id directly (no authz bypass)", async () => {
+  it("404 (NOT 403) when a NON-member passes a channel id directly — existence non-disclosure", async () => {
+    // A no-access channel must be indistinguishable from a nonexistent one at
+    // the agent boundary (Aigneis security invariant): the channel-membership
+    // 403 collapses to the same 404 a missing channel returns, so a
+    // cross-channel ref can't be used as an existence oracle. (The DM branch
+    // keeps its 403 "blocked" — a legit diagnosis that leaks no new existence.)
     mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
-    // getChannelForMember returns null for a non-member → requireChannelMember 403.
-    mockGetChannelForMember.mockResolvedValue(undefined)
+    mockGetChannelForMember.mockResolvedValue(undefined) // non-member
     const res = await resolveTargetById(db, "outsider", "ch_1")
-    expect(res).toEqual({ error: 403, message: "forbidden" })
+    expect(res).toEqual({ error: 404, message: "channel not found: ch_1" })
   })
 
   it("resolves a DM id (participant) to { kind: dm, otherUserId }", async () => {
@@ -170,11 +174,11 @@ describe("resolveTargetByCreate (open-or-create by identity, ref/id addressing-i
     expect(res).toEqual({ error: 404, message: "message not found: m_gone" })
   })
 
-  it("--thread-on when the caller can't post to the root's channel → 403, no create", async () => {
+  it("--thread-on when the caller can't post to the root's channel → 404 (existence non-disclosure), no create", async () => {
     mockGetMessage.mockResolvedValue({ id: "m_root", channelId: "ch_parent" })
-    mockGetChannelForMember.mockResolvedValue(undefined) // non-member
+    mockGetChannelForMember.mockResolvedValue(undefined) // non-member → 403 collapses to 404
     const res = await resolveTargetByCreate(db, "outsider", { threadOnMessageId: "m_root", callerKind: "bot" })
-    expect(res).toEqual({ error: 403, message: "forbidden" })
+    expect(res).toEqual({ error: 404, message: "message not found: m_root" })
     expect(mockCreateThreadChannel).not.toHaveBeenCalled()
   })
 

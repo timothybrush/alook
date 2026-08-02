@@ -127,10 +127,10 @@ describe("POST /api/community/agent/reactAdd", () => {
     expect(mockFanOutToChannel).not.toHaveBeenCalled()
   })
 
-  it("403 when the bot is not a channel member", async () => {
+  it("404 (NOT 403) when the bot is not a channel member — existence non-disclosure", async () => {
     mockGetChannelForMember.mockResolvedValue(null)
     const res = await POST(req({ channelId: "ch_1", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
     expect(mockAddReaction).not.toHaveBeenCalled()
     expect(mockFanOutToChannel).not.toHaveBeenCalled()
   })

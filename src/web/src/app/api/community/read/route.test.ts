@@ -77,10 +77,13 @@ describe("POST /api/community/agent/read", () => {
     expect(res.status).toBe(400)
   })
 
-  it("403 forbidden when the bot isn't a member of the resolved channel", async () => {
+  it("404 (NOT 403) when the bot isn't a member of the resolved channel — existence non-disclosure", async () => {
+    // A bot addressing a channel it can't see must not distinguish "exists but
+    // no access" from "doesn't exist" — the channel-membership 403 collapses to
+    // 404 in resolveTargetById's channel branch (Aigneis security invariant).
     mockGetChannelForMember.mockResolvedValue(null)
     const res = await POST(req({ channelId: "ch_1" }, { Authorization: "Bearer crk_abc" }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
   })
 
   it("200 happy path: returns { items, hasMore, latestSeq } from listMessagesBySeq", async () => {

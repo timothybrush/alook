@@ -64,7 +64,18 @@ export async function resolveTargetById(
   }
 
   const gate = await requireChannelMember(db, channelId, userId)
-  if (!gate.ok) return { error: gate.status as 400 | 403 | 404, message: gate.error }
+  if (!gate.ok) {
+    // Existence non-disclosure at the agent boundary (Aigneis security
+    // invariant): a bot addressing a channel it can't see must not be able to
+    // tell "exists but no access" (403) from "doesn't exist" (404) — otherwise
+    // a cross-channel ref becomes an existence oracle. Collapse the
+    // channel-membership 403 to the SAME 404 a missing channel returns. This is
+    // the CHANNEL branch only — the DM branch above keeps its 403 ("blocked"),
+    // which is a legitimate diagnosis that discloses no new existence (a blocked
+    // bot already knows the peer/DM exists).
+    if (gate.status === 403) return { error: 404, message: `channel not found: ${channelId}` }
+    return { error: gate.status as 400 | 403 | 404, message: gate.error }
+  }
   return { kind: "channel", channelId }
 }
 
@@ -111,7 +122,15 @@ export async function resolveTargetByCreate(
     // The thread roots on the message's own channel — gate that the caller can
     // post there (same membership gate the ref path applies to the parent).
     const gate = await requireChannelMember(db, rootMessage.channelId, userId)
-    if (!gate.ok) return { error: gate.status as 400 | 403 | 404, message: gate.error }
+    if (!gate.ok) {
+      // Existence non-disclosure (same invariant as resolveTargetById's channel
+      // branch): `--thread-on <messageId>` asserting a message in a channel the
+      // caller can't see must not distinguish "exists but no access" (403) from
+      // "doesn't exist" (404) — collapse the channel-membership 403 to the same
+      // 404 a missing message returns.
+      if (gate.status === 403) return { error: 404, message: `message not found: ${args.threadOnMessageId}` }
+      return { error: gate.status as 400 | 403 | 404, message: gate.error }
+    }
     // A thread may only root on a top-level channel — never inside a thread or
     // forum post (mirrors the name-path guard + `createThreadChannel`'s DB check).
     if (gate.value.parentChannelId) {

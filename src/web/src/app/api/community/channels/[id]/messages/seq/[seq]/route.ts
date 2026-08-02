@@ -28,9 +28,17 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
 
   const db = getDb(ctx.env.DB)
 
-  // Permission check: user must have access to this channel
+  // Permission check: user must have access to this channel. Existence
+  // non-disclosure (Aigneis security invariant): collapse a no-access 403 into
+  // the SAME 404 a nonexistent channel/message returns (below) — a caller
+  // resolving a seq by an opaque ref must not distinguish "exists but no
+  // access" from "doesn't exist", or a cross-channel ref becomes an existence
+  // oracle. Only the channel-membership 403 collapses; a genuine 400 stays.
   const auth = await requireChannelMember(db, channelId, ctx.userId)
-  if (!auth.ok) return writeError(auth.error, auth.status)
+  if (!auth.ok) {
+    if (auth.status === 403) return writeJSON({ error: "not_found" }, 404)
+    return writeError(auth.error, auth.status)
+  }
 
   // `withD1Retry` (D1-armor: no-fallback message-by-seq read; retry to truth).
   const message = await withD1Retry(
