@@ -114,6 +114,16 @@ describe("resolveMessageJump (ref/id A2 + #3 — message pill → context-sheet 
     })
   })
 
+  it("DM message ref (/.dm/peer#0042#42) jumps to the dm channelId (token id) directly — no server in the directory, serverId '' (never navigates)", () => {
+    // A DM isn't a server, so the label's `.dm` server-seg isn't in the
+    // directory. The token id IS the dm channel id (all the sheet needs; it
+    // opens with type "dm"). Without the DM branch this returned null and the
+    // pill rendered non-clickable (Gener's bug).
+    expect(resolveMessageJump("/.dm/gustavo#0042#42", "dm_ch_1", directory)).toEqual({
+      serverId: "", channelId: "dm_ch_1", label: "gustavo#0042", seq: 42,
+    })
+  })
+
   it("returns null on an unparseable label rather than throwing", () => {
     expect(resolveMessageJump("not-a-ref", "x", directory)).toBeNull()
   })

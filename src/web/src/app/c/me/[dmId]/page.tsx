@@ -106,7 +106,20 @@ function DmView() {
       : (readSnapshot?.lastReadMessageId ?? null),
   })
 
-  const [contextSheetSeq, setContextSheetSeq] = useState<number | null>(null)
+  // The message-context sheet target. Was seq-only (this DM); now a full target
+  // so a message-ref pill pointing at ANOTHER channel (someone pasted a server
+  // message ref into the DM) opens the sheet ON THAT channel — the sheet's
+  // access-checked read path returns not-found for a channel the viewer can't
+  // see, so a private-channel ref leaks nothing. `type` picks the fetch surface
+  // ("dm" for this DM, "channel" for a cross-channel target). Same-DM seq opens
+  // (message-list click, chained #N in the sheet) go through `openLocalSeq`.
+  const [contextTarget, setContextTarget] = useState<
+    { serverId?: string; channelId: string; seq: number; label?: string; type: "dm" | "channel" } | null
+  >(null)
+  const openLocalSeq = useCallback(
+    (seq: number) => setContextTarget({ channelId: dmId, seq, type: "dm" }),
+    [dmId],
+  )
   // DM composer has no "current server" — flatten every member server's
   // channels into one cross-server candidate list so a `/`-ref can be
   // dropped into a DM (see plan community-channel-ref.md §6).
@@ -190,11 +203,29 @@ function DmView() {
   // pill via the `jumpToSeq` UI-handler. The DM view has no in-place scroll
   // target prop (unlike the channel page), so always open the context sheet,
   // which resolves seq→id and shows the message with surrounding context.
-  const jumpToSeq = useCallback((seq: number) => setContextSheetSeq(seq), [])
+  const jumpToSeq = useCallback((seq: number) => openLocalSeq(seq), [openLocalSeq])
+  // Cross-channel message ref (`openMessageContext`, ref/id A2): a message-ref
+  // pill's `()` carries the channelId of the message's OWN channel, which may be
+  // any channel — not this DM. Open the sheet on that target IN PLACE (never
+  // navigate — Gus #417): same-DM → the DM read surface; another channel → the
+  // channel read surface (access-checked, not-found on no-access). This mirrors
+  // the channels page; without it a message pill in a DM hit an unregistered
+  // handler and silently did nothing (Gener's bug).
+  const openMessageContext = useCallback(
+    (target: { serverId: string; channelId: string; label: string; seq: number }) =>
+      setContextTarget({
+        serverId: target.serverId,
+        channelId: target.channelId,
+        seq: target.seq,
+        label: target.label,
+        type: target.channelId === dmId ? "dm" : "channel",
+      }),
+    [dmId],
+  )
   useEffect(() => {
-    useCommunityStore.getState().registerUiHandlers({ jumpToSeq })
-    return () => useCommunityStore.getState().registerUiHandlers({ jumpToSeq: undefined })
-  }, [jumpToSeq])
+    useCommunityStore.getState().registerUiHandlers({ jumpToSeq, openMessageContext })
+    return () => useCommunityStore.getState().registerUiHandlers({ jumpToSeq: undefined, openMessageContext: undefined })
+  }, [jumpToSeq, openMessageContext])
 
   useEffect(() => {
     useCommunityStore.getState().setCurrentChannelId(dmId)
@@ -390,7 +421,7 @@ function DmView() {
           onLoadNewer={fetchNewerMessages}
           onJumpToPresent={jumpToPresent}
           unreadCount={unreadCount}
-          onOpenContextSheet={setContextSheetSeq}
+          onOpenContextSheet={openLocalSeq}
           hero={
             <>
               <div className="relative mb-3 w-fit"><Avatar label={dm.avatar} seed={dm.userId} size={64} /></div>
@@ -422,17 +453,33 @@ function DmView() {
         )}
       </main>
       <MessageContextSheet
-        open={contextSheetSeq !== null}
-        onOpenChange={(v) => { if (!v) setContextSheetSeq(null) }}
-        channelId={dmId}
-        targetSeq={contextSheetSeq}
-        onOpenContextSheet={setContextSheetSeq}
-        type="dm"
+        open={contextTarget !== null}
+        onOpenChange={(v) => { if (!v) setContextTarget(null) }}
+        channelId={contextTarget?.channelId ?? dmId}
+        channelLabel={contextTarget?.label}
+        targetSeq={contextTarget?.seq ?? null}
+        // A chained `#N` inside the sheet is scoped to the CURRENTLY-shown
+        // channel — keep its channelId/type, just move the seq.
+        onOpenContextSheet={(seq) =>
+          setContextTarget((prev) => (prev ? { ...prev, seq } : { channelId: dmId, seq, type: "dm" }))
+        }
+        type={contextTarget?.type ?? "dm"}
         onOpenProfile={openProfile}
         resolveUserName={resolveUserName}
-        onReply={dmBlocked ? undefined : (target) => {
-          setReplyTo(target)
-          setContextSheetSeq(null)
+        onReply={(target) => {
+          // Reply to a message shown in the sheet. Same-DM (and not blocked) →
+          // seed this DM's composer. Cross-channel → can't reply here (the
+          // composer is DM-bound); hand off via the store + navigate to that
+          // channel, which seeds its own composer on arrival (mirrors the
+          // channels page's cross-channel reply).
+          if (contextTarget && contextTarget.channelId !== dmId && contextTarget.serverId) {
+            useCommunityStore.getState().setPendingReply({ channelId: contextTarget.channelId, target })
+            setContextTarget(null)
+            uiHandlers.navigate?.(contextTarget.serverId, contextTarget.channelId)
+          } else if (!dmBlocked) {
+            setReplyTo(target)
+            setContextTarget(null)
+          }
         }}
       />
     </>

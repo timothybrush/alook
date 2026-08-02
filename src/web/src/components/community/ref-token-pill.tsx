@@ -10,7 +10,7 @@ import type { RefTokenType } from "@/lib/community/ref-token"
 // this rich pill and the plaintext preview (`formatRefLabel`/`stripRefTokens`)
 // can't drift (ref/id A1). `compactLabel` re-exported so this module's existing
 // import surface (+ its test) is unchanged.
-import { compactLabel, refDisplayParts, parseRef } from "@alook/shared/community-cli-contract"
+import { compactLabel, refDisplayParts, parseRef, DM_SERVER } from "@alook/shared/community-cli-contract"
 import type { ChannelRefDirectory } from "@/lib/community/channel-ref"
 export { compactLabel }
 
@@ -48,6 +48,14 @@ export function resolveMessageJump(
     return null
   }
   if (parsed.seq === undefined) return null
+  // A DM message ref (`/.dm/peer#N`) has no server in the directory — DMs aren't
+  // servers. The token's leaf id IS the dm channel id, which is all the context
+  // sheet needs (it opens with type "dm"); `serverId` is "" (unused — a DM
+  // target never navigates, it opens in place). Without this branch a DM
+  // message pill fell through to `null` and rendered non-clickable.
+  if (parsed.server === DM_SERVER) {
+    return { serverId: "", channelId: id, label: parsed.channel, seq: parsed.seq }
+  }
   const server = directory.find((s) => s.id === parsed.server) ?? directory.find((s) => s.name === parsed.server)
   if (!server) return null
   // channelId = the token's leaf id (tid for a thread, cid for a plain channel) —
@@ -149,11 +157,11 @@ export function RefTokenPill(
 
   if (view.kind === "plain") return <>{view.text}</>
   if (view.kind === "server") {
-    return <ServerPill onClick={() => uiHandlers.navigate?.(view.serverId)}>{view.label}</ServerPill>
+    return <ServerPill onClick={() => callHandler("navigate", uiHandlers.navigate, view.serverId)}>{view.label}</ServerPill>
   }
   if (view.kind === "channel") {
     return (
-      <ChannelPill onClick={() => uiHandlers.navigate?.(view.serverId, view.channelId)}>
+      <ChannelPill onClick={() => callHandler("navigate", uiHandlers.navigate, view.serverId, view.channelId)}>
         {view.label}
       </ChannelPill>
     )
@@ -165,9 +173,29 @@ export function RefTokenPill(
   return (
     <ChannelPill
       seqSuffix={view.seq ?? undefined}
-      onClick={messageJump ? () => uiHandlers.openMessageContext?.(messageJump) : undefined}
+      onClick={messageJump ? () => callHandler("openMessageContext", uiHandlers.openMessageContext, messageJump) : undefined}
     >
       {view.label}
     </ChannelPill>
   )
+}
+
+// Invoke a UI-handler, but in DEV surface a warning instead of silently doing
+// nothing when the handler isn't registered in the current view. A pill that
+// renders clickable but whose handler is undefined (a view that forgot to
+// `registerUiHandlers`) is a false-affordance that reads as "click does
+// nothing" — exactly the DM message-pill bug. This turns that silent gap into a
+// visible dev signal; in prod it stays a graceful no-op (no user-facing throw).
+function callHandler<A extends unknown[]>(
+  name: string,
+  fn: ((...args: A) => void) | undefined,
+  ...args: A
+): void {
+  if (fn) { fn(...args); return }
+  if (process.env.NODE_ENV !== "production") {
+    console.warn(
+      `[ref-pill] ui-handler "${name}" is not registered in this view — pill click is a no-op. ` +
+        `The view needs to registerUiHandlers({ ${name} }).`,
+    )
+  }
 }

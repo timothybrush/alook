@@ -176,7 +176,14 @@ export function MessageContextSheet({
           { signal },
         )
       } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return { notFound: true }
+        // Existence non-disclosure (Aigneis red line): a no-access channel
+        // returns 403, a nonexistent/deleted one returns 404 — collapse BOTH to
+        // the same neutral not-found state so a clicker can't distinguish "this
+        // exists but I can't see it" from "this doesn't exist". Only genuine
+        // transient/network errors (5xx, offline) fall through to the retryable
+        // error branch. Reachable now that message-ref pills navigate
+        // cross-channel (a DM pill can point at a channel the viewer can't see).
+        if (e instanceof ApiError && (e.status === 404 || e.status === 403)) return { notFound: true }
         throw e
       }
       const page = await apiFetch<MessagesPage>(
@@ -402,8 +409,12 @@ export function MessageContextSheet({
           )}
 
           {query.data?.notFound && (
+            // Neutral, cause-free terminal state (Aigneis existence-non-disclosure
+            // red line): must not hint "deleted"/"private"/"no access", must be
+            // indistinguishable for exists-vs-not, and must not read as a
+            // retryable transient. Covers both 404 (gone) and 403 (no access).
             <p className="py-8 text-center text-sm text-muted-foreground">
-              Message not found — it may have been deleted.
+              You can&rsquo;t open this message.
             </p>
           )}
 
