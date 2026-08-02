@@ -25,7 +25,11 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
 
   const db = getDb(ctx.env.DB)
 
-  const channel = await queries.communityChannel.getChannel(db, channelId)
+  // `withD1Retry` (D1-armor state 2): existence/access read — a transient would
+  // 404 a real channel (mis-judged state); retry to truth.
+  const channel = await withD1Retry(() => queries.communityChannel.getChannel(db, channelId), {
+    route: "channels/read-state/get-channel",
+  })
   if (!channel) return writeError("channel not found", 404)
   const auth = await requireChannelMember(db, channelId, ctx.userId)
   if (!auth.ok) return writeError(auth.error, auth.status)

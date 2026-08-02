@@ -31,13 +31,21 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
 
   let target: { id: string; createdAt: string; seq: number } | null
   if (body.lastReadMessageId) {
-    const msg = await queries.communityMessage.getMessage(db, body.lastReadMessageId)
+    // `withD1Retry` (D1-armor state 2): target anchors the DM read watermark — a
+    // transient would 400 a real message (wrong reject + no advance); retry.
+    const msg = await withD1Retry(() => queries.communityMessage.getMessage(db, body.lastReadMessageId!), {
+      route: "dm/read/target-message",
+    })
     if (!msg || msg.channelId !== dmId) {
       return writeError("lastReadMessageId does not belong to this dm", 400)
     }
     target = { id: msg.id, createdAt: msg.createdAt, seq: msg.seq }
   } else {
-    target = await queries.communityMessage.getLatestMessage(db, { channelId: dmId })
+    // `withD1Retry` (D1-armor state 2): mass mark-read resolves to latest — a
+    // transient false-empty would wrongly no-op a real mark-read; retry to truth.
+    target = await withD1Retry(() => queries.communityMessage.getLatestMessage(db, { channelId: dmId }), {
+      route: "dm/read/latest-message",
+    })
     if (!target) return writeJSON({ ok: true })
   }
 

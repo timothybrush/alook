@@ -25,7 +25,11 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
   // routes (pins, threads, PATCH/DELETE) also honor: unknown channel → 404,
   // known channel + non-member → 403. `requireChannelMember` alone collapses
   // both into 403 because the JOIN can't tell the difference.
-  const channel = await queries.communityChannel.getChannel(db, channelId)
+  // `withD1Retry` (D1-armor state 2): existence/access read — a transient would
+  // 404 a real thread channel (mis-judged state); retry to truth.
+  const channel = await withD1Retry(() => queries.communityChannel.getChannel(db, channelId), {
+    route: "threads/read/get-channel",
+  })
   if (!channel) return writeError("channel not found", 404)
   const child = requireChildSurface(channel.type)
   if (!child.ok) return writeError(child.error, child.status)
@@ -41,14 +45,22 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
 
   let target: { id: string; createdAt: string; seq: number } | null
   if (body.lastReadMessageId) {
-    const msg = await queries.communityMessage.getMessage(db, body.lastReadMessageId)
+    // `withD1Retry` (D1-armor state 2): target anchors the thread read watermark
+    // — a transient would 404 a real message (wrong 404 + no advance); retry.
+    const msg = await withD1Retry(() => queries.communityMessage.getMessage(db, body.lastReadMessageId!), {
+      route: "threads/read/target-message",
+    })
     if (!msg) return writeError("message not found", 404)
     if (msg.channelId !== channelId) {
       return writeError("message not in channel", 400)
     }
     target = { id: msg.id, createdAt: msg.createdAt, seq: msg.seq }
   } else {
-    target = await queries.communityMessage.getLatestMessage(db, { channelId })
+    // `withD1Retry` (D1-armor state 2): mass mark-read resolves to latest — a
+    // transient false-empty would wrongly no-op a real mark-read; retry to truth.
+    target = await withD1Retry(() => queries.communityMessage.getLatestMessage(db, { channelId }), {
+      route: "threads/read/latest-message",
+    })
     if (!target) return writeJSON({ ok: true })
   }
 

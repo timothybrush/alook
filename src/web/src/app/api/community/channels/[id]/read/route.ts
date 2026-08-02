@@ -39,7 +39,11 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
   // routes (pins, threads, PATCH/DELETE) also honor: unknown channel → 404,
   // known channel + non-member → 403. `requireChannelMember` alone collapses
   // both into 403 because the JOIN can't tell the difference.
-  const channel = await queries.communityChannel.getChannel(db, channelId)
+  // `withD1Retry` (D1-armor state 2): existence/access read (a transient would
+  // 404 a real channel — mis-judged state); retry to truth.
+  const channel = await withD1Retry(() => queries.communityChannel.getChannel(db, channelId), {
+    route: "channels/read/get-channel",
+  })
   if (!channel) return writeError("channel not found", 404)
   const auth = await requireChannelMember(db, channelId, ctx.userId)
   if (!auth.ok) return writeError(auth.error, auth.status)
@@ -64,7 +68,12 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
   // to a real message — that's the read-state invariant.
   let target: { id: string; createdAt: string; seq: number } | null
   if (lastReadMessageId) {
-    const msg = await queries.communityMessage.getMessage(db, lastReadMessageId)
+    // `withD1Retry` (D1-armor state 2): the target message anchors the read
+    // watermark — a transient would 404 a real message (wrong 404 + no advance);
+    // retry to truth.
+    const msg = await withD1Retry(() => queries.communityMessage.getMessage(db, lastReadMessageId), {
+      route: "channels/read/target-message",
+    })
     if (!msg) return writeError("message not found", 404)
     // Scope check — a message from another channel MUST NOT advance THIS
     // channel's watermark.
@@ -73,7 +82,12 @@ export const PUT = withAuth(async (req: NextRequest, ctx) => {
     }
     target = { id: msg.id, createdAt: msg.createdAt, seq: msg.seq }
   } else {
-    target = await queries.communityMessage.getLatestMessage(db, { channelId })
+    // `withD1Retry` (D1-armor state 2): mass-mark-read resolves to the latest
+    // message — a transient false-empty would wrongly no-op a real mark-read
+    // (leaving unreads stuck); retry to truth.
+    target = await withD1Retry(() => queries.communityMessage.getLatestMessage(db, { channelId }), {
+      route: "channels/read/latest-message",
+    })
     // Empty channel: no row can be written under the invariant. Nothing to
     // clear either (mentions/for-you require messages to exist first), so
     // short-circuit with a successful no-op.
