@@ -77,8 +77,11 @@ function makeInsertCapture() {
           returning: vi.fn(() =>
             Promise.resolve((rows as Record<string, unknown>[]).map((r, i) => ({ ...r, id: `row-${inserts.length}-${i}` })))
           ),
-          onConflictDoNothing: vi.fn(() => Promise.resolve()),
         };
+        // Real Drizzle `.onConflictDoNothing()` returns the builder, so
+        // `.returning()` chains off it — mirror that (createMentions now does
+        // `.values(...).onConflictDoNothing({target}).returning()`).
+        chainable.onConflictDoNothing = vi.fn(() => chainable);
         return chainable;
       });
       return builder;

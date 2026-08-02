@@ -449,6 +449,12 @@ export const communityMention = sqliteTable(
   (t) => [
     index("idx_mention_user_read").on(t.userId, t.read),
     index("idx_mention_message").on(t.messageId),
+    // Natural idempotency key: a message mentions a given user in a given kind
+    // AT MOST once. Makes `createMentions` retry-safe (onConflictDoNothing) so a
+    // transient replay can't double-insert a mention row (which would silently
+    // inflate the unread count / duplicate the inbox entry). All three columns
+    // are NOT NULL, so a plain unique index suffices (no partial needed).
+    uniqueIndex("uq_mention_message_user_kind").on(t.messageId, t.userId, t.kind),
   ]
 );
 

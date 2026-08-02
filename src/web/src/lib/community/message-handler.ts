@@ -481,7 +481,14 @@ export async function createCommunityMessage(params: {
     // bare call (same rationale as the agent `send` route).
     created =
       expectedSeq !== undefined
-        ? await queries.communityMessage.createMessage(db, { ...baseMessageData, expectedSeq })
+        ? await nonIdempotentWriteAllowed(
+            {
+              reason:
+                "CAS seq-claim (expectedSeq): a blind retry could re-attempt a partially-applied seq claim, so this path is deliberately NOT retried — a transient throws and surfaces as a 500 (never silent), which the caller resyncs+resends",
+              route: "community/message-create-cas",
+            },
+            () => queries.communityMessage.createMessage(db, { ...baseMessageData, expectedSeq }),
+          )
         : await idempotentWrite(
             { dedupeKey: effectiveNonce, route: "community/message-create" },
             () => queries.communityMessage.createMessage(db, baseMessageData),
@@ -854,18 +861,32 @@ export async function createCommunityMessage(params: {
   const liveMentions = [...mentionTargets]
   const liveReplies = [...replyTargets]
   if (liveMentions.length > 0) {
-    await queries.communityMention.createMentions(db, {
-      messageId: row.id,
-      userIds: liveMentions,
-      kind: MENTION_KIND.MENTION,
-    })
+    // `withD1Retry` (D1-armor state 3): mention rows are the inbox/notify source
+    // of truth — a dropped write is a silently missed mention. Now idempotent
+    // via `uq_mention_message_user_kind` + onConflictDoNothing, so a retry
+    // re-inserts only the missing rows (no double-count). Retry to persist.
+    await withD1Retry(
+      () =>
+        queries.communityMention.createMentions(db, {
+          messageId: row.id,
+          userIds: liveMentions,
+          kind: MENTION_KIND.MENTION,
+        }),
+      { route: "message-create/mentions" },
+    )
   }
   if (liveReplies.length > 0) {
-    await queries.communityMention.createMentions(db, {
-      messageId: row.id,
-      userIds: liveReplies,
-      kind: MENTION_KIND.REPLY,
-    })
+    // `withD1Retry` (D1-armor state 3): reply mention rows — same idempotent
+    // (unique + onConflictDoNothing) + missed-notify rationale as above.
+    await withD1Retry(
+      () =>
+        queries.communityMention.createMentions(db, {
+          messageId: row.id,
+          userIds: liveReplies,
+          kind: MENTION_KIND.REPLY,
+        }),
+      { route: "message-create/reply-mentions" },
+    )
   }
 
   const messagePayload = mapMessageForWs(row, {

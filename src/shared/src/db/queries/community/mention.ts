@@ -30,6 +30,16 @@ export async function createMentions(
               kind,
             }))
           )
+          // Natural idempotency key `uq_mention_message_user_kind` (message_id,
+          // user_id, kind): a message mentions a user in a kind at most once, so
+          // a replay (transient retry under withD1Retry) skips existing rows
+          // instead of double-inserting (which would silently inflate the unread
+          // count). Callers don't read the returned rows for correctness (the
+          // notify pipeline reads mentions independently), so skipping conflicts
+          // is safe.
+          .onConflictDoNothing({
+            target: [communityMention.messageId, communityMention.userId, communityMention.kind],
+          })
           .returning()
       )
     )
