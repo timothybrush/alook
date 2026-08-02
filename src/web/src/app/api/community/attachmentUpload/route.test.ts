@@ -21,11 +21,10 @@ vi.mock("@/lib/auth", () => ({
 const mockFindActiveAgentRunnerKeyByBearer = vi.fn()
 const mockGetUserInternal = vi.fn()
 const mockGetBotBinding = vi.fn()
-const mockResolveServerByNameForMember = vi.fn()
-const mockResolveChannelByNameForMember = vi.fn()
+const mockGetChannel = vi.fn()
 const mockGetChannelForMember = vi.fn()
 const mockGetDM = vi.fn()
-const mockGetDMBetween = vi.fn()
+const mockGetDMPeer = vi.fn()
 const mockCreatePendingAttachment = vi.fn()
 
 vi.mock("@alook/shared", async () => {
@@ -37,14 +36,13 @@ vi.mock("@alook/shared", async () => {
       communityMachine: { findActiveAgentRunnerKeyByBearer: (...a: unknown[]) => mockFindActiveAgentRunnerKeyByBearer(...a) },
       user: { getUserInternal: (...a: unknown[]) => mockGetUserInternal(...a) },
       communityBot: { getBotBinding: (...a: unknown[]) => mockGetBotBinding(...a) },
-      communityServer: { resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a) },
       communityChannel: {
-        resolveChannelByNameForMember: (...a: unknown[]) => mockResolveChannelByNameForMember(...a),
+        getChannel: (...a: unknown[]) => mockGetChannel(...a),
         getChannelForMember: (...a: unknown[]) => mockGetChannelForMember(...a),
       },
       communityDm: {
         getDM: (...a: unknown[]) => mockGetDM(...a),
-        getDMBetween: (...a: unknown[]) => mockGetDMBetween(...a),
+        getDMPeer: (...a: unknown[]) => mockGetDMPeer(...a),
       },
       communityFriendship: { isBlocked: async () => false },
       communityAttachment: {
@@ -61,12 +59,21 @@ vi.mock("@/lib/community/upload", () => ({
 
 import { POST } from "./route"
 
-function req(target: string | null, headers: Record<string, string> = {}): NextRequest {
-  const q = target !== null ? `?target=${encodeURIComponent(target)}` : ""
+function req(channelId: string | null, headers: Record<string, string> = {}): NextRequest {
+  const q = channelId !== null ? `?channelId=${encodeURIComponent(channelId)}` : ""
   return new NextRequest(`http://localhost/api/community/agent/attachmentUpload${q}`, {
     method: "POST",
     headers,
   })
+}
+
+// Builds a request that addresses by a bare name-path (`?target=`) — the
+// retired addressing, kept here to assert it now loud-rejects 400.
+function reqNamePath(target: string, headers: Record<string, string> = {}): NextRequest {
+  return new NextRequest(
+    `http://localhost/api/community/agent/attachmentUpload?target=${encodeURIComponent(target)}`,
+    { method: "POST", headers },
+  )
 }
 
 describe("POST /api/community/agent/attachmentUpload", () => {
@@ -75,6 +82,9 @@ describe("POST /api/community/agent/attachmentUpload", () => {
     mockFindActiveAgentRunnerKeyByBearer.mockResolvedValue({ userId: "owner_1", machineId: "m_1", agentId: "bot_1" })
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
+    // id-path defaults: a text channel the bot is a member of.
+    mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     mockCreatePendingAttachment.mockResolvedValue({
       id: "att_1",
       filename: "hi.png",
@@ -91,23 +101,26 @@ describe("POST /api/community/agent/attachmentUpload", () => {
   })
 
   it("401 without Authorization", async () => {
-    const res = await POST(req("/studio/general"))
+    const res = await POST(req("ch_1"))
     expect(res.status).toBe(401)
   })
 
-  it("400 when target query param is missing", async () => {
+  it("400 when channelId + target query params are both missing", async () => {
     const res = await POST(req(null, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
   })
 
-  it("returns id + filename + contentType + size — no url, no r2Key", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([
-      { id: "c1", serverId: "srv_1", parentChannelId: null },
-    ])
-    mockGetChannelForMember.mockResolvedValue({ id: "c1", serverId: "srv_1", parentChannelId: null })
+  it("400 loud-rejects a bare name-path target (name addressing retired)", async () => {
+    const res = await POST(reqNamePath("/studio/general", { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBeTruthy()
+    expect(body.hint).toBeTruthy()
+    expect(mockGetChannel).not.toHaveBeenCalled()
+  })
 
-    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+  it("returns id + filename + contentType + size — no url, no r2Key", async () => {
+    const res = await POST(req("ch_1", { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({
@@ -124,25 +137,20 @@ describe("POST /api/community/agent/attachmentUpload", () => {
       expect.anything(),
       expect.anything(),
       "channel",
-      "c1",
+      "ch_1",
       { uploader: "bot", uploaderUserId: "bot_1" },
     )
     expect(mockCreatePendingAttachment).toHaveBeenCalledWith({}, expect.objectContaining({
       uploaderId: "bot_1",
-      targetId: "c1",
+      targetId: "ch_1",
       r2Key: "channel/c1/uuid/hi.png",
     }))
   })
 
   it("createPendingAttachment throws → 500 JSON envelope, R2 delete fired with r2Key", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([
-      { id: "c1", serverId: "srv_1", parentChannelId: null },
-    ])
-    mockGetChannelForMember.mockResolvedValue({ id: "c1", serverId: "srv_1", parentChannelId: null })
     mockCreatePendingAttachment.mockRejectedValueOnce(new Error("d1_transient"))
 
-    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req("ch_1", { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(500)
     const body = await res.json()
     expect(body).toEqual({ error: "internal error", code: "internal" })
@@ -150,40 +158,30 @@ describe("POST /api/community/agent/attachmentUpload", () => {
   })
 
   it("createPendingAttachment throws AND R2 delete also throws → still 500 JSON, no rethrow", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([
-      { id: "c1", serverId: "srv_1", parentChannelId: null },
-    ])
-    mockGetChannelForMember.mockResolvedValue({ id: "c1", serverId: "srv_1", parentChannelId: null })
     mockCreatePendingAttachment.mockRejectedValueOnce(new Error("d1_transient"))
     mockR2Delete.mockRejectedValueOnce(new Error("r2_boom"))
 
-    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req("ch_1", { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: "internal error", code: "internal" })
   })
 
-  it("pre-R2 throw (resolveTargetForMember errors) → 500 JSON, R2 delete NOT called", async () => {
-    mockResolveServerByNameForMember.mockRejectedValueOnce(new Error("d1_outage"))
+  it("pre-R2 throw (resolveTargetById errors) → 500 JSON, R2 delete NOT called", async () => {
+    mockGetChannel.mockRejectedValueOnce(new Error("d1_outage"))
 
-    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req("ch_1", { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: "internal error", code: "internal" })
     expect(mockR2Delete).not.toHaveBeenCalled()
   })
 
   it("propagates handler failure response verbatim", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([
-      { id: "c1", serverId: "srv_1", parentChannelId: null },
-    ])
-    mockGetChannelForMember.mockResolvedValue({ id: "c1", serverId: "srv_1", parentChannelId: null })
     mockHandleAttachmentUpload.mockResolvedValue({
       ok: false,
       response: new Response(JSON.stringify({ error: "file too large" }), { status: 413 }),
     })
 
-    const res = await POST(req("/studio/general", { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req("ch_1", { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(413)
     expect(mockCreatePendingAttachment).not.toHaveBeenCalled()
   })

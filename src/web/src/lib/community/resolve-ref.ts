@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { queries, withD1Retry, parseRef, DM_SERVER, parseNameAndTag } from "@alook/shared"
+import { queries, withD1Retry } from "@alook/shared"
 import type { Database } from "@alook/shared"
 import { isUniqueConstraintError } from "@alook/shared"
 import { guardDmOpen } from "./dm-guard"
@@ -11,226 +11,20 @@ export type TargetResolution =
   | { kind: "dm"; channelId: string; otherUserId: string }
   | { error: 400 | 403 | 404; message: string; hint?: Array<{ id: string; path: string }> }
 
-export interface ResolveTargetOpts {
-  /** `send` only — auto-creates the DM row (guarded by `guardDmOpen`) if missing. */
-  createDmIfMissing?: boolean
-  /** `send` only — auto-creates the thread channel row if missing. */
-  createThreadIfMissing?: boolean
-  /** Threaded into `guardDmOpen` when `createDmIfMissing` — default "human". */
-  callerKind?: "human" | "bot"
-}
-
-/**
- * Resolve a CLI path ref (`ChannelRef`, e.g. `/studio/general`,
- * `/studio/general/#42`, `/.dm/gusye#1231`) to a concrete channel/DM id,
- * scoped to `userId`'s memberships. Threads flatten to `{ kind: "channel",
- * channelId: <thread's own id> }` (debt #10 — threads ARE channels); the
- * caller (the `send` route) is responsible for reconstructing the full
- * `MessageTarget` (`kind: "thread"` with `parentChannelId`) before calling
- * `createCommunityMessage` — see plan §5's "MessageTarget reconstruction"
- * note, this function intentionally does NOT do that itself.
- *
- * Channel names are unique per server for top-level channels (migration
- * 0057's partial-unique index `idx_channel_server_name`) — the resolver
- * enforces the same invariant by matching only where `parentChannelId IS
- * NULL`. Threads and forum posts are unreachable from this helper by name
- * or id; use the canonical `#seq` grammar to descend into a thread. Server
- * NAME ambiguity is still possible (server names are non-unique) and still
- * returns `{ error: 400, hint: [...] }` so the agent can pick.
- * `createDmIfMissing`/`createThreadIfMissing` are both `true` for `send`
- * only — every other route passes `false` so a stale ref never materializes
- * a DM/thread row as a side effect of a read.
- *
- * DORMANT (deliberate — do NOT "optimize" this away): the endpoint accepts a
- * bare addressing path and resolves it inline, in the SAME HTTP trip as the
- * action (one round trip). We intentionally did NOT build a client-side
- * ref→scope-id pre-resolution layer: it buys nothing (the endpoint already
- * resolves in one trip) and makes a cold ref strictly slower (two trips + a
- * rename-invalidation cache). If a future need ever forces client-side
- * resolution, it MUST stay CLI-internal and transparent (one command, two
- * HTTP calls the caller never sees) — NEVER a manual "resolve, then send the
- * id" two-step exposed to the agent (that's the PR-408 smell, considered and
- * rejected). The `{}()` ref token (ref/id 乙) already gives id-first sends
- * without a resolve step, so this path stays a pure fallback for bare paths.
- */
-export async function resolveTargetForMember(
-  db: Database,
-  userId: string,
-  ref: string,
-  opts?: ResolveTargetOpts
-): Promise<TargetResolution> {
-  let parsed: ReturnType<typeof parseRef>
-  try {
-    parsed = parseRef(ref)
-  } catch {
-    return { error: 400, message: "malformed channel ref" }
-  }
-
-  // Message-pin form (`/server/channel#N`) has no use in this API surface —
-  // every endpoint that needs to pin a message takes a separate `seq` field
-  // (`resolve`, `read`). Reject rather than silently ignoring the `#N`.
-  if (parsed.seq !== undefined) {
-    return { error: 400, message: "channel ref must not pin a specific message (#N) — use a separate seq field" }
-  }
-
-  if (parsed.server === DM_SERVER) {
-    if (parsed.threadRootSeq !== undefined) {
-      // DM messages have no channelId, so they can't be a thread's
-      // parentChannelId (community_channel.parentChannelId always
-      // references another community_channel) — not modeled today.
-      return { error: 404, message: "DM threads are not supported" }
-    }
-
-    const handle = parseNameAndTag(parsed.channel)
-    if (!handle) {
-      return { error: 400, message: "invalid DM handle, expected name#0042" }
-    }
-    const peer = await withD1Retry(
-      () => queries.user.getUserByNameAndDiscriminator(db, handle.name, handle.discriminator),
-      { route: "resolve-ref/dm-peer" },
-    )
-    if (!peer) {
-      return { error: 404, message: "user not found" }
-    }
-    const peerId = peer.id
-
-    if (opts?.createDmIfMissing) {
-      const guard = await guardDmOpen(db, userId, peerId, { callerKind: opts.callerKind })
-      if (!guard.ok) return { error: guard.status, message: guard.error }
-      // get-first-then-create → response-lost retry is safe (finds existing);
-      // concurrency double-create is the pre-existing race (separate backlog).
-      const dm = await withD1Retry(
-        () => queries.communityDm.createOrGetDM(db, { userId1: userId, userId2: peerId }),
-        { route: "resolve-ref/create-or-get-dm" },
-      )
-      return { kind: "dm", channelId: dm.id, otherUserId: peerId }
-    }
-
-    const dm = await withD1Retry(() => queries.communityDm.getDMBetween(db, userId, peerId), {
-      route: "resolve-ref/dm-between",
-    })
-    if (!dm) return { error: 404, message: "dm not found" }
-    return { kind: "dm", channelId: dm.id, otherUserId: peerId }
-  }
-
-  // Channel form: resolve server, then channel, both scoped to membership.
-  const servers = await withD1Retry(
-    () => queries.communityServer.resolveServerByNameForMember(db, userId, parsed.server),
-    { route: "resolve-ref/server" },
-  )
-  if (servers.length === 0) return { error: 404, message: `server not found: ${parsed.server}` }
-  if (servers.length > 1) {
-    return {
-      error: 400,
-      message: "ambiguous server name",
-      hint: servers.map((s) => ({ id: s.id, path: `/${s.id}/${parsed.channel}` })),
-    }
-  }
-  const serverId = servers[0]!.id
-
-  // The hot bot-send resolve read — this was the one throwing SQLITE_BUSY 500s
-  // (Ingaborg #162). withD1Retry absorbs the transient instead of failing send.
-  const matches = await withD1Retry(
-    () => queries.communityChannel.resolveChannelByNameForMember(db, serverId, userId, parsed.channel),
-    { route: "resolve-ref/channel" },
-  )
-  if (matches.length === 0) return { error: 404, message: `channel not found: ${parsed.channel}` }
-  const channel = matches[0]!
-
-  // Forum-post form (`/server/forum/post`) — the resolved `channel` is the
-  // parent forum; descend to the `forum_post` child by name. Runs parallel to
-  // the thread branch below (do NOT fold them: a thread anchors on a root-msg
-  // seq, a post on its own name). Post names are NOT unique within a forum, so
-  // >1 match is an ambiguous ref — return 400 + candidates, NEVER silently pick
-  // one (mirrors the ambiguous-server-name behavior above). A forum post
-  // inherits its forum's access; `requireChannelMember`/`requireChannelAccess`
-  // at the call site climb `parentChannelId` to gate on the forum's roster.
-  if (parsed.childChannelName !== undefined) {
-    const posts = await withD1Retry(
-      () => queries.communityChannel.getChildChannelByName(db, channel.id, parsed.childChannelName!),
-      { route: "resolve-ref/child-channel" },
-    )
-    if (posts.length === 0) {
-      return { error: 404, message: `post not found: ${parsed.childChannelName}` }
-    }
-    if (posts.length > 1) {
-      // Ambiguous: >1 post shares this name (only possible for legacy dupes
-      // predating create-time dedup). The red line is met by refusing — we
-      // NEVER silently pick one. A name-based hint can't disambiguate here
-      // (the candidates' name-anchor paths are identical), so we report the
-      // count instead of fabricating useless identical paths; a one-time
-      // slug-dedup migration on legacy posts is the clean fix (deferred).
-      return {
-        error: 400,
-        message: `ambiguous post name "${parsed.childChannelName}" in ${parsed.channel} — ${posts.length} posts share this name; rename the duplicates to address them by name`,
-      }
-    }
-    return { kind: "channel", channelId: posts[0]!.id }
-  }
-
-  if (parsed.threadRootSeq === undefined) {
-    return { kind: "channel", channelId: channel.id }
-  }
-
-  // Defense in depth: a thread may only root on a TOP-LEVEL channel — never
-  // on a forum post or another thread (that grandchild would defeat the
-  // single-level privacy anchor climb and leak a private forum's thread
-  // server-wide). This branch is provably unreachable via the current name
-  // resolver (`resolveChannelByNameForMember` filters `parent_channel_id IS
-  // NULL`, so `channel.parentChannelId` is always null here); it stays as a
-  // guard against future changes that widen that resolver, and mirrors what
-  // `createThreadChannel` enforces at the DB layer as a last resort.
-  if (channel.parentChannelId) {
-    return { error: 400, message: "can't start a thread inside a thread or forum post" }
-  }
-
-  // Thread form (`/server/channel/#N`) — translate the root seq to the
-  // parent message's id, then find (or create) the thread's own channel row.
-  const rootMessage = await withD1Retry(
-    () =>
-      queries.communityMessage.getMessageByChannelAndSeq(
-        db,
-        { channelId: channel.id },
-        parsed.threadRootSeq!,
-      ),
-    { route: "resolve-ref/root-message" },
-  )
-  if (!rootMessage || parsed.threadRootSeq === 0) {
-    return { error: 404, message: `no message with seq #${parsed.threadRootSeq} in this channel` }
-  }
-
-  const existingThread = await withD1Retry(
-    () => queries.communityChannel.getThreadChannelByParentMessage(db, channel.id, rootMessage.id),
-    { route: "resolve-ref/existing-thread" },
-  )
-  if (existingThread) return { kind: "channel", channelId: existingThread.id }
-
-  if (!opts?.createThreadIfMissing) {
-    return { error: 404, message: "thread not found" }
-  }
-
-  try {
-    // `withD1Retry` (state 3): createThreadChannel is replay-safe — the
-    // existing-thread check above + the one-thread-per-message unique constraint
-    // mean a retry either finds the row or hits the (non-retryable) UNIQUE, which
-    // rethrows into the catch below and re-selects the winner. Can't double-create.
-    const created = await withD1Retry(
-      () => queries.communityChannel.createThreadChannel(db, channel.id, rootMessage.id, userId),
-      { route: "resolve-ref/create-thread" },
-    )
-    return { kind: "channel", channelId: created.id }
-  } catch (err) {
-    if (isUniqueConstraintError(err)) {
-      // Lost the race to a concurrent thread-create — re-select the winner.
-      const winner = await withD1Retry(
-        () => queries.communityChannel.getThreadChannelByParentMessage(db, channel.id, rootMessage.id),
-        { route: "resolve-ref/thread-winner" },
-      )
-      if (winner) return { kind: "channel", channelId: winner.id }
-    }
-    throw err
-  }
-}
+// Name-path addressing has been RETIRED (ref/id addressing-id-ification,
+// Gener). The old `resolveTargetForMember` — which parsed a `/server/channel`
+// name-path and resolved it to an id at use-time — is gone: a name resolved at
+// use-time silently mis-targets a renamed channel (the exact bug this reversal
+// kills). Agents now address existing targets by a received ref's id
+// (`resolveTargetById`) and open relationship channels by identity
+// (`resolveTargetByCreate`); routes loud-reject a bare name-path
+// (`nameRefRetiredResponse`). The DORMANT "resolve inline server-side" design
+// this file once documented is intentionally removed, not dormant.
+//
+// (Server SELECTORS on `list` verbs — `--server <id-or-name>` in
+// `listChannels`/`listMembers` — still resolve a server by name via
+// `resolveServerByNameForMember`; that is a separate, still-supported path and
+// was never part of the retired `--target`/`--channel` addressing.)
 
 /**
  * id-first sibling of `resolveTargetForMember` (ref/id coexistence, PR-2). A
@@ -275,6 +69,81 @@ export async function resolveTargetById(
 }
 
 /**
+ * Creation-by-identity resolver (ref/id addressing-id-ification, option A). A
+ * relationship channel — a DM with a peer, a thread on a message — is OPENED by
+ * identity (a `senderId` / `messageId` the caller received), not by a ref: the
+ * first time, it has no ref. Both are idempotent open-or-create — an existing
+ * DM/thread is returned as-is (`createOrGetDM` / the one-thread-per-message
+ * unique constraint), never duplicated. Access is gated exactly as the id/ref
+ * paths gate: a DM opens only if `guardDmOpen` allows (block/privacy check); a
+ * thread roots only on a channel the caller can post in. `send` returns the
+ * resolved target's canonical ref, so the caller collapses back to single-ref
+ * addressing after the first open.
+ *
+ * Exactly one of `dmWithUserId` / `threadOnMessageId` is set (the route checks).
+ */
+export async function resolveTargetByCreate(
+  db: Database,
+  userId: string,
+  args: { dmWithUserId?: string; threadOnMessageId?: string; callerKind?: "human" | "bot" }
+): Promise<TargetResolution> {
+  if (args.dmWithUserId !== undefined) {
+    const peerId = args.dmWithUserId
+    if (peerId === userId) return { error: 400, message: "can't open a DM with yourself" }
+    // Idempotent open-or-create, guarded by the same block/privacy check the
+    // name-path DM branch used. get-first-then-create → response-lost retry is
+    // replay-safe (finds the existing row).
+    const guard = await guardDmOpen(db, userId, peerId, { callerKind: args.callerKind })
+    if (!guard.ok) return { error: guard.status, message: guard.error }
+    const dm = await withD1Retry(
+      () => queries.communityDm.createOrGetDM(db, { userId1: userId, userId2: peerId }),
+      { route: "resolve-ref/create-dm-by-id" },
+    )
+    return { kind: "dm", channelId: dm.id, otherUserId: peerId }
+  }
+
+  if (args.threadOnMessageId !== undefined) {
+    const rootMessage = await withD1Retry(
+      () => queries.communityMessage.getMessage(db, args.threadOnMessageId!),
+      { route: "resolve-ref/thread-root-by-id" },
+    )
+    if (!rootMessage) return { error: 404, message: `message not found: ${args.threadOnMessageId}` }
+    // The thread roots on the message's own channel — gate that the caller can
+    // post there (same membership gate the ref path applies to the parent).
+    const gate = await requireChannelMember(db, rootMessage.channelId, userId)
+    if (!gate.ok) return { error: gate.status as 400 | 403 | 404, message: gate.error }
+    // A thread may only root on a top-level channel — never inside a thread or
+    // forum post (mirrors the name-path guard + `createThreadChannel`'s DB check).
+    if (gate.value.parentChannelId) {
+      return { error: 400, message: "can't start a thread inside a thread or forum post" }
+    }
+    const existing = await withD1Retry(
+      () => queries.communityChannel.getThreadChannelByParentMessage(db, rootMessage.channelId, rootMessage.id),
+      { route: "resolve-ref/existing-thread-by-id" },
+    )
+    if (existing) return { kind: "channel", channelId: existing.id }
+    try {
+      const created = await withD1Retry(
+        () => queries.communityChannel.createThreadChannel(db, rootMessage.channelId, rootMessage.id, userId),
+        { route: "resolve-ref/create-thread-by-id" },
+      )
+      return { kind: "channel", channelId: created.id }
+    } catch (err) {
+      if (isUniqueConstraintError(err)) {
+        const winner = await withD1Retry(
+          () => queries.communityChannel.getThreadChannelByParentMessage(db, rootMessage.channelId, rootMessage.id),
+          { route: "resolve-ref/thread-winner-by-id" },
+        )
+        if (winner) return { kind: "channel", channelId: winner.id }
+      }
+      throw err
+    }
+  }
+
+  return { error: 400, message: "no creation target specified" }
+}
+
+/**
  * Convert a `resolveTargetForMember` error branch into the JSON error
  * response every agent route returns for it — shared so `send`/`ack`/`read`/
  * `resolve` don't each hand-roll the `{ error, hint? }` shape independently.
@@ -287,5 +156,26 @@ export function resolveErrorResponse(
   return NextResponse.json(
     { error: resolved.message, ...(resolved.hint ? { hint: resolved.hint } : {}) },
     { status: resolved.error }
+  )
+}
+
+/**
+ * Name-path addressing is RETIRED (ref/id addressing-id-ification, Gener). A
+ * bare `/server/channel` path on `--target`/`--channel`/`--reply` is no longer
+ * resolved server-side — a name resolved at use-time silently mis-targets a
+ * renamed channel (the exact bug this reversal kills). Addressing is strict on
+ * the name axis: a name-path is a LOUD 400 with a hint, never a silent resolve.
+ * (Server selectors on `list` verbs — `--server <id-or-name>` — are a separate,
+ * still-supported path and do NOT go through here.)
+ */
+export function nameRefRetiredResponse(): NextResponse {
+  return NextResponse.json(
+    {
+      error:
+        "name-path addressing is no longer supported — a bare /server/channel path can't be a target",
+      hint:
+        "reuse a ref you received (the `channel` field on a pulled message, or a channel/message ref token) — re-`inbox pull` if you don't have it; to open a DM/thread use `--dm-user`/`--thread-on`",
+    },
+    { status: 400 }
   )
 }

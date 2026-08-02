@@ -1,6 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import * as agentInbox from "../../src/db/queries/community/agent-inbox";
-import { formatRef, formatSeq, DM_SERVER } from "../../src/community-cli-contract";
+import { formatRef, formatRefToken, formatSeq, DM_SERVER } from "../../src/community-cli-contract";
+
+// The agent-facing `channel` ref is now the canonical body token
+// `{label}(channel/<channelId>)` (ref/id addressing-id-ification): label = the
+// readable full path (`formatRef(...)`), id = the scope's own channel id. Test
+// helper mirrors `resolveScopeRefs`/`resolveUnreadNoticeChannel`.
+const channelRefToken = (label: string, id: string) =>
+  formatRefToken({ label, type: "channel", id });
 
 /**
  * Generic chainable + thenable mock. Every builder method (`select`, `from`,
@@ -79,10 +86,11 @@ describe("toAgentMessages", () => {
     const [msg] = await agentInbox.toAgentMessages(db, [rawMsg()], "viewer_1");
     expect(msg).toEqual({
       seq: formatSeq(1),
-      channel: formatRef({ server: "studio", channel: "general" }),
+      channel: channelRefToken(formatRef({ server: "studio", channel: "general" }), "ch_1"),
       channelId: "ch_1",
       messageId: "m_1",
       sender: "@Alice#1234",
+      senderId: "u_1",
       content: { text: "hello" },
       time: "2026-07-01T00:00:00.000Z",
     });
@@ -90,8 +98,10 @@ describe("toAgentMessages", () => {
 
   it("projection invariant: exactly the wire fields, address-handle ids present, no internal fields, sender is @-prefixed", async () => {
     // Fork-C lean: the agent-facing Message surfaces ONLY the addressing
-    // handles (`channelId`/`messageId`) alongside the ref/seq — never a raw
-    // `authorId`/`userId` or any other internal sub-field.
+    // handles (`channelId`/`messageId`/`senderId` — the DM-initiation handle,
+    // sanctioned like `channelId`, cf. FriendCard.userId) alongside the
+    // ref/seq — never an internally-named `authorId`/`userId` or other
+    // internal sub-field.
     const db = createSequentialDb([
       [{ id: "ch_1", name: "general", serverId: "srv_1", parentChannelId: null, parentMessageId: null }],
       [{ id: "u_1", name: "Alice", discriminator: "1234" }],
@@ -99,8 +109,11 @@ describe("toAgentMessages", () => {
     ]);
     const [msg] = await agentInbox.toAgentMessages(db, [rawMsg()], "viewer_1");
     expect(Object.keys(msg!).sort()).toEqual(
-      ["channel", "channelId", "content", "messageId", "seq", "sender", "time"].sort()
+      ["channel", "channelId", "content", "messageId", "seq", "sender", "senderId", "time"].sort()
     );
+    // `senderId` is the sender's raw id surfaced as a DM-initiation address
+    // handle (like `channelId`), but the internal author-row field name
+    // `authorId` is still never leaked.
     expect(msg).not.toHaveProperty("authorId");
     expect(msg).not.toHaveProperty("userId");
     expect(msg).not.toHaveProperty("id");
@@ -126,7 +139,7 @@ describe("toAgentMessages", () => {
       [rawMsg({ channelId: "thread_1" })],
       "viewer_1"
     );
-    expect(msg!.channel).toBe(formatRef({ server: "studio", channel: "general", threadRootSeq: 7 }));
+    expect(msg!.channel).toBe(channelRefToken(formatRef({ server: "studio", channel: "general", threadRootSeq: 7 }), "thread_1"));
   });
 
   it("hydrates a forum-post message with the name-anchor ref (/server/forum/post)", async () => {
@@ -148,7 +161,7 @@ describe("toAgentMessages", () => {
       [rawMsg({ channelId: "post_1" })],
       "viewer_1"
     );
-    expect(msg!.channel).toBe(formatRef({ server: "studio", channel: "ideas", childChannelName: "my-post" }));
+    expect(msg!.channel).toBe(channelRefToken(formatRef({ server: "studio", channel: "ideas", childChannelName: "my-post" }), "post_1"));
   });
 
   it("hydrates a DM message, addressing the OTHER party (as a name#0042 handle) relative to viewerId", async () => {
@@ -169,7 +182,7 @@ describe("toAgentMessages", () => {
       [rawMsg({ channelId: "dm_ch_1" })],
       "viewer_1"
     );
-    expect(msg!.channel).toBe(formatRef({ server: DM_SERVER, channel: "Bob#9999" }));
+    expect(msg!.channel).toBe(channelRefToken(formatRef({ server: DM_SERVER, channel: "Bob#9999" }), "dm_ch_1"));
   });
 
   it("falls back to /unknown/<key> when the scope can't be resolved (e.g. deleted channel)", async () => {
@@ -332,9 +345,9 @@ describe("toAgentMessages", () => {
       "viewer_1"
     );
     const byChannel = new Map(msgs.map((m) => [m.channel, m]));
-    expect(byChannel.get(formatRef({ server: "studio", channel: "general" }))!.content.replyTo)
+    expect(byChannel.get(channelRefToken(formatRef({ server: "studio", channel: "general" }), "ch_1"))!.content.replyTo)
       .toEqual({ seq: formatSeq(11), sender: "@Ana#0012" });
-    expect(byChannel.get(formatRef({ server: "studio", channel: "random" }))!.content.replyTo)
+    expect(byChannel.get(channelRefToken(formatRef({ server: "studio", channel: "random" }), "ch_2"))!.content.replyTo)
       .toEqual({ seq: formatSeq(22), sender: "@Ben#3456" });
   });
 });
@@ -574,7 +587,7 @@ describe("resolveUnreadNoticeChannel", () => {
       [{ name: "Bob", discriminator: "9999" }],
     ]);
     const result = await agentInbox.resolveUnreadNoticeChannel(db, { channelId: "dm_ch_1" }, "bot_1");
-    expect(result).toBe(formatRef({ server: DM_SERVER, channel: "Bob#9999" }));
+    expect(result).toBe(channelRefToken(formatRef({ server: DM_SERVER, channel: "Bob#9999" }), "dm_ch_1"));
   });
 
   it("DM scope: null when the channel itself doesn't resolve", async () => {
@@ -763,11 +776,11 @@ describe("toInboxRows", () => {
     ]);
     const result = await agentInbox.toInboxRows(db, rows, "viewer_1");
     expect(result[0]).toMatchObject({
-      channel: formatRef({ server: DM_SERVER, channel: "Bob#9999" }),
+      channel: channelRefToken(formatRef({ server: DM_SERVER, channel: "Bob#9999" }), "dm_ch_1"),
       flags: ["dm", "mention"],
     });
     expect(result[1]).toMatchObject({
-      channel: formatRef({ server: "studio", channel: "general", threadRootSeq: 3 }),
+      channel: channelRefToken(formatRef({ server: "studio", channel: "general", threadRootSeq: 3 }), "thread_1"),
       flags: ["thread"],
     });
   });

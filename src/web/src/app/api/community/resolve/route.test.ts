@@ -17,13 +17,10 @@ vi.mock("@/lib/auth", () => ({
 
 const mockFindActiveAgentRunnerKeyByBearer = vi.fn()
 const mockGetUserInternal = vi.fn()
-const mockGetUserByNameAndDiscriminator = vi.fn()
 const mockGetBotBinding = vi.fn()
-const mockResolveServerByNameForMember = vi.fn()
-const mockResolveChannelByNameForMember = vi.fn()
+const mockGetChannel = vi.fn()
 const mockGetChannelForMember = vi.fn()
 const mockGetDM = vi.fn()
-const mockGetDMBetween = vi.fn()
 const mockGetDMPeer = vi.fn()
 const mockIsBlocked = vi.fn()
 const mockGetMessageByChannelAndSeq = vi.fn()
@@ -38,18 +35,15 @@ vi.mock("@alook/shared", async () => {
       communityMachine: { findActiveAgentRunnerKeyByBearer: (...a: unknown[]) => mockFindActiveAgentRunnerKeyByBearer(...a) },
       user: {
         getUserInternal: (...a: unknown[]) => mockGetUserInternal(...a),
-        getUserByNameAndDiscriminator: (...a: unknown[]) => mockGetUserByNameAndDiscriminator(...a),
       },
       communityBot: { getBotBinding: (...a: unknown[]) => mockGetBotBinding(...a) },
       communityFriendship: { isBlocked: (...a: unknown[]) => mockIsBlocked(...a) },
-      communityServer: { resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a) },
       communityChannel: {
-        resolveChannelByNameForMember: (...a: unknown[]) => mockResolveChannelByNameForMember(...a),
+        getChannel: (...a: unknown[]) => mockGetChannel(...a),
         getChannelForMember: (...a: unknown[]) => mockGetChannelForMember(...a),
       },
       communityDm: {
         getDM: (...a: unknown[]) => mockGetDM(...a),
-        getDMBetween: (...a: unknown[]) => mockGetDMBetween(...a),
         getDMPeer: (...a: unknown[]) => mockGetDMPeer(...a),
       },
       communityMessage: {
@@ -78,93 +72,84 @@ describe("POST /api/community/agent/resolve", () => {
     mockFindActiveAgentRunnerKeyByBearer.mockResolvedValue({ userId: "owner_1", machineId: "m_1", agentId: "bot_1" })
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
+    // id-path defaults: a text channel the bot is a member of.
+    mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     mockToAgentMessage.mockImplementation((_db: unknown, row: unknown) => Promise.resolve({ ...row as object, wireShaped: true }))
   })
 
   it("401 without Authorization", async () => {
-    const res = await POST(req({ channel: "/studio/general", seq: 1 }))
+    const res = await POST(req({ channelId: "ch_1", seq: 1 }))
     expect(res.status).toBe(401)
   })
 
   it("400 on a payload that fails schema validation", async () => {
-    const res = await POST(req({ channel: "", seq: 1 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "", seq: 1 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
   })
 
   it("404 rejects seq 0 (legacy sentinel) before even resolving the channel", async () => {
-    const res = await POST(req({ channel: "/studio/general", seq: 0 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 0 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(404)
-    expect(mockResolveServerByNameForMember).not.toHaveBeenCalled()
+    expect(mockGetChannel).not.toHaveBeenCalled()
   })
 
-  it("404 propagates the ref-resolution error (channel not found)", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([])
+  it("400 loud-rejects a bare name-path (name addressing retired)", async () => {
     const res = await POST(req({ channel: "/studio/general", seq: 3 }, { Authorization: "Bearer crk_abc" }))
-    expect(res.status).toBe(404)
-    expect(await res.json()).toEqual({ error: "server not found: studio" })
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBeTruthy()
+    expect(body.hint).toBeTruthy()
+    expect(mockGetChannel).not.toHaveBeenCalled()
   })
 
-  it("403 forbidden when the bot resolves the channel but isn't actually a member", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
+  it("404 propagates the id-resolution error (channel not found)", async () => {
+    mockGetChannel.mockResolvedValue(undefined)
+    const res = await POST(req({ channelId: "ch_missing", seq: 3 }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: "channel not found: ch_missing" })
+  })
+
+  it("403 forbidden when the channel resolves but the bot isn't actually a member", async () => {
     mockGetChannelForMember.mockResolvedValue(null)
-    const res = await POST(req({ channel: "/studio/general", seq: 3 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 3 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(403)
   })
 
   it("404 when the channel exists but has no message at that seq", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", parentChannelId: null })
     mockGetMessageByChannelAndSeq.mockResolvedValue(null)
-    const res = await POST(req({ channel: "/studio/general", seq: 99 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 99 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(404)
     expect((await res.json()).error).toMatch(/no message with seq #99/)
   })
 
-  it("200 happy path: resolves the channel ref, fetches by seq, and wire-shapes via toAgentMessage", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", parentChannelId: null })
+  it("200 happy path: resolves the channel id, fetches by seq, and wire-shapes via toAgentMessage", async () => {
     mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "m_1", seq: 3, content: "hi" })
-    const res = await POST(req({ channel: "/studio/general", seq: 3 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 3 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.message).toMatchObject({ id: "m_1", seq: 3, wireShaped: true })
     expect(mockGetMessageByChannelAndSeq).toHaveBeenCalledWith(expect.anything(), { channelId: "ch_1" }, 3)
   })
 
-  it("200 happy path over a DM ref, gated by requireDMAccess", async () => {
-    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-    mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
-      Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null })
-    )
-    // resolveTargetForMember (no createDmIfMissing) needs an existing DM row.
-    mockGetDMBetween.mockResolvedValue({ id: "dm_1" })
+  it("200 happy path over a DM id, gated by requireDMAccess", async () => {
+    mockGetChannel.mockResolvedValue({ id: "dm_1", type: "dm" })
     mockGetDM.mockResolvedValue({ id: "dm_1", lastMessageAt: null, createdAt: "t" })
     mockGetDMPeer.mockResolvedValue({ otherUserId: "peer_1" })
     mockIsBlocked.mockResolvedValue(false)
     mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "m_dm_1", seq: 2, content: "hey" })
-    const res = await POST(req({ channel: "/.dm/peer#0001", seq: 2 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "dm_1", seq: 2 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     expect(mockGetMessageByChannelAndSeq).toHaveBeenCalledWith(expect.anything(), { channelId: "dm_1" }, 2)
   })
 
-  it("400 invalid DM handle when the channel segment has no #0042 tag", async () => {
-    const res = await POST(req({ channel: "/.dm/peer_1", seq: 2 }, { Authorization: "Bearer crk_abc" }))
-    expect(res.status).toBe(400)
-  })
-
   it("read/resolve-route parity: the reply row's replyToId is threaded into toAgentMessage (guards the getMessageByChannelAndSeq projection)", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", parentChannelId: null })
     // getMessageByChannelAndSeq now projects replyToId (see message.ts) — the
     // route feeds this row straight into toAgentMessage, which surfaces
     // content.replyTo. If replyToId were dropped from the projection this row
     // wouldn't carry it (and TS would fail to compile RawAgentMessage).
     mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "m_1", seq: 42, content: "yes", replyToId: "m_target" })
-    const res = await POST(req({ channel: "/studio/general", seq: 42 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 42 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     expect(mockToAgentMessage).toHaveBeenCalledWith(
       expect.anything(),

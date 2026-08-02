@@ -17,13 +17,10 @@ vi.mock("@/lib/auth", () => ({
 
 const mockFindActiveAgentRunnerKeyByBearer = vi.fn()
 const mockGetUserInternal = vi.fn()
-const mockGetUserByNameAndDiscriminator = vi.fn()
 const mockGetBotBinding = vi.fn()
-const mockResolveServerByNameForMember = vi.fn()
-const mockResolveChannelByNameForMember = vi.fn()
+const mockGetChannel = vi.fn()
 const mockGetChannelForMember = vi.fn()
 const mockGetDM = vi.fn()
-const mockGetDMBetween = vi.fn()
 const mockGetDMPeer = vi.fn()
 const mockIsBlocked = vi.fn()
 const mockGetMessageByChannelAndSeq = vi.fn()
@@ -45,18 +42,15 @@ vi.mock("@alook/shared", async () => {
       communityMachine: { findActiveAgentRunnerKeyByBearer: (...a: unknown[]) => mockFindActiveAgentRunnerKeyByBearer(...a) },
       user: {
         getUserInternal: (...a: unknown[]) => mockGetUserInternal(...a),
-        getUserByNameAndDiscriminator: (...a: unknown[]) => mockGetUserByNameAndDiscriminator(...a),
       },
       communityBot: { getBotBinding: (...a: unknown[]) => mockGetBotBinding(...a) },
       communityFriendship: { isBlocked: (...a: unknown[]) => mockIsBlocked(...a) },
-      communityServer: { resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a) },
       communityChannel: {
-        resolveChannelByNameForMember: (...a: unknown[]) => mockResolveChannelByNameForMember(...a),
+        getChannel: (...a: unknown[]) => mockGetChannel(...a),
         getChannelForMember: (...a: unknown[]) => mockGetChannelForMember(...a),
       },
       communityDm: {
         getDM: (...a: unknown[]) => mockGetDM(...a),
-        getDMBetween: (...a: unknown[]) => mockGetDMBetween(...a),
         getDMPeer: (...a: unknown[]) => mockGetDMPeer(...a),
       },
       communityMessage: {
@@ -87,75 +81,79 @@ describe("POST /api/community/agent/reactAdd", () => {
     mockFindActiveAgentRunnerKeyByBearer.mockResolvedValue({ userId: "owner_1", machineId: "m_1", agentId: "bot_1" })
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
+    // id-addressing defaults: getChannel discriminates dm/channel; getChannelForMember
+    // is the membership + surface-type gate for the channel branch.
+    mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
   })
 
   it("401 without Authorization", async () => {
-    const res = await POST(req({ channel: "/studio/general", seq: 1, emoji: "👍" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 1, emoji: "👍" }))
     expect(res.status).toBe(401)
   })
 
   it("400 on invalid payload (missing emoji)", async () => {
-    const res = await POST(req({ channel: "/studio/general", seq: 1 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 1 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
   })
 
   it("400 rejects seq 0 (positive-seq schema)", async () => {
-    const res = await POST(req({ channel: "/studio/general", seq: 0, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 0, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
   })
 
   it("400 rejects oversize emoji", async () => {
     const bigEmoji = "🎉".repeat(20)
-    const res = await POST(req({ channel: "/studio/general", seq: 1, emoji: bigEmoji }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 1, emoji: bigEmoji }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
     expect(mockAddReaction).not.toHaveBeenCalled()
   })
 
-  it("404 propagates unresolvable ref", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([])
+  it("400 loud-rejects a bare name-path (addressing is id-only)", async () => {
     const res = await POST(req({ channel: "/studio/general", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBeTruthy()
+    expect(body.hint).toBeTruthy()
+    expect(mockAddReaction).not.toHaveBeenCalled()
+    expect(mockFanOutToChannel).not.toHaveBeenCalled()
+  })
+
+  it("404 propagates an unresolvable channelId", async () => {
+    mockGetChannel.mockResolvedValue(undefined)
+    const res = await POST(req({ channelId: "ch_missing", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(404)
     expect(mockAddReaction).not.toHaveBeenCalled()
     expect(mockFanOutToChannel).not.toHaveBeenCalled()
   })
 
   it("403 when the bot is not a channel member", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
     mockGetChannelForMember.mockResolvedValue(null)
-    const res = await POST(req({ channel: "/studio/general", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(403)
     expect(mockAddReaction).not.toHaveBeenCalled()
     expect(mockFanOutToChannel).not.toHaveBeenCalled()
   })
 
   it("404 when the channel exists but has no message at that seq", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     mockGetMessageByChannelAndSeq.mockResolvedValue(null)
-    const res = await POST(req({ channel: "/studio/general", seq: 99, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 99, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(404)
     expect(mockAddReaction).not.toHaveBeenCalled()
   })
 
   it("400 when reacting on a forum top-level (not a message-bearing surface)", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
     mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "forum", parentChannelId: null })
-    const res = await POST(req({ channel: "/studio/chore", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
     expect(mockAddReaction).not.toHaveBeenCalled()
   })
 
   it("200 happy path — channel react: inserts, fans out to channel with REACTION_ADD, excluding the bot", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "m_1", seq: 3, content: "hi" })
     mockAddReaction.mockResolvedValue({ messageId: "m_1", userId: "bot_1", emoji: "👍" })
 
-    const res = await POST(req({ channel: "/studio/general", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({ ok: true })
@@ -175,18 +173,14 @@ describe("POST /api/community/agent/reactAdd", () => {
   })
 
   it("200 happy path — DM react: fans out via fanOutToDM with channelId", async () => {
-    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-    mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
-      Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null }),
-    )
-    mockGetDMBetween.mockResolvedValue({ id: "dm_1" })
+    mockGetChannel.mockResolvedValue({ id: "dm_1", type: "dm" })
     mockGetDM.mockResolvedValue({ id: "dm_1", lastMessageAt: null, createdAt: "t" })
     mockGetDMPeer.mockResolvedValue({ otherUserId: "peer_1" })
     mockIsBlocked.mockResolvedValue(false)
     mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "m_dm_1", seq: 2, content: "hey" })
     mockAddReaction.mockResolvedValue({ messageId: "m_dm_1", userId: "bot_1", emoji: "🙏" })
 
-    const res = await POST(req({ channel: "/.dm/peer#0001", seq: 2, emoji: "🙏" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "dm_1", seq: 2, emoji: "🙏" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     expect(mockFanOutToDM).toHaveBeenCalledTimes(1)
     const [dmId, event, opts] = mockFanOutToDM.mock.calls[0]
@@ -203,14 +197,11 @@ describe("POST /api/community/agent/reactAdd", () => {
   })
 
   it("duplicate — addReaction throws unique-constraint → {ok:true, duplicate:true}, no fan-out", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "m_1", seq: 3, content: "hi" })
     // Match isUniqueConstraintError → matches SQLite UNIQUE constraint messages
     mockAddReaction.mockRejectedValue(new Error("D1_ERROR: UNIQUE constraint failed: community_reaction.message_id, community_reaction.user_id, community_reaction.emoji"))
 
-    const res = await POST(req({ channel: "/studio/general", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", seq: 3, emoji: "👍" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({ ok: true, duplicate: true })

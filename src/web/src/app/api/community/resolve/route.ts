@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { queries, withD1Retry, CommunityAgentResolveRequestSchema } from "@alook/shared"
 import { getDb } from "@/lib/db"
 import { withCommunityActor, requireBot } from "@/lib/middleware/community-actor"
-import { resolveTargetForMember, resolveErrorResponse } from "@/lib/community/resolve-ref"
+import { resolveTargetById, resolveErrorResponse, nameRefRetiredResponse } from "@/lib/community/resolve-ref"
 import { isDmTarget } from "@/lib/community/message-handler"
 import { requireChannelMember, requireDMAccess } from "@/lib/community/permissions"
 
@@ -43,11 +43,8 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     return NextResponse.json({ error: "seq 0 is not a real message" }, { status: 404 })
   }
 
-  const resolved = await resolveTargetForMember(db, botUserId, body.channel, {
-    createDmIfMissing: false,
-    createThreadIfMissing: false,
-    callerKind: "bot",
-  })
+  if (body.channelId === undefined) return nameRefRetiredResponse()
+  const resolved = await resolveTargetById(db, botUserId, body.channelId)
   if ("error" in resolved) return resolveErrorResponse(resolved)
 
   const scopeTarget = { channelId: resolved.channelId }
@@ -66,7 +63,8 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     { route: "resolve/message" },
   )
   if (!row) {
-    return NextResponse.json({ error: `no message with seq #${body.seq} in ${body.channel}` }, { status: 404 })
+    const where = body.channel ?? body.channelId
+    return NextResponse.json({ error: `no message with seq #${body.seq} in ${where}` }, { status: 404 })
   }
 
   // Attachments + agent-message shaping, retried as one unit (both reads).

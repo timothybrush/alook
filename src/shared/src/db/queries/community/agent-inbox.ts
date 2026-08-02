@@ -23,6 +23,7 @@ import { user } from "../../schema";
 import type { Database } from "../../index";
 import {
   formatRef,
+  formatRefToken,
   formatSeq,
   DM_SERVER,
   type AgentAttachmentRef,
@@ -177,6 +178,19 @@ async function resolveScopeRefs(
   const serverNameById = new Map(servers.map((s) => [s.id, s.name]));
   const parentSeqById = new Map(parentMessages.map((m) => [m.id, m.seq]));
 
+  // ref/id: the agent-facing `channel` ref is now the canonical body ref TOKEN
+  // `{label}(channel/<channelId>)`, NOT a bare name-path. The label stays the
+  // readable full path (`formatRef(...)` — for copy/log/cross-client self-
+  // description), but the authoritative, rename-proof segment is the channel's
+  // OWN id (`ch.id`) — every scope here (DM channel / thread channel / forum_post
+  // child / top-level channel) is a real `community_channel` row with an id, so
+  // every selector collapses to a `channel`-type token on that id (ref/id
+  // addressing-id-ification, option (b)). The agent reuses this token verbatim
+  // as `--target`; the server resolves it by id (`resolveTargetById`), so a
+  // rename between mint and use can't break it.
+  const channelToken = (label: string, id: string): string =>
+    formatRefToken({ label, type: "channel", id });
+
   const out = new Map<string, ScopeInfo>();
   for (const ch of channels) {
     if (ch.type === "dm") {
@@ -184,7 +198,7 @@ async function resolveScopeRefs(
       const peer = peerId ? dmPeerById.get(peerId) : undefined;
       const peerSegment = peer ? formatHandle(peer.name, peer.discriminator) : peerId || "unknown";
       out.set(ch.id, {
-        ref: formatRef({ server: DM_SERVER, channel: peerSegment }),
+        ref: channelToken(formatRef({ server: DM_SERVER, channel: peerSegment }), ch.id),
         isThread: false,
         isDm: true,
       });
@@ -196,7 +210,10 @@ async function resolveScopeRefs(
       const rootSeq = parentSeqById.get(ch.parentMessageId);
       if (parent && rootSeq !== undefined) {
         out.set(ch.id, {
-          ref: formatRef({ server: serverName, channel: parent.name, threadRootSeq: rootSeq }),
+          ref: channelToken(
+            formatRef({ server: serverName, channel: parent.name, threadRootSeq: rootSeq }),
+            ch.id,
+          ),
           isThread: true,
           isDm: false,
         });
@@ -204,22 +221,28 @@ async function resolveScopeRefs(
       }
     }
     // Forum post: a `forum_post` child channel has a parent forum but NO
-    // parentMessageId (unlike a thread), so it's anchored by its own name under
-    // the forum: `/server/<forum>/<post>`. Without this it fell through to the
-    // top-level fallback below (`/server/<post-name>`), which the name resolver
-    // — top-level only — can never parse back, 404ing send/read/ack on the post.
+    // parentMessageId (unlike a thread), so its readable label is anchored by
+    // its own name under the forum: `/server/<forum>/<post>`. The token id is
+    // the post's own channel id (`ch.id`) — the label is just the readable half.
     if (ch.type === "forum_post" && ch.parentChannelId) {
       const parent = parentChannelById.get(ch.parentChannelId);
       if (parent) {
         out.set(ch.id, {
-          ref: formatRef({ server: serverName, channel: parent.name, childChannelName: ch.name }),
+          ref: channelToken(
+            formatRef({ server: serverName, channel: parent.name, childChannelName: ch.name }),
+            ch.id,
+          ),
           isThread: false,
           isDm: false,
         });
         continue;
       }
     }
-    out.set(ch.id, { ref: formatRef({ server: serverName, channel: ch.name }), isThread: false, isDm: false });
+    out.set(ch.id, {
+      ref: channelToken(formatRef({ server: serverName, channel: ch.name }), ch.id),
+      isThread: false,
+      isDm: false,
+    });
   }
   return out;
 }
@@ -279,6 +302,7 @@ export async function toAgentMessages(
       channelId: r.channelId,
       messageId: r.id,
       sender: `@${sender}`,
+      senderId: r.authorId,
       content,
       time: r.createdAt,
     };
@@ -381,7 +405,11 @@ export async function resolveUnreadNoticeChannel(
     // function's doc comment) — a peer that no longer resolves is
     // `notice_channel_unresolvable`, not a bare-peerId ref.
     if (!peer) return null;
-    return formatRef({ server: DM_SERVER, channel: formatHandle(peer.name, peer.discriminator) });
+    return formatRefToken({
+      label: formatRef({ server: DM_SERVER, channel: formatHandle(peer.name, peer.discriminator) }),
+      type: "channel",
+      id: ch.id,
+    });
   }
 
   if (ch.parentChannelId && ch.parentMessageId) {
@@ -402,7 +430,11 @@ export async function resolveUnreadNoticeChannel(
     if (!parent || !root || !parent.serverId) return null;
     const serverName = await getServerName(db, parent.serverId);
     if (!serverName) return null;
-    return formatRef({ server: serverName, channel: parent.name, threadRootSeq: root.seq });
+    return formatRefToken({
+      label: formatRef({ server: serverName, channel: parent.name, threadRootSeq: root.seq }),
+      type: "channel",
+      id: ch.id,
+    });
   }
 
   // Forum post: parent forum but no parentMessageId — anchor by the post's own
@@ -419,13 +451,21 @@ export async function resolveUnreadNoticeChannel(
     if (!parent || !parent.serverId) return null;
     const serverName = await getServerName(db, parent.serverId);
     if (!serverName) return null;
-    return formatRef({ server: serverName, channel: parent.name, childChannelName: ch.name });
+    return formatRefToken({
+      label: formatRef({ server: serverName, channel: parent.name, childChannelName: ch.name }),
+      type: "channel",
+      id: ch.id,
+    });
   }
 
   if (!ch.serverId) return null;
   const serverName = await getServerName(db, ch.serverId);
   if (!serverName) return null;
-  return formatRef({ server: serverName, channel: ch.name });
+  return formatRefToken({
+    label: formatRef({ server: serverName, channel: ch.name }),
+    type: "channel",
+    id: ch.id,
+  });
 }
 
 async function getServerName(db: Database, serverId: string): Promise<string | null> {

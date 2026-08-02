@@ -9,6 +9,7 @@ const mockGetDMBetween = vi.fn()
 const mockResolveServerByNameForMember = vi.fn()
 const mockResolveChannelByNameForMember = vi.fn()
 const mockGetMessageByChannelAndSeq = vi.fn()
+const mockGetMessage = vi.fn()
 const mockGetThreadChannelByParentMessage = vi.fn()
 const mockCreateThreadChannel = vi.fn()
 const mockGetChildChannelByName = vi.fn()
@@ -51,246 +52,15 @@ vi.mock("@alook/shared", async () => {
       },
       communityMessage: {
         getMessageByChannelAndSeq: (...a: unknown[]) => mockGetMessageByChannelAndSeq(...a),
+        getMessage: (...a: unknown[]) => mockGetMessage(...a),
       },
     },
   }
 })
 
-import { resolveTargetForMember, resolveTargetById, resolveErrorResponse } from "./resolve-ref"
+import { resolveTargetByCreate, resolveTargetById, resolveErrorResponse } from "./resolve-ref"
 
 const db = {} as never
-
-describe("resolveTargetForMember", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it("400 malformed channel ref for a ref not starting with /", async () => {
-    const res = await resolveTargetForMember(db, "u_1", "not-a-ref")
-    expect(res).toEqual({ error: 400, message: "malformed channel ref" })
-  })
-
-  it("400 rejects a ref carrying a pinned #N message seq", async () => {
-    const res = await resolveTargetForMember(db, "u_1", "/studio/general#5")
-    expect(res).toMatchObject({ error: 400 })
-    expect((res as { message: string }).message).toMatch(/must not pin/)
-  })
-
-  describe("DM refs (/.dm/<peer#0042>)", () => {
-    it("404 DM threads are not supported", async () => {
-      const res = await resolveTargetForMember(db, "u_1", "/.dm/peer#0001/#3")
-      expect(res).toEqual({ error: 404, message: "DM threads are not supported" })
-    })
-
-    it("400 invalid DM handle when the segment has no #0042 tag", async () => {
-      const res = await resolveTargetForMember(db, "u_1", "/.dm/peer_1")
-      expect(res).toEqual({ error: 400, message: "invalid DM handle, expected name#0042" })
-      expect(mockGetUserByNameAndDiscriminator).not.toHaveBeenCalled()
-    })
-
-    it("404 user not found when peer is missing or soft-deleted", async () => {
-      mockGetUserByNameAndDiscriminator.mockResolvedValue(null)
-      const res = await resolveTargetForMember(db, "u_1", "/.dm/peer#0001")
-      expect(res).toEqual({ error: 404, message: "user not found" })
-      expect(mockGetUserByNameAndDiscriminator).toHaveBeenCalledWith(db, "peer", "0001")
-    })
-
-    it("without createDmIfMissing: 404 dm not found when no existing DM row", async () => {
-      mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-      mockGetDMBetween.mockResolvedValue(null)
-      const res = await resolveTargetForMember(db, "u_1", "/.dm/peer#0001")
-      expect(res).toEqual({ error: 404, message: "dm not found" })
-      expect(mockCreateOrGetDM).not.toHaveBeenCalled()
-    })
-
-    it("without createDmIfMissing: resolves an existing DM without calling guardDmOpen", async () => {
-      mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-      mockGetDMBetween.mockResolvedValue({ id: "dm_1" })
-      const res = await resolveTargetForMember(db, "u_1", "/.dm/peer#0001")
-      expect(res).toEqual({ kind: "dm", channelId: "dm_1", otherUserId: "peer_1" })
-      expect(mockIsBlocked).not.toHaveBeenCalled()
-    })
-
-    it("with createDmIfMissing: blocked by guardDmOpen surfaces the guard's status/error", async () => {
-      mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-      mockGetUserInternal.mockResolvedValue({ id: "peer_1", deletedAt: null })
-      mockIsBlocked.mockResolvedValue(true)
-      const res = await resolveTargetForMember(db, "u_1", "/.dm/peer#0001", { createDmIfMissing: true })
-      expect(res).toEqual({ error: 403, message: "blocked" })
-      expect(mockCreateOrGetDM).not.toHaveBeenCalled()
-    })
-
-    it("with createDmIfMissing: creates/gets the DM when guard passes", async () => {
-      mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-      mockGetUserInternal.mockResolvedValue({ id: "peer_1", deletedAt: null })
-      mockIsBlocked.mockResolvedValue(false)
-      mockCreateOrGetDM.mockResolvedValue({ id: "dm_new" })
-      const res = await resolveTargetForMember(db, "u_1", "/.dm/peer#0001", { createDmIfMissing: true })
-      expect(res).toEqual({ kind: "dm", channelId: "dm_new", otherUserId: "peer_1" })
-      expect(mockCreateOrGetDM).toHaveBeenCalledWith(db, { userId1: "u_1", userId2: "peer_1" })
-    })
-  })
-
-  describe("channel refs (/server/channel)", () => {
-    it("404 server not found", async () => {
-      mockResolveServerByNameForMember.mockResolvedValue([])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general")
-      expect(res).toEqual({ error: 404, message: "server not found: studio" })
-    })
-
-    it("400 ambiguous server name returns hint list", async () => {
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }, { id: "srv_2" }])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general")
-      expect(res).toEqual({
-        error: 400,
-        message: "ambiguous server name",
-        hint: [
-          { id: "srv_1", path: "/srv_1/general" },
-          { id: "srv_2", path: "/srv_2/general" },
-        ],
-      })
-    })
-
-    it("404 channel not found", async () => {
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-      mockResolveChannelByNameForMember.mockResolvedValue([])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general")
-      expect(res).toEqual({ error: 404, message: "channel not found: general" })
-    })
-
-    it("resolves a plain channel ref to { kind: channel, channelId }", async () => {
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-      mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general")
-      expect(res).toEqual({ kind: "channel", channelId: "ch_1" })
-    })
-
-    it("resolves to the top-level channel when a thread under it shares the same name", async () => {
-      // DB partial-unique guarantees the resolver returns at most one row for
-      // a name lookup — the top-level channel. Same-named thread stays
-      // unreachable via the name path.
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-      mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_top" }])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general")
-      expect(res).toEqual({ kind: "channel", channelId: "ch_top" })
-      expect(mockResolveChannelByNameForMember).toHaveBeenCalledWith(db, "srv_1", "u_1", "general")
-    })
-
-    it("404 channel not found when caller passes a raw top-level channel id (id refs rejected)", async () => {
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-      // Name-only resolver returns [] when the segment is an id — the DB
-      // lookup misses because the row's `name` column doesn't match the id.
-      mockResolveChannelByNameForMember.mockResolvedValue([])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/mFUplbfFL7PIzeiaP3Ysg")
-      expect(res).toEqual({ error: 404, message: "channel not found: mFUplbfFL7PIzeiaP3Ysg" })
-    })
-
-    it("404 channel not found when caller passes a raw thread id (id refs rejected)", async () => {
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-      mockResolveChannelByNameForMember.mockResolvedValue([])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/WyHlYFioUV_V9oRZXlSir")
-      expect(res).toEqual({ error: 404, message: "channel not found: WyHlYFioUV_V9oRZXlSir" })
-    })
-  })
-
-  describe("thread refs (/server/channel/#N)", () => {
-    beforeEach(() => {
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-      mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    })
-
-    it("404 when the root message (seq #N) doesn't exist", async () => {
-      mockGetMessageByChannelAndSeq.mockResolvedValue(null)
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general/#7")
-      expect(res).toEqual({ error: 404, message: "no message with seq #7 in this channel" })
-    })
-
-    it("resolves to the existing thread channel when one already exists", async () => {
-      mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "msg_1" })
-      mockGetThreadChannelByParentMessage.mockResolvedValue({ id: "thread_1" })
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general/#7")
-      expect(res).toEqual({ kind: "channel", channelId: "thread_1" })
-      expect(mockCreateThreadChannel).not.toHaveBeenCalled()
-    })
-
-    it("404 thread not found when missing and createThreadIfMissing is false", async () => {
-      mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "msg_1" })
-      mockGetThreadChannelByParentMessage.mockResolvedValue(null)
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general/#7")
-      expect(res).toEqual({ error: 404, message: "thread not found" })
-    })
-
-    it("creates the thread channel when missing and createThreadIfMissing is true", async () => {
-      mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "msg_1" })
-      mockGetThreadChannelByParentMessage.mockResolvedValue(null)
-      mockCreateThreadChannel.mockResolvedValue({ id: "thread_new" })
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general/#7", { createThreadIfMissing: true })
-      expect(res).toEqual({ kind: "channel", channelId: "thread_new" })
-      expect(mockCreateThreadChannel).toHaveBeenCalledWith(db, "ch_1", "msg_1", "u_1")
-    })
-
-    it("on a lost create race (unique constraint), re-selects the winning thread", async () => {
-      mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "msg_1" })
-      mockGetThreadChannelByParentMessage
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ id: "thread_winner" })
-      mockCreateThreadChannel.mockRejectedValue(new Error("unique constraint failed"))
-      mockIsUniqueConstraintError.mockReturnValue(true)
-      const res = await resolveTargetForMember(db, "u_1", "/studio/general/#7", { createThreadIfMissing: true })
-      expect(res).toEqual({ kind: "channel", channelId: "thread_winner" })
-    })
-
-    it("rethrows non-unique-constraint errors from createThreadChannel", async () => {
-      mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "msg_1" })
-      mockGetThreadChannelByParentMessage.mockResolvedValue(null)
-      mockCreateThreadChannel.mockRejectedValue(new Error("boom"))
-      mockIsUniqueConstraintError.mockReturnValue(false)
-      await expect(
-        resolveTargetForMember(db, "u_1", "/studio/general/#7", { createThreadIfMissing: true })
-      ).rejects.toThrow("boom")
-    })
-  })
-
-  describe("forum-post refs (/server/forum/post)", () => {
-    beforeEach(() => {
-      mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-      // The parent forum resolves as a top-level channel.
-      mockResolveChannelByNameForMember.mockResolvedValue([{ id: "forum_1", name: "ideas" }])
-    })
-
-    it("resolves a forum post by name under its forum", async () => {
-      mockGetChildChannelByName.mockResolvedValue([{ id: "post_1", name: "my-post" }])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/ideas/my-post")
-      expect(res).toEqual({ kind: "channel", channelId: "post_1" })
-      expect(mockGetChildChannelByName).toHaveBeenCalledWith(db, "forum_1", "my-post")
-    })
-
-    it("404 when no post with that name exists under the forum", async () => {
-      mockGetChildChannelByName.mockResolvedValue([])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/ideas/ghost")
-      expect(res).toEqual({ error: 404, message: "post not found: ghost" })
-    })
-
-    it("400 ambiguous (never silently picks) when >1 post shares the name", async () => {
-      mockGetChildChannelByName.mockResolvedValue([
-        { id: "post_1", name: "dupe" },
-        { id: "post_2", name: "dupe" },
-      ])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/ideas/dupe")
-      expect(res).toMatchObject({ error: 400 })
-      expect((res as { message: string }).message).toMatch(/ambiguous post name "dupe"/)
-      // Critically: no channelId is returned — the caller cannot mis-route.
-      expect(res).not.toHaveProperty("channelId")
-    })
-
-    it("404 when the parent forum itself doesn't resolve", async () => {
-      mockResolveChannelByNameForMember.mockResolvedValue([])
-      const res = await resolveTargetForMember(db, "u_1", "/studio/ideas/my-post")
-      expect(res).toEqual({ error: 404, message: "channel not found: ideas" })
-      expect(mockGetChildChannelByName).not.toHaveBeenCalled()
-    })
-  })
-})
 
 describe("resolveTargetById (id-first path, ref/id PR-2)", () => {
   beforeEach(() => {
@@ -303,17 +73,11 @@ describe("resolveTargetById (id-first path, ref/id PR-2)", () => {
     expect(res).toEqual({ error: 404, message: "channel not found: ch_missing" })
   })
 
-  it("resolves a channel id (member) to the SAME shape the ref path returns", async () => {
-    // ref path: resolveTargetForMember(/studio/general) → {kind:channel, channelId:ch_1}
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    const viaRef = await resolveTargetForMember(db, "u_1", "/studio/general")
-    // id path: same channelId → member gate passes → same result.
+  it("resolves a channel id (member) to { kind: channel, channelId }", async () => {
     mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
     mockGetChannelForMember.mockResolvedValue({ id: "ch_1", type: "text", serverId: "srv_1" })
     const viaId = await resolveTargetById(db, "u_1", "ch_1")
     expect(viaId).toEqual({ kind: "channel", channelId: "ch_1" })
-    expect(viaId).toEqual(viaRef) // both entries → same scope, same result
   })
 
   it("403 when a NON-member passes a channel id directly (no authz bypass)", async () => {
@@ -349,6 +113,77 @@ describe("resolveTargetById (id-first path, ref/id PR-2)", () => {
     mockIsBlocked.mockResolvedValue(true)
     const res = await resolveTargetById(db, "u_1", "dm_1")
     expect(res).toEqual({ error: 403, message: "blocked" })
+  })
+})
+
+describe("resolveTargetByCreate (open-or-create by identity, ref/id addressing-id-ification)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockIsUniqueConstraintError.mockReturnValue(false)
+  })
+
+  it("--dm-user: opens (or creates) a DM with a peer, gated → { kind: dm, otherUserId }", async () => {
+    mockGetUserInternal.mockResolvedValue({ id: "peer_1", deletedAt: null, isBot: false })
+    mockIsBlocked.mockResolvedValue(false)
+    mockCreateOrGetDM.mockResolvedValue({ id: "dm_1" })
+    const res = await resolveTargetByCreate(db, "u_1", { dmWithUserId: "peer_1", callerKind: "bot" })
+    expect(res).toEqual({ kind: "dm", channelId: "dm_1", otherUserId: "peer_1" })
+    expect(mockCreateOrGetDM).toHaveBeenCalledWith(db, { userId1: "u_1", userId2: "peer_1" })
+  })
+
+  it("--dm-user with self → 400, never touches the DB", async () => {
+    const res = await resolveTargetByCreate(db, "u_1", { dmWithUserId: "u_1", callerKind: "bot" })
+    expect(res).toEqual({ error: 400, message: "can't open a DM with yourself" })
+    expect(mockCreateOrGetDM).not.toHaveBeenCalled()
+  })
+
+  it("--dm-user blocked by the DM guard (bot not friends with a bot peer) → 403, no create", async () => {
+    mockGetUserInternal.mockResolvedValue({ id: "peer_1", deletedAt: null, isBot: true, ownerUserId: "someone_else" })
+    mockAreFriends.mockResolvedValue(false) // bot not friends → guard 403
+    const res = await resolveTargetByCreate(db, "u_1", { dmWithUserId: "peer_1", callerKind: "bot" })
+    expect(res).toEqual({ error: 403, message: "not friends with this bot" })
+    expect(mockCreateOrGetDM).not.toHaveBeenCalled()
+  })
+
+  it("--thread-on: opens an existing thread on a message the caller can post to", async () => {
+    mockGetMessage.mockResolvedValue({ id: "m_root", channelId: "ch_parent" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_parent", type: "text", parentChannelId: null })
+    mockGetThreadChannelByParentMessage.mockResolvedValue({ id: "thread_1" })
+    const res = await resolveTargetByCreate(db, "u_1", { threadOnMessageId: "m_root", callerKind: "bot" })
+    expect(res).toEqual({ kind: "channel", channelId: "thread_1" })
+    expect(mockCreateThreadChannel).not.toHaveBeenCalled()
+  })
+
+  it("--thread-on: creates the thread when none exists yet", async () => {
+    mockGetMessage.mockResolvedValue({ id: "m_root", channelId: "ch_parent" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_parent", type: "text", parentChannelId: null })
+    mockGetThreadChannelByParentMessage.mockResolvedValue(undefined)
+    mockCreateThreadChannel.mockResolvedValue({ id: "thread_new" })
+    const res = await resolveTargetByCreate(db, "u_1", { threadOnMessageId: "m_root", callerKind: "bot" })
+    expect(res).toEqual({ kind: "channel", channelId: "thread_new" })
+    expect(mockCreateThreadChannel).toHaveBeenCalledWith(db, "ch_parent", "m_root", "u_1")
+  })
+
+  it("--thread-on a missing message → 404", async () => {
+    mockGetMessage.mockResolvedValue(null)
+    const res = await resolveTargetByCreate(db, "u_1", { threadOnMessageId: "m_gone", callerKind: "bot" })
+    expect(res).toEqual({ error: 404, message: "message not found: m_gone" })
+  })
+
+  it("--thread-on when the caller can't post to the root's channel → 403, no create", async () => {
+    mockGetMessage.mockResolvedValue({ id: "m_root", channelId: "ch_parent" })
+    mockGetChannelForMember.mockResolvedValue(undefined) // non-member
+    const res = await resolveTargetByCreate(db, "outsider", { threadOnMessageId: "m_root", callerKind: "bot" })
+    expect(res).toEqual({ error: 403, message: "forbidden" })
+    expect(mockCreateThreadChannel).not.toHaveBeenCalled()
+  })
+
+  it("--thread-on a message inside a thread/forum-post → 400 (no nested threads)", async () => {
+    mockGetMessage.mockResolvedValue({ id: "m_root", channelId: "thread_x" })
+    mockGetChannelForMember.mockResolvedValue({ id: "thread_x", type: "thread", parentChannelId: "ch_parent" })
+    const res = await resolveTargetByCreate(db, "u_1", { threadOnMessageId: "m_root", callerKind: "bot" })
+    expect(res).toEqual({ error: 400, message: "can't start a thread inside a thread or forum post" })
+    expect(mockCreateThreadChannel).not.toHaveBeenCalled()
   })
 })
 

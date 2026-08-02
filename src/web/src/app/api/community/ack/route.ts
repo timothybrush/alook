@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { queries, withD1Retry, CommunityAgentAckRequestSchema } from "@alook/shared"
 import { getDb } from "@/lib/db"
 import { withCommunityActor, requireBot } from "@/lib/middleware/community-actor"
-import { resolveTargetForMember, resolveTargetById } from "@/lib/community/resolve-ref"
+import { resolveTargetById } from "@/lib/community/resolve-ref"
 import { isDmTarget } from "@/lib/community/message-handler"
 import { requireChannelMember, requireDMAccess } from "@/lib/community/permissions"
 
@@ -50,13 +50,20 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     // Label the cursor in applied/failed by whichever locator it was addressed
     // with — the ref if given, else the channelId (id-first path).
     const label = cursor.channel ?? cursor.channelId!
-    const resolved = cursor.channelId !== undefined
-      ? await resolveTargetById(db, botUserId, cursor.channelId)
-      : await resolveTargetForMember(db, botUserId, cursor.channel!, {
-          createDmIfMissing: false,
-          createThreadIfMissing: false,
-          callerKind: "bot",
-        })
+    // Name-path addressing is retired: a cursor must carry `channelId` (the CLI
+    // keys ack cursors on the raw id). A legacy name-only cursor fails THIS
+    // cursor (not the whole batch — ack is per-cursor best-effort) with a clear
+    // code, so a stale name-path can't silently no-op the waterline.
+    if (cursor.channelId === undefined) {
+      failed.push({
+        channel: label,
+        seq: cursor.seq,
+        code: "unresolvable",
+        error: "name-path cursor is no longer supported — ack by channelId (re-pull to get fresh cursors)",
+      })
+      continue
+    }
+    const resolved = await resolveTargetById(db, botUserId, cursor.channelId)
     if ("error" in resolved) {
       failed.push({ channel: label, seq: cursor.seq, code: "unresolvable", error: resolved.message })
       continue

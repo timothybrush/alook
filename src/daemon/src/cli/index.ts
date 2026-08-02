@@ -19,7 +19,7 @@ import { realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import type { ServerApi, Cursor, Message, RefTokenType } from "../server/contract.js";
-import { parseRef, parseRefToken } from "../server/contract.js";
+import { parseRef, parseRefToken, formatRefToken } from "../server/contract.js";
 import { proxyServerApiFromEnv } from "./proxyServerApi.js";
 import { daemonStart, daemonStop, daemonList } from "./daemonStart.js";
 import { parseInviteToken } from "@alook/shared/lib/invite-link";
@@ -84,16 +84,20 @@ function agentId(opts: Record<string, unknown>): string {
   return id;
 }
 
-// A `--target` value is EITHER an addressing path (`/server/channel`, `/.dm/peer`)
-// OR a `{}()` ref token (ref/id 乙). `resolveTarget` discriminates the two:
-//  - A whole-string channel-class token → `{ channelId }` (send by id, PR-2 fast
-//    path). CLI does the COARSE type-filter here: message/server tokens are
-//    rejected with a hint (they can't be a send/upload destination). This is a
-//    check on the TOKEN TYPE (`(type/id)`), a plain string — distinct from the
-//    endpoint's check on the resolved channel's REAL StoredChannelType
-//    (message-bearing surface, `isMessageBearingSurface`); the two layers judge
-//    different things and don't overlap (Blondie #268).
-//  - Anything else → `{ ref }` (bare path, resolved server-side as before).
+// A `--target` value is normally a `{}()` ref token (addressing is id-based).
+// `resolveTarget` discriminates:
+//  - A whole-string channel-class token → `{ channelId }` (send by id). CLI does
+//    the COARSE type-filter here: message/server tokens are rejected with a hint
+//    (they can't be a send/upload destination). This is a check on the TOKEN
+//    TYPE (`(type/id)`), a plain string — distinct from the endpoint's check on
+//    the resolved channel's REAL StoredChannelType (message-bearing surface,
+//    `isMessageBearingSurface`); the two layers judge different things and don't
+//    overlap (Blondie #268).
+//  - Anything else → `{ ref }` (a bare name-path). Name-path addressing is
+//    RETIRED: this is no longer resolved — the server loud-rejects it (400 +
+//    hint to reuse a received ref). Passing it through (rather than failing in
+//    the CLI) lets the agent get that authoritative server-side hint in one
+//    trip. To open a DM/thread that has no ref yet, use `--dm-user`/`--thread-on`.
 //
 // Shell-residue guard: `{`/`}`/`(` are zsh metacharacters (brace expansion,
 // subshell), so an UNQUOTED token arrives here mangled. A token always starts
@@ -109,7 +113,7 @@ type ResolvedTarget = { channelId: string } | { ref: string };
 
 const REF_TOKEN_TARGET_HINT: Record<Exclude<RefTokenType, "channel">, string> = {
   server:
-    "a server ref token can't be a send target — specify a channel (a channel token or a /server/channel path)",
+    "a server ref token can't be a send target — specify a channel ref (a channel token you received)",
 };
 
 function resolveTarget(raw: string, flag: string): ResolvedTarget {
@@ -256,11 +260,28 @@ async function sendWithRetry(
 async function cmdMessageSend(opts: Record<string, unknown>): Promise<unknown> {
   const api = getApi();
   const agent = agentId(opts);
-  const targetRaw = opts.target as string;
-  if (!targetRaw) throw new CliError("message send: --target <ref> is required (e.g. /demo-workspace/general)");
-  // `--target` is a path OR a `{}()` channel ref token; a token resolves to a
-  // channelId (send by id), a path stays a ref (resolved server-side).
-  const target = resolveTarget(targetRaw, "message send: --target");
+  const targetRaw = opts.target as string | undefined;
+  const dmUser = opts.dmUser as string | undefined;
+  const threadOn = opts.threadOn as string | undefined;
+
+  // Destination is EITHER an address (`--target` ref) OR a creation verb
+  // (`--dm-user <senderId>` / `--thread-on <messageId>` — open-or-create a
+  // relationship channel by identity). Exactly one.
+  const destModes = [targetRaw, dmUser, threadOn].filter((v) => v !== undefined && v !== "");
+  if (destModes.length === 0) {
+    throw new CliError(
+      "message send: a destination is required — a ref via --target, " +
+        "or a creation verb (--dm-user <senderId> to open a DM, --thread-on <messageId> to open a thread)",
+    );
+  }
+  if (destModes.length > 1) {
+    throw new CliError(
+      "message send: --target, --dm-user, and --thread-on are mutually exclusive — pass exactly one",
+    );
+  }
+  // `--target` is a `{}()` channel ref token (→ channelId, send by id); a bare
+  // path is still accepted as a legacy fallback (resolved server-side).
+  const target = targetRaw ? resolveTarget(targetRaw, "message send: --target") : undefined;
 
   let text: string | undefined;
   const fileFlag = opts.file as string | undefined;
@@ -309,51 +330,97 @@ async function cmdMessageSend(opts: Record<string, unknown>): Promise<unknown> {
   // the duplicate-send bug. A brand-new invocation gets a fresh nonce, so two
   // genuinely-distinct identical sends are never collapsed.
   const nonce = randomUUID();
+  const destField = target
+    ? ("channelId" in target ? { channelId: target.channelId } : { channel: target.ref })
+    : dmUser
+      ? { createDmWithUserId: dmUser }
+      : { createThreadOnMessageId: threadOn };
   const res = await sendWithRetry(api, {
     agentId: agent,
-    ...("channelId" in target ? { channelId: target.channelId } : { channel: target.ref }),
+    ...destField,
     content: { text: text ?? "" },
     attachments: attachmentIds.length > 0 ? attachmentIds : undefined,
     replyToSeq,
     nonce,
   });
   if (res.state === "blocked") {
+    const where = targetRaw ?? dmUser ?? threadOn;
     throw new CliError(
-      `channel not aligned: ${res.unreadCount} unread message(s) in ${targetRaw} (latest #${res.latestSeq}). ` +
+      `channel not aligned: ${res.unreadCount} unread message(s) in ${where} (latest #${res.latestSeq}). ` +
         `Run \`alook inbox pull\` to align, then resend.`,
     );
   }
   // `deduped` (a same-nonce retry matched the already-committed message) is a
   // SUCCESS — the message is in the channel; surface its canonical ref exactly
-  // like a fresh send, never as an error.
-  return { sent: `${res.message.channel}${res.message.seq}` };
+  // like a fresh send, never as an error. `message.channel` is the channel's
+  // canonical id-ref token `{label}(channel/id)`; the sent message's own ref
+  // pins its seq in the token LABEL (§3.4b: message = channel token + #seq in
+  // label, `()` stays the channelId). For a creation verb this is exactly how
+  // the agent learns the new DM/thread's canonical ref to reuse.
+  return { sent: messageRefFromChannelToken(res.message.channel, res.message.seq) };
+}
+
+// Build a message's canonical ref from its channel's id-ref token + seq: inject
+// `#<seq>` into the token's label, keeping `(channel/<id>)` intact (§3.4b — a
+// message is a channel token whose label carries the seq, not a separate type).
+// Falls back to appending if `channel` isn't a parseable token (defensive — the
+// send response always carries a token now).
+function messageRefFromChannelToken(channel: string, seq: string): string {
+  const token = parseRefToken(channel);
+  if (!token) return `${channel}${seq}`;
+  return formatRefToken({ ...token, label: `${token.label}${seq}` });
 }
 
 async function cmdMessageEmoji(opts: Record<string, unknown>): Promise<unknown> {
   const api = getApi();
   const target = opts.target as string;
   const emoji = opts.emoji as string;
-  if (!target) throw new CliError("message emoji: --target <ref> is required (e.g. /demo/general#42)");
+  if (!target) throw new CliError('message emoji: --target <ref> is required (a message ref you received, e.g. "{/demo/general#42}(channel/<id>)")');
   if (!emoji) throw new CliError("message emoji: --emoji <string> is required");
+  if (Buffer.byteLength(emoji, "utf8") > MAX_EMOJI_BYTES) {
+    const err = new CliError("emoji is too long");
+    (err as { hint?: string }).hint = "use a single emoji, not a phrase";
+    throw err;
+  }
 
+  // A message ref = a channel-class token whose LABEL carries the pinned `#seq`
+  // (§3.4b). Address by the token's id (`(channel/<id>)`) + the seq parsed from
+  // its label. A bare path (`/server/channel#N`) is still accepted as a legacy
+  // fallback (resolved server-side by name). Either way we send channelId (or a
+  // scope path) + the pin-seq separately.
+  const seqError = () => {
+    const err = new CliError(`message emoji needs a message ref with a seq (e.g. ${target}#42)`);
+    (err as { hint?: string }).hint =
+      'reuse a message ref you received — "{/server/channel#N}(channel/<id>)"; a bare path also works ' +
+      "(/server/channel#N, /server/channel/#N#M for a thread reply, or /.dm/peer#N)";
+    return err;
+  };
+
+  const token = parseRefToken(target);
+  if (token) {
+    if (token.type !== "channel") {
+      throw new CliError("message emoji: --target must be a channel/message ref, not a server ref");
+    }
+    // The seq rides the label (`/server/channel#42` → seq 42).
+    let labelParsed: ReturnType<typeof parseRef>;
+    try {
+      labelParsed = parseRef(token.label);
+    } catch {
+      throw seqError();
+    }
+    if (labelParsed.seq === undefined) throw seqError();
+    const res = await api.reactAdd({ channelId: token.id, seq: labelParsed.seq, emoji });
+    return { target, emoji, duplicate: res.duplicate === true };
+  }
+
+  // Legacy bare-path fallback.
   let parsed: ReturnType<typeof parseRef>;
   try {
     parsed = parseRef(target);
   } catch (err) {
     throw new CliError(`message emoji: ${(err as Error).message}`);
   }
-
-  if (parsed.seq === undefined) {
-    const err = new CliError(`message emoji needs a ref with a seq (e.g. ${target}#42)`);
-    (err as { hint?: string }).hint =
-      "pass --target /<server>/<channel>#N, /<server>/<channel>/#N#M for thread reply, or /.dm/<peer>#N";
-    throw err;
-  }
-  if (Buffer.byteLength(emoji, "utf8") > MAX_EMOJI_BYTES) {
-    const err = new CliError("emoji is too long");
-    (err as { hint?: string }).hint = "use a single emoji, not a phrase";
-    throw err;
-  }
+  if (parsed.seq === undefined) throw seqError();
 
   // Rebuild the SCOPE ref (no pin-seq — that's passed separately as `seq`).
   // A forum-post target (`/server/forum/post#N`) must keep its childChannelName
@@ -449,11 +516,16 @@ async function cmdInboxPull(opts: Record<string, unknown>): Promise<unknown> {
   let acked = 0;
   let ackError: string | undefined;
   if (opts.ack !== false && messages.length > 0) {
+    // Ack cursors key on `channelId`, NOT the `channel` ref — the ref is now a
+    // `{label}(channel/id)` token, and the ack route resolves a cursor by id
+    // directly (`resolveTargetById`). Keying on the token string would send it
+    // down the name-resolve path (retired), silently failing every ack. Using
+    // the raw id keeps the waterline advancing regardless of the ref's form.
     const latest = new Map<string, Cursor>();
     for (const m of messages) {
       const seqN = Number(m.seq.replace("#", ""));
-      const cur = latest.get(m.channel);
-      if (!cur || seqN > cur.seq) latest.set(m.channel, { channel: m.channel, seq: seqN });
+      const cur = latest.get(m.channelId);
+      if (!cur || seqN > cur.seq) latest.set(m.channelId, { channelId: m.channelId, seq: seqN });
     }
     try {
       await api.ack({ agentId: agent, cursors: [...latest.values()] });
@@ -516,20 +588,28 @@ async function cmdChannelList(opts: Record<string, unknown>): Promise<unknown> {
 async function cmdChannelMember(opts: Record<string, unknown>): Promise<unknown> {
   const api = getApi();
   const agent = agentId(opts);
-  const channel = opts.channel as string;
-  if (!channel) throw new CliError("channel member: --channel <ref> is required");
-  return await api.channelMember({ agentId: agent, channel });
+  const raw = opts.channel as string;
+  if (!raw) throw new CliError("channel member: --channel <ref> is required");
+  // A `{}()` channel ref token → address by id; a bare path stays a ref
+  // (resolved server-side as a legacy fallback).
+  const t = resolveTarget(raw, "channel member: --channel");
+  return await api.channelMember({
+    agentId: agent,
+    ...("channelId" in t ? { channelId: t.channelId } : { channel: t.ref }),
+  });
 }
 
 async function cmdChannelHistory(opts: Record<string, unknown>): Promise<unknown> {
   const api = getApi();
   const agent = agentId(opts);
-  const channel = opts.channel as string;
-  if (!channel) throw new CliError("channel history: --channel <ref> is required");
+  const raw = opts.channel as string;
+  if (!raw) throw new CliError("channel history: --channel <ref> is required");
+  // Token → address by id; bare path stays a ref (legacy server-side fallback).
+  const t = resolveTarget(raw, "channel history: --channel");
   const toSeq = (v: unknown): number | undefined => (v === undefined ? undefined : Number(v));
   const { items, hasMore, latestSeq } = await api.read({
     agentId: agent,
-    channel,
+    ...("channelId" in t ? { channelId: t.channelId } : { channel: t.ref }),
     before: toSeq(opts.before),
     after: toSeq(opts.after),
     around: toSeq(opts.around),
@@ -595,7 +675,15 @@ function buildProgram(): Command {
     .description("send a message to a channel, DM, or thread")
     .option(
       "--target <ref>",
-      'destination — a path (e.g. /demo-workspace/general) or a quoted channel ref token (e.g. "{/demo/general}(channel/<id>)")',
+      'destination — a quoted channel ref token you received (e.g. "{/demo/general}(channel/<id>)"); reuse a ref, don\'t hand-type a path',
+    )
+    .option(
+      "--dm-user <senderId>",
+      "open (or create) a DM with this user id (a senderId you received) and send into it — idempotent; the response returns the DM's ref",
+    )
+    .option(
+      "--thread-on <messageId>",
+      "open (or create) a thread on this message id (a messageId you received) and send into it — idempotent; the response returns the thread's ref",
     )
     .option("--text <text>", "inline message body (short messages)")
     .option("--file <path>", "read message body from a file (long messages)")
@@ -605,7 +693,7 @@ function buildProgram(): Command {
       (v, prev: string[] = []) => [...prev, v],
       [] as string[],
     )
-    .option("--reply <seq>", 'reply to a message by its seq in --target (e.g. "#37" or 37)')
+    .option("--reply <seq>", 'reply to a message by its seq in the destination (e.g. "#37" or 37)')
     .exitOverride()
     .configureOutput({ writeOut: () => {}, writeErr: () => {} })
     .action(async function (this: Command) {
@@ -618,7 +706,10 @@ function buildProgram(): Command {
   message
     .command("emoji")
     .description("react to a message with a single emoji")
-    .requiredOption("--target <ref>", "message ref (path-style, e.g. /demo/general#42 or /.dm/peer#7)")
+    .requiredOption(
+      "--target <ref>",
+      'a message ref you received — a channel ref whose label carries the #seq (e.g. "{/demo/general#42}(channel/<id>)")',
+    )
     .requiredOption("--emoji <string>", "single emoji character")
     .exitOverride()
     .configureOutput({ writeOut: () => {}, writeErr: () => {} })
@@ -637,7 +728,7 @@ function buildProgram(): Command {
     .description("upload a local file as a pending attachment for a future send")
     .option(
       "--target <ref>",
-      'destination — a channel/DM/thread path or a quoted channel ref token (e.g. "{/demo/general}(channel/<id>)")',
+      'destination — a quoted channel ref you received (e.g. "{/demo/general}(channel/<id>)"); reuse a ref, don\'t hand-type a path',
     )
     .option("--file <path>", "local file to upload")
     .exitOverride()
@@ -740,7 +831,7 @@ function buildProgram(): Command {
   channel
     .command("history")
     .description("fetch a page of messages from a channel, thread, or DM")
-    .option("--channel <ref>", "channel/thread/DM ref (path-style)")
+    .option("--channel <ref>", "a channel/thread/DM ref you received (reuse it — a bare path is rejected)")
     .option("--before <seq>", "messages before this seq")
     .option("--after <seq>", "messages after this seq")
     .option("--around <seq>", "messages around this seq")
@@ -757,7 +848,7 @@ function buildProgram(): Command {
   channel
     .command("member")
     .description("fetch the followed members of a channel or thread; public channels return a hint pointing at `alook server member`")
-    .option("--channel <ref>", "channel/thread ref (path-style)")
+    .option("--channel <ref>", "a channel/thread ref you received (reuse it — a bare path is rejected)")
     .exitOverride()
     .configureOutput({ writeOut: () => {}, writeErr: () => {} })
     .action(async function (this: Command) {

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { queries, nonIdempotentWriteAllowed, createLogger } from "@alook/shared"
 import { getDb } from "@/lib/db"
 import { withCommunityActor, requireBot } from "@/lib/middleware/community-actor"
-import { resolveTargetForMember, resolveTargetById, resolveErrorResponse } from "@/lib/community/resolve-ref"
+import { resolveTargetById, resolveErrorResponse, nameRefRetiredResponse } from "@/lib/community/resolve-ref"
 import { requireChannelMember, requireDMAccess } from "@/lib/community/permissions"
 import { handleAttachmentUpload } from "@/lib/community/upload"
 
@@ -41,9 +41,9 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
 
     const db = getDb(ctx.env.DB)
 
-    const resolved = channelIdParam
-      ? await resolveTargetById(db, botUserId, channelIdParam)
-      : await resolveTargetForMember(db, botUserId, target!)
+    // Name-path addressing retired — a bare `?target=` path is a loud 400.
+    if (!channelIdParam) return nameRefRetiredResponse()
+    const resolved = await resolveTargetById(db, botUserId, channelIdParam)
     if ("error" in resolved) return resolveErrorResponse(resolved)
 
     let kind: "channel" | "dm"

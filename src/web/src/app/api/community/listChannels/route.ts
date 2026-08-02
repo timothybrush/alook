@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { queries, withD1Retry, CommunityAgentListChannelsRequestSchema, formatRef } from "@alook/shared"
+import { formatRefToken } from "@/lib/community/ref-token"
 import type {
   CommunityCliChannelGroup as ChannelGroup,
   ChannelListItem,
@@ -92,7 +93,15 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
         const cat = c.categoryId ? categoryById.get(c.categoryId) : null
         const isPrivate = !!(cat && (cat.private ?? 0) === 1)
         const item: ChannelListItem = {
-          ref: formatRef({ server: server.name, channel: c.name }),
+          // The `ref` is the canonical id-ref token (addressing is id-based):
+          // label = readable path, `()` = the channel's own id — directly
+          // reusable as `--target`/`--channel`. A bare name-path would be
+          // loud-rejected on those surfaces, so `ref` must carry the id.
+          ref: formatRefToken({
+            label: formatRef({ server: server.name, channel: c.name }),
+            type: "channel",
+            id: c.id,
+          }),
           id: c.id,
           serverId: server.id,
           name: c.name,

@@ -17,21 +17,17 @@ vi.mock("@/lib/auth", () => ({
 
 const mockFindActiveAgentRunnerKeyByBearer = vi.fn()
 const mockGetUserInternal = vi.fn()
-const mockGetUserByNameAndDiscriminator = vi.fn()
 const mockGetBotBinding = vi.fn()
-const mockResolveServerByNameForMember = vi.fn()
 const mockGetServer = vi.fn()
-const mockResolveChannelByNameForMember = vi.fn()
 const mockGetChannel = vi.fn()
-const mockIsChannelPrivate = vi.fn()
+const mockGetChannelForMember = vi.fn()
 const mockResolveChannelAccessContext = vi.fn()
 const mockListThreadParticipantUserIds = vi.fn()
 const mockResolveScopeMembers = vi.fn()
 const mockGetMembersByUserIds = vi.fn()
-const mockGetDMBetween = vi.fn()
+const mockGetDM = vi.fn()
+const mockGetDMPeer = vi.fn()
 const mockIsBlocked = vi.fn()
-const mockGetMessageByChannelAndSeq = vi.fn()
-const mockGetThreadChannelByParentMessage = vi.fn()
 
 vi.mock("@alook/shared", async () => {
   const actual = await vi.importActual<typeof import("@alook/shared")>("@alook/shared")
@@ -43,21 +39,17 @@ vi.mock("@alook/shared", async () => {
       user: {
         ...actual.queries.user,
         getUserInternal: (...a: unknown[]) => mockGetUserInternal(...a),
-        getUserByNameAndDiscriminator: (...a: unknown[]) => mockGetUserByNameAndDiscriminator(...a),
       },
       communityBot: { getBotBinding: (...a: unknown[]) => mockGetBotBinding(...a) },
       communityServer: {
         ...actual.queries.communityServer,
-        resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a),
         getServer: (...a: unknown[]) => mockGetServer(...a),
       },
       communityChannel: {
         ...actual.queries.communityChannel,
-        resolveChannelByNameForMember: (...a: unknown[]) => mockResolveChannelByNameForMember(...a),
         getChannel: (...a: unknown[]) => mockGetChannel(...a),
-        isChannelPrivate: (...a: unknown[]) => mockIsChannelPrivate(...a),
+        getChannelForMember: (...a: unknown[]) => mockGetChannelForMember(...a),
         resolveChannelAccessContext: (...a: unknown[]) => mockResolveChannelAccessContext(...a),
-        getThreadChannelByParentMessage: (...a: unknown[]) => mockGetThreadChannelByParentMessage(...a),
       },
       communityThread: {
         ...actual.queries.communityThread,
@@ -71,13 +63,10 @@ vi.mock("@alook/shared", async () => {
         ...actual.queries.communityMember,
         getMembersByUserIds: (...a: unknown[]) => mockGetMembersByUserIds(...a),
       },
-      communityMessage: {
-        ...actual.queries.communityMessage,
-        getMessageByChannelAndSeq: (...a: unknown[]) => mockGetMessageByChannelAndSeq(...a),
-      },
       communityDm: {
         ...actual.queries.communityDm,
-        getDMBetween: (...a: unknown[]) => mockGetDMBetween(...a),
+        getDM: (...a: unknown[]) => mockGetDM(...a),
+        getDMPeer: (...a: unknown[]) => mockGetDMPeer(...a),
       },
       communityFriendship: {
         ...actual.queries.communityFriendship,
@@ -103,6 +92,11 @@ describe("POST /api/community/agent/channelMember", () => {
     mockFindActiveAgentRunnerKeyByBearer.mockResolvedValue({ userId: "owner_1", machineId: "m_1", agentId: "bot_1" })
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
+    // resolveTargetById defaults: the channelId resolves to a text channel the
+    // bot is a member of (getChannel discriminates DM-vs-channel by `type`;
+    // getChannelForMember gates membership in requireChannelMember).
+    mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     // Default: bot has channel access (server member, public channel).
     mockResolveChannelAccessContext.mockResolvedValue({
       channel: { id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null, creatorId: "owner_1", categoryId: null },
@@ -115,39 +109,61 @@ describe("POST /api/community/agent/channelMember", () => {
   })
 
   it("401 without Authorization", async () => {
-    const res = await POST(req({ channel: "/demo/general" }))
+    const res = await POST(req({ channelId: "ch_1" }))
     expect(res.status).toBe(401)
   })
 
-  it("400 on payload validation failure (missing channel)", async () => {
+  it("400 on payload validation failure (missing channel/channelId)", async () => {
     const res = await POST(req({}, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
   })
 
-  it("400 on a DM ref — channel-scoped only", async () => {
-    // No DB mocks needed: DM refs are rejected up front, so an un-opened DM
-    // (no peer, no DM row) still gets the specific channel-scoped 400 instead
-    // of a misleading "dm not found" 404.
-    const res = await POST(req({ channel: "/.dm/peer#0042" }, { Authorization: "Bearer crk_abc" }))
+  it("400 loud-reject on a bare name-path (addressing is id-only)", async () => {
+    // Name-path addressing is retired: a `/server/channel` path carries no
+    // channelId, so the route loud-rejects up front instead of resolving it.
+    const res = await POST(req({ channel: "/studio/general" }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toContain("name-path")
+    expect(body.hint).toBeTruthy()
+    // Never reaches target resolution.
+    expect(mockGetChannel).not.toHaveBeenCalled()
+    expect(mockResolveChannelAccessContext).not.toHaveBeenCalled()
+  })
+
+  it("400 on a DM channelId — channel member is channel-scoped", async () => {
+    // A channelId that names a DM row resolves to `kind: "dm"`; channel member
+    // is channel-scoped, so it's rejected AFTER resolution (via resolved.kind)
+    // rather than by a name-parse. DM gate mocks make resolveTargetById return
+    // a DM target.
+    mockGetChannel.mockResolvedValue({ id: "dm_1", type: "dm" })
+    mockGetDM.mockResolvedValue({ id: "dm_1", lastMessageAt: null, createdAt: "t" })
+    mockGetDMPeer.mockResolvedValue({ otherUserId: "peer_1" })
+    mockIsBlocked.mockResolvedValue(false)
+    const res = await POST(req({ channelId: "dm_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(400)
     const body = await res.json()
     expect(body.error).toContain("channel-scoped")
-    expect(mockGetUserByNameAndDiscriminator).not.toHaveBeenCalled()
-    expect(mockGetDMBetween).not.toHaveBeenCalled()
+    // Rejected before any channel-access/roster work.
+    expect(mockResolveChannelAccessContext).not.toHaveBeenCalled()
   })
 
-  it("400 on a malformed ref", async () => {
-    const res = await POST(req({ channel: "not-a-ref" }, { Authorization: "Bearer crk_abc" }))
-    expect(res.status).toBe(400)
+  it("404 when the channelId names no channel", async () => {
+    mockGetChannel.mockResolvedValue(undefined)
+    const res = await POST(req({ channelId: "ch_missing" }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(404)
+  })
+
+  it("403 when the bot is not a member of the channel", async () => {
+    // getChannelForMember returns null for a non-member → requireChannelMember 403.
+    mockGetChannelForMember.mockResolvedValue(undefined)
+    const res = await POST(req({ channelId: "ch_1" }, { Authorization: "Bearer crk_abc" }))
+    expect(res.status).toBe(403)
   })
 
   it("public top-level channel → { visibility:'public', hint } with the server's actual name substituted", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "demo" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1", name: "general", type: "text", parentChannelId: null }])
-    mockGetChannel.mockResolvedValue({ id: "ch_1", serverId: "srv_1", name: "general", type: "text" })
     mockGetServer.mockResolvedValue({ id: "srv_1", name: "demo" })
-    mockIsChannelPrivate.mockResolvedValue(false)
-    const res = await POST(req({ channel: "/demo/general" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({
@@ -158,9 +174,6 @@ describe("POST /api/community/agent/channelMember", () => {
   })
 
   it("private top-level channel → { visibility:'private', members } from resolveScopeMembers", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "demo" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1", name: "leadership", type: "text", parentChannelId: null }])
-    mockGetChannel.mockResolvedValue({ id: "ch_1", serverId: "srv_1", name: "leadership", type: "text" })
     // Access context: bot is the creator (so it can see the private channel).
     mockResolveChannelAccessContext.mockResolvedValue({
       channel: { id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null, creatorId: "bot_1", categoryId: "cat_1" },
@@ -170,7 +183,6 @@ describe("POST /api/community/agent/channelMember", () => {
       isCreator: true,
       isPrivate: true,
     })
-    mockIsChannelPrivate.mockResolvedValue(true)
     mockResolveScopeMembers.mockResolvedValue([
       { userId: "u_owner", role: "owner", source: "explicit" },
       { userId: "u_alice", role: "member", source: "explicit" },
@@ -179,7 +191,7 @@ describe("POST /api/community/agent/channelMember", () => {
       { userName: "gustavo", discriminator: "4821", role: "owner" },
       { userName: "alice", discriminator: "0193", role: "member" },
     ])
-    const res = await POST(req({ channel: "/demo/leadership" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body).toEqual({
@@ -192,11 +204,11 @@ describe("POST /api/community/agent/channelMember", () => {
   })
 
   it("thread ref → always private on the wire; roster is the thread-participant set", async () => {
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1", name: "demo" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_parent", name: "general", type: "text", parentChannelId: null }])
-    mockGetMessageByChannelAndSeq.mockResolvedValue({ id: "msg_12" })
-    mockGetThreadChannelByParentMessage.mockResolvedValue({ id: "th_1" })
-    mockGetChannel.mockResolvedValue({ id: "th_1", serverId: "srv_1", name: "Thread", type: "thread", parentChannelId: "ch_parent" })
+    // The received channelId already names the thread channel (th_1); no name
+    // resolution needed. getChannel discriminates non-DM; getChannelForMember
+    // gates membership; access context marks it a thread.
+    mockGetChannel.mockResolvedValue({ id: "th_1", type: "thread" })
+    mockGetChannelForMember.mockResolvedValue({ id: "th_1", serverId: "srv_1", type: "thread", parentChannelId: "ch_parent" })
     mockResolveChannelAccessContext.mockResolvedValue({
       channel: { id: "th_1", serverId: "srv_1", type: "thread", parentChannelId: "ch_parent", creatorId: "bot_1", categoryId: null },
       anchor: { id: "ch_parent", type: "text", creatorId: "owner_1", categoryId: null },
@@ -211,7 +223,7 @@ describe("POST /api/community/agent/channelMember", () => {
       { userName: "otter", discriminator: "5522", role: "member", nickname: null },
     ])
 
-    const res = await POST(req({ channel: "/demo/general/#12" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "th_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.visibility).toBe("private")

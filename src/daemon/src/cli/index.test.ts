@@ -841,7 +841,7 @@ describe("message emoji", () => {
     setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
     await main(["message", "emoji", "--target", "/demo/ideas/my-post", "--emoji", "👍"]);
     const env = parseEnvelope(cap.lines());
-    expect(env.error).toMatch(/needs a ref with a seq/);
+    expect(env.error).toMatch(/needs a message ref with a seq/);
     expect(reactAddSpy).not.toHaveBeenCalled();
   });
 
@@ -865,7 +865,7 @@ describe("message emoji", () => {
     setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
     await main(["message", "emoji", "--target", "/demo/general/#5", "--emoji", "👍"]);
     const env = parseEnvelope(cap.lines());
-    expect(env.error).toMatch(/needs a ref with a seq/);
+    expect(env.error).toMatch(/needs a message ref with a seq/);
     expect(env.hint).toMatch(/#N#M/);
     expect(reactAddSpy).not.toHaveBeenCalled();
   });
@@ -875,7 +875,7 @@ describe("message emoji", () => {
     setApiForTesting(stubApi({ reactAdd: reactAddSpy }));
     await main(["message", "emoji", "--target", "/demo/general", "--emoji", "👍"]);
     const env = parseEnvelope(cap.lines());
-    expect(env.error).toMatch(/needs a ref with a seq/);
+    expect(env.error).toMatch(/needs a message ref with a seq/);
     expect(env.hint).toMatch(/#N/);
     expect(reactAddSpy).not.toHaveBeenCalled();
   });

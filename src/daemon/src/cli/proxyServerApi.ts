@@ -245,7 +245,7 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
     listServers: (_r: { agentId: AgentId }) => callListServers(),
     joinServer: callJoinServer,
     listChannels: (r: ListChannelsRequest) => call<{ groups: ChannelGroup[] }>("listChannels", r),
-    channelMember: (r: { agentId?: AgentId; channel: ChannelRef }) =>
+    channelMember: (r: { agentId?: AgentId; channel?: ChannelRef; channelId?: string }) =>
       call<ChannelMemberResult>("channelMember", r),
     inboxPull: (r: InboxPullRequest) => call<InboxPullResponse>("inboxPull", r),
     inboxSnapshot: (r: { agentId: AgentId }) => call<InboxSnapshot>("inboxSnapshot", r),
@@ -256,7 +256,7 @@ export function createProxyServerApi(config: ProxyServerApiConfig): ServerApi {
     listMembers: (r: { agentId: AgentId; server: string }) => call<{ members: ServerMember[] }>("listMembers", r),
     attachmentUpload: callUpload,
     attachmentDownload: callDownload,
-    reactAdd: (r: { channel: ChannelRef; seq: Seq; emoji: string }) =>
+    reactAdd: (r: { channel?: ChannelRef; channelId?: string; seq: Seq; emoji: string }) =>
       call<CommunityAgentReactAddResponse>("reactAdd", r),
     friendRequest: (r: { agentId: AgentId; username: string }) =>
       call<FriendRequestResult>("friendRequest", r),

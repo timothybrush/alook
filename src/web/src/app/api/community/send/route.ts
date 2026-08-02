@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { queries, withD1Retry, CommunityAgentSendRequestSchema, utcDayKey } from "@alook/shared"
 import { getDb } from "@/lib/db"
 import { withCommunityActor, requireBot } from "@/lib/middleware/community-actor"
-import { resolveTargetForMember, resolveTargetById, resolveErrorResponse } from "@/lib/community/resolve-ref"
+import { resolveTargetById, resolveTargetByCreate, resolveErrorResponse, nameRefRetiredResponse } from "@/lib/community/resolve-ref"
 import { requireChannelMember, requireDMAccess } from "@/lib/community/permissions"
 import { requireMessageBearingSurface } from "@/lib/community/channel-write-guard"
 import { createCommunityMessage, isDmTarget, type MessageTarget } from "@/lib/community/message-handler"
@@ -47,13 +47,26 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
   }
   const body = parsed.data
 
-  const resolved = body.channelId !== undefined
-    ? await resolveTargetById(db, botUserId, body.channelId)
-    : await resolveTargetForMember(db, botUserId, body.channel!, {
-        createDmIfMissing: true,
-        createThreadIfMissing: true,
-        callerKind: "bot",
-      })
+  // Resolve the destination. Precedence: creation verbs (open-or-create by
+  // identity) → id-ref (address an existing target) → legacy name-path (still
+  // accepted as a fallback in this producer-side half; retired in the name-path
+  // removal that follows). Creation is a third axis — `--dm-user`/`--thread-on`
+  // open a relationship channel that has no ref the first time; the response
+  // returns its canonical ref for subsequent addressing.
+  // A bare name-path (`body.channel` without `channelId`) is retired — loud
+  // 400, never a silent name-resolve (Gener's rename bug).
+  if (body.channelId === undefined && body.createDmWithUserId === undefined &&
+      body.createThreadOnMessageId === undefined && body.channel !== undefined) {
+    return nameRefRetiredResponse()
+  }
+  const resolved =
+    body.createDmWithUserId !== undefined || body.createThreadOnMessageId !== undefined
+      ? await resolveTargetByCreate(db, botUserId, {
+          dmWithUserId: body.createDmWithUserId,
+          threadOnMessageId: body.createThreadOnMessageId,
+          callerKind: "bot",
+        })
+      : await resolveTargetById(db, botUserId, body.channelId!)
   if ("error" in resolved) return resolveErrorResponse(resolved)
 
   const scopeTarget = { channelId: resolved.channelId }

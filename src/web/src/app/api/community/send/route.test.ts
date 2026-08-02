@@ -22,7 +22,7 @@ const mockGetUserByNameAndDiscriminator = vi.fn()
 const mockGetBotBinding = vi.fn()
 const mockBumpBotDailyActivityStatement = vi.fn(() => ({ __stmt: "sent-bump" }))
 const mockResolveServerByNameForMember = vi.fn()
-const mockResolveChannelByNameForMember = vi.fn()
+const mockGetChannel = vi.fn()
 const mockGetChannelForMember = vi.fn()
 const mockGetDM = vi.fn()
 const mockGetDMBetween = vi.fn()
@@ -59,7 +59,7 @@ vi.mock("@alook/shared", async () => {
       },
       communityServer: { resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a) },
       communityChannel: {
-        resolveChannelByNameForMember: (...a: unknown[]) => mockResolveChannelByNameForMember(...a),
+        getChannel: (...a: unknown[]) => mockGetChannel(...a),
         getChannelForMember: (...a: unknown[]) => mockGetChannelForMember(...a),
       },
       communityDm: {
@@ -109,7 +109,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
     mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
+    mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
     mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     mockGetLatestSeqForScope.mockResolvedValue(0)
     // Default aligned (no deliverable unread) — matches the beforeEach
@@ -135,9 +135,9 @@ describe("POST /api/community/agent/send", () => {
   })
 
   it("404 propagates ref-resolution errors (e.g. channel not found)", async () => {
-    mockResolveChannelByNameForMember.mockResolvedValue([])
+    mockGetChannel.mockResolvedValue(undefined)
     const res = await POST(
-      req({ channel: "/studio/missing", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_missing", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(404)
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
@@ -148,7 +148,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValue({ lastReadSeq: 4 })
     mockHasDeliverableUnread.mockResolvedValue(true)
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ state: "blocked", reason: "unaligned", unreadCount: 6, latestSeq: 10 })
@@ -165,7 +165,7 @@ describe("POST /api/community/agent/send", () => {
     mockHasDeliverableUnread.mockResolvedValue(false)
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 21, content: "hi" } })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     expect((await res.json()).state).toBe("sent")
@@ -180,7 +180,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValue({ lastReadSeq: 9 })
     mockCreateCommunityMessage.mockResolvedValue({ ok: false, status: 409, error: "seq_conflict" })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ state: "blocked", reason: "unaligned", unreadCount: 1, latestSeq: 10 })
@@ -192,7 +192,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValue({ lastReadSeq: 5 })
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 6, content: "hi" } })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     expect(mockCreateCommunityMessage).toHaveBeenCalledWith(
@@ -207,7 +207,7 @@ describe("POST /api/community/agent/send", () => {
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 10 } })
     const res = await POST(
       req(
-        { channel: "/studio/general", content: { text: "hi" }, seenUpToSeq: 10 },
+        { channelId: "ch_1", content: { text: "hi" }, seenUpToSeq: 10 },
         { Authorization: "Bearer crk_abc" }
       )
     )
@@ -218,7 +218,7 @@ describe("POST /api/community/agent/send", () => {
   it("403 forbidden when resolution succeeds but channel membership gate fails", async () => {
     mockGetChannelForMember.mockResolvedValue(null)
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(403)
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
@@ -227,7 +227,7 @@ describe("POST /api/community/agent/send", () => {
   it("200 { state: sent } happy path for a plain channel send", async () => {
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 1, content: "hi" } })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -248,11 +248,11 @@ describe("POST /api/community/agent/send", () => {
     // row exercises the SAME reconstruction branch as an actual `/#N`
     // thread ref, without needing to also mock the root-message/thread-row
     // lookups `resolveTargetForMember`'s thread-form parsing would trigger.
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "thread_1" }])
+    mockGetChannel.mockResolvedValue({ id: "thread_1", type: "thread" })
     mockGetChannelForMember.mockResolvedValue({ id: "thread_1", serverId: "srv_1", type: "thread", parentChannelId: "ch_parent" })
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 1, content: "hi" } })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "thread_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     expect(mockCreateCommunityMessage).toHaveBeenCalledWith(
@@ -265,14 +265,13 @@ describe("POST /api/community/agent/send", () => {
   it("propagates createCommunityMessage's own validation error (e.g. content too long) with its status", async () => {
     mockCreateCommunityMessage.mockResolvedValue({ ok: false, status: 400, error: "content is required" })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: "content is required" })
   })
 
-  it("200 happy path for a DM send, auto-creating the DM row via createDmIfMissing", async () => {
-    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
+  it("200 happy path for a DM send, auto-creating the DM row via createDmWithUserId", async () => {
     mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
       Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null })
     )
@@ -282,7 +281,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetDMPeer.mockResolvedValue({ otherUserId: "peer_1" })
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_dm", seq: 1, content: "hey" } })
     const res = await POST(
-      req({ channel: "/.dm/peer#0001", content: { text: "hey" } }, { Authorization: "Bearer crk_abc" })
+      req({ createDmWithUserId: "peer_1", content: { text: "hey" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     expect(mockCreateCommunityMessage).toHaveBeenCalledWith(
@@ -291,35 +290,36 @@ describe("POST /api/community/agent/send", () => {
   })
 
   it("403 blocked propagates from guardDmOpen when trying to auto-create a DM with a blocking peer", async () => {
-    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
     mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
       Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null })
     )
     mockIsBlocked.mockResolvedValue(true)
     const res = await POST(
-      req({ channel: "/.dm/peer#0001", content: { text: "hey" } }, { Authorization: "Bearer crk_abc" })
+      req({ createDmWithUserId: "peer_1", content: { text: "hey" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(403)
     expect(mockCreateOrGetDM).not.toHaveBeenCalled()
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
   })
 
-  it("400 invalid DM handle when the channel segment has no #0042 tag", async () => {
+  it("400 loud-rejects a bare name-path (name addressing retired)", async () => {
     const res = await POST(
-      req({ channel: "/.dm/peer_1", content: { text: "hey" } }, { Authorization: "Bearer crk_abc" })
+      req({ channel: "/.dm/peer#0001", content: { text: "hey" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/name-path addressing is no longer supported/)
+    expect(body.hint).toBeDefined()
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
   })
 
   it("attachment-only DM send: passes attachmentIds through to createCommunityMessage", async () => {
     // Regression: user reported {"error":"Unexpected end of JSON input"} when
-    // running `alook message send --attachment I-... --target /.dm/peer#0001`
-    // with no `--text`. The CLI sends `content: {text: ""}` + `attachments`.
+    // running `alook message send --attachment I-... --dm-user <id>` with no
+    // `--text`. The CLI sends `content: {text: ""}` + `attachments`.
     mockFindPendingAttachmentsForBot.mockResolvedValueOnce([
       { id: "I-abc", uploaderId: "bot_1", kind: "dm", targetId: "dm_new" },
     ])
-    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
     mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
       Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null })
     )
@@ -334,7 +334,7 @@ describe("POST /api/community/agent/send", () => {
     })
     const res = await POST(
       req(
-        { channel: "/.dm/peer#0001", content: { text: "" }, attachments: ["I-abc"] },
+        { createDmWithUserId: "peer_1", content: { text: "" }, attachments: ["I-abc"] },
         { Authorization: "Bearer crk_abc" },
       ),
     )
@@ -353,7 +353,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValueOnce({ lastReadSeq: 4 })
     mockHasDeliverableUnread.mockResolvedValueOnce(true)
     const blocked1 = await POST(
-      req({ channel: "/studio/general", content: { text: "catching up" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "catching up" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(blocked1.status).toBe(200)
     expect(await blocked1.json()).toEqual({ state: "blocked", reason: "unaligned", unreadCount: 6, latestSeq: 10 })
@@ -367,7 +367,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValueOnce({ lastReadSeq: 10 })
     mockCreateCommunityMessage.mockResolvedValueOnce({ ok: true, row: { id: "m_1", seq: 11, content: "caught up" } })
     const sent = await POST(
-      req({ channel: "/studio/general", content: { text: "caught up" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "caught up" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(sent.status).toBe(200)
     expect((await sent.json()).state).toBe("sent")
@@ -380,7 +380,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValueOnce({ lastReadSeq: 10 })
     mockHasDeliverableUnread.mockResolvedValueOnce(true)
     const blocked2 = await POST(
-      req({ channel: "/studio/general", content: { text: "still going" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "still going" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(blocked2.status).toBe(200)
     expect(await blocked2.json()).toEqual({ state: "blocked", reason: "unaligned", unreadCount: 2, latestSeq: 12 })
@@ -396,7 +396,7 @@ describe("POST /api/community/agent/send", () => {
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 6, content: "on it" } })
     const res = await POST(
       req(
-        { channel: "/studio/general", content: { text: "on it" }, replyToSeq: 3 },
+        { channelId: "ch_1", content: { text: "on it" }, replyToSeq: 3 },
         { Authorization: "Bearer crk_abc" }
       )
     )
@@ -419,12 +419,12 @@ describe("POST /api/community/agent/send", () => {
     mockGetMessageByChannelAndSeq.mockResolvedValue(null)
     const res = await POST(
       req(
-        { channel: "/studio/general", content: { text: "on it" }, replyToSeq: 99999 },
+        { channelId: "ch_1", content: { text: "on it" }, replyToSeq: 99999 },
         { Authorization: "Bearer crk_abc" }
       )
     )
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: "reply target #99999 not found in /studio/general" })
+    expect(await res.json()).toEqual({ error: "reply target #99999 not found in ch_1" })
     expect(mockCreateCommunityMessage).not.toHaveBeenCalled()
   })
 
@@ -433,7 +433,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValue({ lastReadSeq: 5 })
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 6, content: "hi" } })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     expect(mockGetMessageByChannelAndSeq).not.toHaveBeenCalled()
@@ -447,7 +447,7 @@ describe("POST /api/community/agent/send", () => {
     mockGetReadState.mockResolvedValue({ lastReadSeq: 5 })
     mockCreateCommunityMessage.mockResolvedValue({ ok: true, row: { id: "m_1", seq: 6, content: "hi" } })
     const res = await POST(
-      req({ channel: "/studio/general", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", content: { text: "hi" } }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     // The "sent" upsert is built for THIS bot + today's UTC day key and handed

@@ -100,8 +100,9 @@ export interface Sender {
 export const DM_SERVER = ".dm";
 
 /**
- * A path-style channel/target ref string — the ONE addressing grammar exposed
- * to the agent. Plain and direct:
+ * A path-style channel/target string. Its ONLY role now is the human-readable
+ * **label** half of a ref token (`{<this path>}(channel/<id>)`) — a readable
+ * rendering of what a ref points at:
  *
  *     /<server>/<channel>            a channel
  *     /<server>/<channel>#N          the N-th message (seq) in that channel
@@ -113,25 +114,24 @@ export const DM_SERVER = ".dm";
  *                                    `.dm`-specific branch below.
  *     /.dm/<peer>#N , /.dm/<peer>/#N a DM message / DM thread
  *
- * A message is located by **channel + seq** (`<channelRef>#N`) — there is no id.
+ * A message is a **channel + seq** (`<path>#N`); the seq rides the label, the
+ * `()` payload is always the channel id (§3.4b — there is no `message` type).
  *
- * `<server>`/`<channel>` are server/channel display *names*, guaranteed free
- * of whitespace, `/`, and `#` (normalized via `slugify()` at creation/rename
- * time), so each segment is always a single, unambiguous token.
+ * `<server>`/`<channel>` are display *names* (slugified: no whitespace/`/`/`#`).
  *
- * On agent surfaces, segments are NAMES (or `#seq`) — raw ids are rejected.
- * The split (names for agents, ids never) is enforced by the resolver, not the
- * type: the wire type is a single string. To descend into a thread or forum
- * post, use the canonical `<server>/<channel>/#N` grammar; the underlying
- * row's id is never a valid ref for agents.
- *
- * TERMINOLOGY (ref/id coexistence contract, Gener B-ruling): "ref" means the
- * `{label}(type/id)` body TOKEN (see `parseRefToken`) — the authoritative,
- * id-carrying reference embedded in message text. This path-string form is an
- * "addressing path", NOT a "ref": a legacy input still accepted on `--target`
- * (as a fallback, resolved server-side inline in one trip) but no longer the
- * word "ref". Body rendering recognizes ONLY the token as a pill; a bare
- * addressing path in message text degrades to plaintext.
+ * ADDRESSING IS ID-BASED (ref/id addressing-id-ification, Gener). There is ONE
+ * word — **"ref"** — and ONE format: the `{label}(type/id)` token. Addressing a
+ * command (`--target`/`--channel`/`--reply`) and linking inside a message body
+ * both use that same id-carrying token; the id is authoritative and rename-
+ * proof. A **bare name-path** (this string, standalone, no id) is NOT a ref: it
+ * is REJECTED on the addressing surfaces (a name resolved at use-time silently
+ * mis-targets a renamed channel — the bug this design kills) and degrades to
+ * plaintext in a message body. It survives only as the token's readable label.
+ * Agents never resolve a name at use-time: they reuse a received ref's id
+ * (`resolveTargetById`), or open a relationship channel by identity
+ * (`resolveTargetByCreate` — `--dm-user`/`--thread-on`). (Server SELECTORS on
+ * `list` verbs — `--server <id-or-name>` — are a separate, still-supported
+ * lookup, not part of the retired `--target`/`--channel` addressing.)
  */
 export type ChannelRef = string;
 
@@ -160,19 +160,25 @@ export type Target =
  * The flat, agent-facing message. This is exactly what the agent sees (one JSON
  * object per line, JSONL). Deliberately minimal:
  *   - `seq`       — "#N", the per-channel sequence (locate via channel + seq).
- *   - `channel`   — the path ref, e.g. "/demo-workspace/general" or "/.dm/gustavo#4821".
+ *   - `channel`   — the channel's **ref**, a `{label}(channel/id)` token, e.g.
+ *                   "{/demo-workspace/general}(channel/chn_abc)". Pass it straight
+ *                   to `--target`, or drop it in a body to render a pill.
  *   - `channelId` — the raw channel id (address handle). Coexists with `channel`:
- *                   the path ref stays the addressing grammar; the id is surfaced
+ *                   the ref carries this id inside `()`; the sibling is surfaced
  *                   so callers holding an id can correlate without reparsing.
  *   - `messageId` — the raw message id (address handle), pairing with `seq`.
- *   - `sender`    — "@handle" (`name#0042`, no id, no human/agent/system type).
- *                   Stays a handle — never a raw user/author id.
+ *   - `sender`    — "@handle" (`name#0042`, no human/agent/system type). Stays a
+ *                   handle for display/mention.
+ *   - `senderId`  — the sender's raw, rename-proof id (address handle). Surfaced
+ *                   like `FriendCard.userId`; pass to `--dm-user` to open a DM
+ *                   with this person. NOT a general user ref — cite/notify via
+ *                   `@mention`.
  *   - `content`   — `{ text }` today; an object (not a bare string) so future
  *                   content kinds (attachments, embeds, …) can be added without
  *                   breaking the shape.
  *   - `time`      — ISO-8601 timestamp.
- * `channelId`/`messageId` are the only raw ids surfaced — addressing handles,
- * not human-UI fields. No `type`, no `authorId`/`userId`.
+ * `channelId`/`messageId`/`senderId` are the raw ids surfaced — addressing
+ * handles, not human-UI fields. No `type`, no `authorId`/`userId`.
  */
 /**
  * Read-side attachment ref surfaced by inbox pull / send response / resolve.
@@ -237,7 +243,7 @@ export type AgentAttachmentDownloadResult = {
 export interface Message {
   /** Per-channel sequence in display form, e.g. "#12". */
   seq: string;
-  /** Path ref of the containing channel/DM. */
+  /** Ref of the containing channel/DM — a `{label}(channel/id)` token; pass to `--target`. */
   channel: ChannelRef;
   /** Raw id of the containing channel (address handle; coexists with `channel`). */
   channelId: string;
@@ -245,6 +251,14 @@ export interface Message {
   messageId: string;
   /** Sender global handle (`name#0042`), e.g. "@gustavo#4821". */
   sender: string;
+  /**
+   * Raw, rename-proof id of the sender — the DM-initiation address handle
+   * (surfaced like `FriendCard.userId`, not a leak: identity-by-id). Use it to
+   * start a DM with this person (their handle's name half is rename-fragile).
+   * NOT a general user reference — citing/notifying a person is still
+   * `@mention` (addressing never notifies as a side effect).
+   */
+  senderId: string;
   content: MessageContent;
   /** ISO-8601. */
   time: string;
@@ -255,11 +269,16 @@ export interface Message {
 /* ------------------------------------------------------------------ */
 
 /**
- * Per-channel read/ack waterline. `channel` is the path ref; `seq` is the
- * numeric high-water mark consumed.
+ * Per-channel read/ack waterline. Addressed by `channelId` (the id-first ack
+ * path — the CLI keys ack cursors on the raw channel id, never the `channel`
+ * ref token, so the waterline advances regardless of the ref's form). `channel`
+ * (a ref) is still accepted on the wire for back-compat, but the CLI always
+ * emits `channelId`. Exactly one locator is set; `seq` is the numeric
+ * high-water mark consumed.
  */
 export interface Cursor {
-  channel: ChannelRef;
+  channel?: ChannelRef;
+  channelId?: string;
   seq: Seq;
 }
 
@@ -337,6 +356,21 @@ export interface SendRequest {
    * that the resolved channel is a message-bearing surface.
    */
   channelId?: ChannelId;
+  /**
+   * Creation verb — open (or create) a DM with this user id and send into it.
+   * Creation is a third axis, distinct from addressing (channel/channelId): a
+   * DM has no ref the first time. Idempotent open-or-create (`createOrGetDM`) —
+   * the `userId` is a `Message.senderId` you received, NOT a ref token. The
+   * response returns the DM's canonical ref for subsequent addressing.
+   */
+  createDmWithUserId?: UserId;
+  /**
+   * Creation verb — open (or create) a thread rooted on this message id and
+   * send into it. Idempotent (`createThreadChannel`, one-thread-per-message).
+   * `messageId` is a `Message.messageId` you received. The response returns the
+   * thread's canonical ref for subsequent addressing.
+   */
+  createThreadOnMessageId?: string;
   content: MessageContent;
   /**
    * Attachment ids returned by prior `attachmentUpload` calls. Order matters —
@@ -424,7 +458,9 @@ export interface CommunityAgentReactAddResponse {
 
 export interface ReadRequest {
   agentId: AgentId;
-  channel: ChannelRef;
+  /** Exactly one of `channelId` (a received ref's id) or `channel` (legacy path). */
+  channel?: ChannelRef;
+  channelId?: ChannelId;
   /** Anchor by seq; pick at most one of before/after/around. */
   before?: Seq;
   after?: Seq;
@@ -435,7 +471,9 @@ export interface ReadRequest {
 /** Locate one message by channel + seq (there is no message id). */
 export interface ResolveRequest {
   agentId: AgentId;
-  channel: ChannelRef;
+  /** Exactly one of `channelId` (a received ref's id) or `channel` (legacy path). */
+  channel?: ChannelRef;
+  channelId?: ChannelId;
   seq: Seq;
 }
 
@@ -446,13 +484,13 @@ export interface ListChannelsRequest {
 }
 
 /**
- * One channel as surfaced to the agent CLI (`channel list`). `ref` stays the
- * addressing grammar — every other agent-facing command addresses channels by
- * `ChannelRef`, never by raw id, so `ref` is the only locator an agent needs
- * (and is directly reusable as `--channel`/`--target`). `id`/`serverId` are
- * surfaced as address handles alongside it (ref/id coexistence) so callers
- * holding an id can correlate. `type` is real per-row data (`"text"` vs
- * `"forum"`), not the always-`"channel"` `kind` the old shape hardcoded.
+ * One channel as surfaced to the agent CLI (`channel list`). `ref` is the
+ * canonical id-ref TOKEN `{label}(channel/<id>)` — the one addressing form —
+ * directly reusable as `--channel`/`--target` (a bare name-path would be
+ * loud-rejected there, so `ref` carries the authoritative id). `id`/`serverId`
+ * are the same handles surfaced alongside for correlation. `type` is real
+ * per-row data (`"text"` vs `"forum"`), not the always-`"channel"` `kind` the
+ * old shape hardcoded.
  * `visibility` is derived from the channel's category — `"private"` iff the
  * row's category has `private = 1`, else `"public"` — and lets the agent decide
  * whether to enumerate members via `channel member` or fall back to
@@ -569,7 +607,7 @@ export interface ServerApi {
    * channels, private forums, forum posts, and threads (regardless of parent
    * visibility) return the concrete roster.
    */
-  channelMember(req: { agentId?: AgentId; channel: ChannelRef }): Promise<ChannelMemberResult>;
+  channelMember(req: { agentId?: AgentId; channel?: ChannelRef; channelId?: string }): Promise<ChannelMemberResult>;
 
   /** Drain unread messages for this agent (across all its servers), flat JSONL. */
   inboxPull(req: InboxPullRequest): Promise<InboxPullResponse>;
@@ -602,7 +640,7 @@ export interface ServerApi {
   attachmentDownload(req: AttachmentDownloadRequest): Promise<AgentAttachmentDownloadResult>;
 
   /** React to a message with a single emoji. Duplicates are idempotent (`duplicate:true`, no fan-out). */
-  reactAdd(req: { channel: ChannelRef; seq: Seq; emoji: string }): Promise<CommunityAgentReactAddResponse>;
+  reactAdd(req: { channel?: ChannelRef; channelId?: string; seq: Seq; emoji: string }): Promise<CommunityAgentReactAddResponse>;
 
   /**
    * Send a friend request to `username` (`name#0042`). Owner-gated for human /

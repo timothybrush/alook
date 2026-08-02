@@ -3,10 +3,8 @@ import {
   queries,
   withD1Retry,
   CommunityAgentChannelMemberRequestSchema,
-  DM_SERVER,
   formatHandle,
   isThread,
-  parseRef,
 } from "@alook/shared"
 import type {
   CommunityCliChannelMemberResult as ChannelMemberResult,
@@ -14,7 +12,7 @@ import type {
 } from "@alook/shared"
 import { getDb } from "@/lib/db"
 import { withCommunityActor, requireBot } from "@/lib/middleware/community-actor"
-import { resolveTargetForMember, resolveTargetById, resolveErrorResponse } from "@/lib/community/resolve-ref"
+import { resolveTargetById, resolveErrorResponse, nameRefRetiredResponse } from "@/lib/community/resolve-ref"
 import { requireChannelAccess } from "@/lib/community/permissions"
 
 /**
@@ -58,31 +56,10 @@ export const POST = withCommunityActor(async (req: NextRequest, ctx) => {
     return NextResponse.json({ error: "invalid payload", details: parsed.error.flatten() }, { status: 400 })
   }
 
-  // Reject DM refs up front: an un-opened DM would otherwise trip
-  // `resolveTargetForMember`'s 404 "dm not found" before the DM-branch guard
-  // below could emit the specific channel-scoped 400. (Ref path only — the
-  // id path reaches the same DM-reject via `resolved.kind === "dm"` below.)
-  if (parsed.data.channel !== undefined) {
-    try {
-      const p = parseRef(parsed.data.channel)
-      if (p.server === DM_SERVER) {
-        return NextResponse.json(
-          { error: "channel member is channel-scoped — DM refs are not supported" },
-          { status: 400 },
-        )
-      }
-    } catch {
-      // Fall through — resolveTargetForMember returns the canonical 400.
-    }
-  }
-
-  const resolved = parsed.data.channelId !== undefined
-    ? await resolveTargetById(db, botUserId, parsed.data.channelId)
-    : await resolveTargetForMember(db, botUserId, parsed.data.channel!, {
-        createDmIfMissing: false,
-        createThreadIfMissing: false,
-        callerKind: "bot",
-      })
+  // Name-path addressing is retired — loud 400. A DM channel reached by id is
+  // still rejected below (channel member is channel-scoped) via resolved.kind.
+  if (parsed.data.channelId === undefined) return nameRefRetiredResponse()
+  const resolved = await resolveTargetById(db, botUserId, parsed.data.channelId)
   if ("error" in resolved) return resolveErrorResponse(resolved)
   if (resolved.kind === "dm") {
     return NextResponse.json(

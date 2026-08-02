@@ -1128,6 +1128,15 @@ export const CommunityAgentSendRequestSchema = z
   .object({
     channel: z.string().min(1).optional(),
     channelId: z.string().min(1).optional(),
+    // Creation verbs (`--dm-user` / `--thread-on`). Addressing a target uses a
+    // ref (channel/channelId); creation is a THIRD axis — a relationship
+    // channel (a DM with someone, a thread on a message) is opened by IDENTITY,
+    // not a ref (it has none the first time). Both are idempotent "open-or-
+    // create by identity": absent → create, present → open the same one. The
+    // response returns the (new or existing) target's canonical ref, which the
+    // caller reuses for all subsequent addressing.
+    createDmWithUserId: z.string().min(1).optional(),
+    createThreadOnMessageId: z.string().min(1).optional(),
     content: CommunityAgentMessageContentSchema,
     attachments: z
       .array(z.string().min(1))
@@ -1144,9 +1153,14 @@ export const CommunityAgentSendRequestSchema = z
     (d) => d.content.text.trim().length > 0 || d.attachments.length > 0,
     { message: "message must have text or attachments" }
   )
-  .refine((d) => d.channel !== undefined || d.channelId !== undefined, {
-    message: "one of channel (ref) or channelId is required",
-  });
+  .refine(
+    (d) =>
+      d.channel !== undefined ||
+      d.channelId !== undefined ||
+      d.createDmWithUserId !== undefined ||
+      d.createThreadOnMessageId !== undefined,
+    { message: "one of channelId (ref) / createDmWithUserId / createThreadOnMessageId is required" }
+  );
 export type CommunityAgentSendRequest = z.infer<typeof CommunityAgentSendRequestSchema>;
 
 // Response body for POST /api/community/agent/attachmentUpload. Bots see
@@ -1196,10 +1210,15 @@ export const CommunityAgentReadRequestSchema = z
   });
 export type CommunityAgentReadRequest = z.infer<typeof CommunityAgentReadRequestSchema>;
 
-export const CommunityAgentResolveRequestSchema = z.object({
-  channel: z.string().min(1),
-  seq: CommunityAgentSeqSchema,
-});
+export const CommunityAgentResolveRequestSchema = z
+  .object({
+    channel: z.string().min(1).optional(),
+    channelId: z.string().min(1).optional(),
+    seq: CommunityAgentSeqSchema,
+  })
+  .refine((d) => d.channel !== undefined || d.channelId !== undefined, {
+    message: "one of channelId (ref) or channel is required",
+  });
 export type CommunityAgentResolveRequest = z.infer<typeof CommunityAgentResolveRequestSchema>;
 
 export const CommunityAgentListChannelsRequestSchema = z.object({

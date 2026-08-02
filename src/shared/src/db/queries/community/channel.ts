@@ -227,54 +227,6 @@ export async function listServerChannels(db: Database, serverId: string) {
     .orderBy(asc(communityChannel.position));
   return rows.map(mapChannelRow);
 }
-
-/**
- * `resolveTargetForMember`'s channel-name resolver: matches by NAME only,
- * scoped to top-level channels (`parentChannelId IS NULL`) — mirrors the
- * DB partial-unique index `idx_channel_server_name` from migration 0057.
- *
- * Ids are NOT accepted from agent surfaces. Agents address channels via
- * the canonical ref grammar (`/server/channel`, `/server/channel/#seq`);
- * ids are a `/c` UI internal. Threads and forum posts must be reached
- * through their parent + `#seq`, never by direct name or id here.
- *
- * The returned array is length 0 or 1: the WHERE clause narrows to a single
- * `(serverId, name)` slot within the top-level partition, and the partial
- * unique index `idx_channel_server_name` (migration 0057) guarantees that
- * slot holds at most one row. The caller returns `channel not found` on
- * empty and passes the single row through otherwise. Visibility-scoped to
- * `userId`'s server membership.
- */
-export async function resolveChannelByNameForMember(
-  db: Database,
-  serverId: string,
-  userId: string,
-  name: string
-) {
-  const rows = await db
-    .select(CHANNEL_COLUMNS)
-    .from(communityChannel)
-    .innerJoin(
-      communityServerMember,
-      and(
-        eq(communityServerMember.serverId, communityChannel.serverId),
-        eq(communityServerMember.userId, userId)
-      )
-    )
-    .where(
-      and(
-        eq(communityChannel.serverId, serverId),
-        // Case-insensitive name match (ref/id §4): `general` and `General`
-        // resolve to the same channel. `COLLATE NOCASE` uses SQLite's own fold
-        // — the SAME ruler as the `idx_channel_server_name` NOCASE index and
-        // the dedup below, so resolve/uniqueness/dedup can't drift.
-        sql`${communityChannel.name} COLLATE NOCASE = ${name}`,
-        isNull(communityChannel.parentChannelId)
-      )
-    );
-  return rows.map(mapChannelRow);
-}
-
 /**
  * Top-level channels (no threads — `parentChannelId IS NULL`, mirroring
  * `listServerChannels`) a viewer can see via `listChannels`, scoped to server
@@ -323,37 +275,6 @@ export async function getThreadChannelByParentMessage(
   const row = rows[0];
   return row ? mapChannelRow(row) : null;
 }
-
-/**
- * Resolve a forum post by its name under a parent forum. A forum post is a
- * `forum_post` child channel anchored by its own name (not a root-message seq
- * like a thread), so `(parentChannelId, name, type='forum_post')` is its
- * address. Returns ALL matches so the caller can disambiguate: post names are
- * NOT unique within a forum (schema exempts child channels from the per-server
- * unique index), so >1 row means an ambiguous ref the resolver must 400 on —
- * never silently pick one.
- */
-export async function getChildChannelByName(
-  db: Database,
-  parentChannelId: string,
-  name: string,
-  type = "forum_post"
-) {
-  const rows = await db
-    .select(CHANNEL_COLUMNS)
-    .from(communityChannel)
-    .where(
-      and(
-        eq(communityChannel.parentChannelId, parentChannelId),
-        // Case-insensitive (ref/id §4), same NOCASE ruler as top-level resolve
-        // + dedup.
-        sql`${communityChannel.name} COLLATE NOCASE = ${name}`,
-        eq(communityChannel.type, type)
-      )
-    );
-  return rows.map(mapChannelRow);
-}
-
 /**
  * Dedupe a forum-post slug within its parent forum so the name anchor
  * (`/server/forum/<post>`) is a real address. Post names are not covered by the

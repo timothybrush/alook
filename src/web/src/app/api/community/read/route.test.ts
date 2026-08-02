@@ -18,8 +18,7 @@ vi.mock("@/lib/auth", () => ({
 const mockFindActiveAgentRunnerKeyByBearer = vi.fn()
 const mockGetUserInternal = vi.fn()
 const mockGetBotBinding = vi.fn()
-const mockResolveServerByNameForMember = vi.fn()
-const mockResolveChannelByNameForMember = vi.fn()
+const mockGetChannel = vi.fn()
 const mockGetChannelForMember = vi.fn()
 const mockListMessagesBySeq = vi.fn()
 const mockToAgentMessages = vi.fn()
@@ -33,9 +32,8 @@ vi.mock("@alook/shared", async () => {
       communityMachine: { findActiveAgentRunnerKeyByBearer: (...a: unknown[]) => mockFindActiveAgentRunnerKeyByBearer(...a) },
       user: { getUserInternal: (...a: unknown[]) => mockGetUserInternal(...a) },
       communityBot: { getBotBinding: (...a: unknown[]) => mockGetBotBinding(...a) },
-      communityServer: { resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a) },
       communityChannel: {
-        resolveChannelByNameForMember: (...a: unknown[]) => mockResolveChannelByNameForMember(...a),
+        getChannel: (...a: unknown[]) => mockGetChannel(...a),
         getChannelForMember: (...a: unknown[]) => mockGetChannelForMember(...a),
       },
       communityAgentInbox: {
@@ -62,9 +60,8 @@ describe("POST /api/community/agent/read", () => {
     mockFindActiveAgentRunnerKeyByBearer.mockResolvedValue({ userId: "owner_1", machineId: "m_1", agentId: "bot_1" })
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
-    mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", parentChannelId: null })
+    mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
     mockToAgentMessages.mockImplementation((_db: unknown, rows: unknown[]) => Promise.resolve(rows))
   })
 
@@ -75,14 +72,14 @@ describe("POST /api/community/agent/read", () => {
 
   it("400 when more than one of before/after/around is supplied", async () => {
     const res = await POST(
-      req({ channel: "/studio/general", before: 5, after: 1 }, { Authorization: "Bearer crk_abc" })
+      req({ channelId: "ch_1", before: 5, after: 1 }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(400)
   })
 
   it("403 forbidden when the bot isn't a member of the resolved channel", async () => {
     mockGetChannelForMember.mockResolvedValue(null)
-    const res = await POST(req({ channel: "/studio/general" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1" }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(403)
   })
 
@@ -92,7 +89,7 @@ describe("POST /api/community/agent/read", () => {
       hasMore: true,
       latestSeq: 2,
     })
-    const res = await POST(req({ channel: "/studio/general", after: 0, limit: 2 }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1", after: 0, limit: 2 }, { Authorization: "Bearer crk_abc" }))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       items: [{ id: "m_1", seq: 1 }, { id: "m_2", seq: 2 }],
@@ -108,7 +105,7 @@ describe("POST /api/community/agent/read", () => {
 
   it("omits latestSeq from the response when the page is empty (undefined, not null/0)", async () => {
     mockListMessagesBySeq.mockResolvedValue({ items: [], hasMore: false, latestSeq: undefined })
-    const res = await POST(req({ channel: "/studio/general" }, { Authorization: "Bearer crk_abc" }))
+    const res = await POST(req({ channelId: "ch_1" }, { Authorization: "Bearer crk_abc" }))
     const body = await res.json()
     expect(body).toEqual({ items: [], hasMore: false })
     expect("latestSeq" in body).toBe(false)

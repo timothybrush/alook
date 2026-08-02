@@ -20,7 +20,7 @@ const mockGetUserInternal = vi.fn()
 const mockGetUserByNameAndDiscriminator = vi.fn()
 const mockGetBotBinding = vi.fn()
 const mockResolveServerByNameForMember = vi.fn()
-const mockResolveChannelByNameForMember = vi.fn()
+const mockGetChannel = vi.fn()
 const mockGetChannelForMember = vi.fn()
 const mockGetDM = vi.fn()
 const mockGetDMBetween = vi.fn()
@@ -43,7 +43,7 @@ vi.mock("@alook/shared", async () => {
       communityFriendship: { isBlocked: (...a: unknown[]) => mockIsBlocked(...a) },
       communityServer: { resolveServerByNameForMember: (...a: unknown[]) => mockResolveServerByNameForMember(...a) },
       communityChannel: {
-        resolveChannelByNameForMember: (...a: unknown[]) => mockResolveChannelByNameForMember(...a),
+        getChannel: (...a: unknown[]) => mockGetChannel(...a),
         getChannelForMember: (...a: unknown[]) => mockGetChannelForMember(...a),
       },
       communityDm: {
@@ -73,8 +73,8 @@ describe("POST /api/community/agent/ack", () => {
     mockGetUserInternal.mockResolvedValue({ isBot: true, deletedAt: null })
     mockGetBotBinding.mockResolvedValue({ machineId: "m_1", runtime: "claude" })
     mockResolveServerByNameForMember.mockResolvedValue([{ id: "srv_1" }])
-    mockResolveChannelByNameForMember.mockResolvedValue([{ id: "ch_1" }])
-    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", parentChannelId: null })
+    mockGetChannel.mockResolvedValue({ id: "ch_1", type: "text" })
+    mockGetChannelForMember.mockResolvedValue({ id: "ch_1", serverId: "srv_1", type: "text", parentChannelId: null })
   })
 
   it("401 without Authorization", async () => {
@@ -115,29 +115,30 @@ describe("POST /api/community/agent/ack", () => {
   it("reports no_such_seq in failed[] (not a request error) when bumpReadCursor can't find that seq", async () => {
     mockBumpReadCursor.mockResolvedValue(null)
     const res = await POST(
-      req({ cursors: [{ channel: "/studio/general", seq: 99 }] }, { Authorization: "Bearer crk_abc" })
+      req({ cursors: [{ channelId: "ch_1", seq: 99 }] }, { Authorization: "Bearer crk_abc" })
     )
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.ok).toBe(false)
     expect(body.applied).toEqual([])
-    expect(body.failed[0]).toMatchObject({ channel: "/studio/general", seq: 99, code: "no_such_seq" })
+    expect(body.failed[0]).toMatchObject({ channel: "ch_1", seq: 99, code: "no_such_seq" })
     expect(body.failed[0].error).toMatch(/no message with seq #99/)
   })
 
   it("REGRESSION (the wedge): a bad cursor never stalls the good cursors behind it — good ones still apply and advance", async () => {
-    // First cursor is a good top-level channel; SECOND resolves fine but its
-    // channel doesn't resolve back (forum_post-style poison ref); THIRD is a
+    // First cursor is a good top-level channel; SECOND carries an id that names
+    // no channel (forum_post-style poison ref → unresolvable); THIRD is a
     // good DM. Under the old fail-fast this returned 404 and the DM after the
     // poison cursor never bumped — the exact mechanism that muted the bot.
-    mockResolveChannelByNameForMember
-      .mockResolvedValueOnce([{ id: "ch_1" }]) // /studio/general → ok
-      .mockResolvedValueOnce([]) // /studio/badpost → unresolvable
-    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-    mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
-      Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null })
+    mockGetChannel.mockImplementation((_db: unknown, id: string) =>
+      Promise.resolve(
+        id === "ch_1"
+          ? { id: "ch_1", type: "text" }
+          : id === "dm_1"
+            ? { id: "dm_1", type: "dm" }
+            : undefined // ch_bad → unresolvable
+      )
     )
-    mockGetDMBetween.mockResolvedValue({ id: "dm_1" })
     mockGetDM.mockResolvedValue({ id: "dm_1", lastMessageAt: null, createdAt: "t" })
     mockGetDMPeer.mockResolvedValue({ otherUserId: "peer_1" })
     mockIsBlocked.mockResolvedValue(false)
@@ -146,9 +147,9 @@ describe("POST /api/community/agent/ack", () => {
       req(
         {
           cursors: [
-            { channel: "/studio/general", seq: 3 },
-            { channel: "/studio/badpost", seq: 5 },
-            { channel: "/.dm/peer#0001", seq: 1 },
+            { channelId: "ch_1", seq: 3 },
+            { channelId: "ch_bad", seq: 5 },
+            { channelId: "dm_1", seq: 1 },
           ],
         },
         { Authorization: "Bearer crk_abc" }
@@ -159,11 +160,11 @@ describe("POST /api/community/agent/ack", () => {
     expect(body.ok).toBe(false)
     // Both good cursors applied AND bumped — despite the poison cursor between them.
     expect(body.applied).toEqual([
-      { channel: "/studio/general", seq: 3 },
-      { channel: "/.dm/peer#0001", seq: 1 },
+      { channel: "ch_1", seq: 3 },
+      { channel: "dm_1", seq: 1 },
     ])
     expect(body.failed).toEqual([
-      { channel: "/studio/badpost", seq: 5, code: "unresolvable", error: expect.any(String) },
+      { channel: "ch_bad", seq: 5, code: "unresolvable", error: expect.any(String) },
     ])
     expect(mockBumpReadCursor).toHaveBeenCalledTimes(2)
     expect(mockBumpReadCursor).toHaveBeenNthCalledWith(1, expect.anything(), "bot_1", { channelId: "ch_1" }, 3)
@@ -172,19 +173,20 @@ describe("POST /api/community/agent/ack", () => {
 
   it("reports a forbidden cursor in failed[] while a sibling good cursor still applies", async () => {
     // First cursor resolves to a channel the bot isn't a member of; second is fine.
-    mockResolveChannelByNameForMember
-      .mockResolvedValueOnce([{ id: "ch_forbidden" }])
-      .mockResolvedValueOnce([{ id: "ch_1" }])
+    // resolveTargetById gates once (call 1 passes), then the route re-affirms
+    // membership on the resolved scope (call 2 → null → forbidden). Calls 3/4
+    // (cursor 2) fall through to the beforeEach default (member) and apply.
+    mockGetChannel.mockResolvedValue({ id: "ch_x", type: "text" })
     mockGetChannelForMember
-      .mockResolvedValueOnce(null) // not a member of ch_forbidden → requireChannelMember fails
-      .mockResolvedValueOnce({ id: "ch_1", serverId: "srv_1", parentChannelId: null })
+      .mockResolvedValueOnce({ id: "ch_forbidden", serverId: "srv_1", type: "text", parentChannelId: null })
+      .mockResolvedValueOnce(null) // route's explicit gate → requireChannelMember fails → forbidden
     mockBumpReadCursor.mockResolvedValue({ id: "m_1", createdAt: "t", seq: 2 })
     const res = await POST(
       req(
         {
           cursors: [
-            { channel: "/studio/secret", seq: 7 },
-            { channel: "/studio/general", seq: 2 },
+            { channelId: "ch_forbidden", seq: 7 },
+            { channelId: "ch_1", seq: 2 },
           ],
         },
         { Authorization: "Bearer crk_abc" }
@@ -193,24 +195,22 @@ describe("POST /api/community/agent/ack", () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.ok).toBe(false)
-    expect(body.applied).toEqual([{ channel: "/studio/general", seq: 2 }])
-    expect(body.failed[0]).toMatchObject({ channel: "/studio/secret", seq: 7, code: "forbidden" })
+    expect(body.applied).toEqual([{ channel: "ch_1", seq: 2 }])
+    expect(body.failed[0]).toMatchObject({ channel: "ch_forbidden", seq: 7, code: "forbidden" })
     expect(mockBumpReadCursor).toHaveBeenCalledTimes(1)
   })
 
   it("propagates a genuine D1 exception as a 500 (never swallowed into failed[])", async () => {
     mockBumpReadCursor.mockRejectedValue(new Error("D1_ERROR: something non-retryable"))
     await expect(
-      POST(req({ cursors: [{ channel: "/studio/general", seq: 3 }] }, { Authorization: "Bearer crk_abc" }))
+      POST(req({ cursors: [{ channelId: "ch_1", seq: 3 }] }, { Authorization: "Bearer crk_abc" }))
     ).rejects.toThrow()
   })
 
   it("200 { ok: true } advances the cursor for every scope in the request, channel and DM alike", async () => {
-    mockGetUserByNameAndDiscriminator.mockResolvedValue({ id: "peer_1", discriminator: "0001" })
-    mockGetUserInternal.mockImplementation((_db: unknown, id: string) =>
-      Promise.resolve(id === "peer_1" ? { id: "peer_1", isBot: false, deletedAt: null } : { isBot: true, deletedAt: null })
+    mockGetChannel.mockImplementation((_db: unknown, id: string) =>
+      Promise.resolve(id === "dm_1" ? { id: "dm_1", type: "dm" } : { id: "ch_1", type: "text" })
     )
-    mockGetDMBetween.mockResolvedValue({ id: "dm_1" })
     mockGetDM.mockResolvedValue({ id: "dm_1", lastMessageAt: null, createdAt: "t" })
     mockGetDMPeer.mockResolvedValue({ otherUserId: "peer_1" })
     mockIsBlocked.mockResolvedValue(false)
@@ -219,8 +219,8 @@ describe("POST /api/community/agent/ack", () => {
       req(
         {
           cursors: [
-            { channel: "/studio/general", seq: 3 },
-            { channel: "/.dm/peer#0001", seq: 1 },
+            { channelId: "ch_1", seq: 3 },
+            { channelId: "dm_1", seq: 1 },
           ],
         },
         { Authorization: "Bearer crk_abc" }
@@ -230,8 +230,8 @@ describe("POST /api/community/agent/ack", () => {
     expect(await res.json()).toEqual({
       ok: true,
       applied: [
-        { channel: "/studio/general", seq: 3 },
-        { channel: "/.dm/peer#0001", seq: 1 },
+        { channel: "ch_1", seq: 3 },
+        { channel: "dm_1", seq: 1 },
       ],
       failed: [],
     })

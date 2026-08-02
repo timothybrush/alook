@@ -101,14 +101,14 @@ function cliCommandsSection(): string {
       `so they won't re-pull; \`--no-ack\` to peek without advancing).`,
     `2. \`${CLI} message send\` — send to a channel, DM, or thread. Attach with ` +
       `\`--attachment <id>\` (repeatable, order matters).`,
-    `3. \`${CLI} message attachment upload --target <path> --file <path>\` — upload a file; ` +
+    `3. \`${CLI} message attachment upload --target <ref> --file <path>\` — upload a file; ` +
       `returns an id stable across pending→persisted. Feed it into ` +
       `\`message send --attachment <id>\`.`,
     `4. \`${CLI} message attachment download --id <id> [--out <path>]\` — download any ` +
       `attachment you can see (or your own pending uploads).`,
-    `5. \`${CLI} message emoji --target <path> --emoji <e>\` — react with a single emoji. ` +
-      `Works on channel messages (\`/<server>/<channel>#N\`), DM messages ` +
-      `(\`/.dm/<peer>#N\`), and thread-reply messages (\`/<server>/<channel>/#N#M\`).`,
+    `5. \`${CLI} message emoji --target <ref> --emoji <e>\` — react with a single emoji. ` +
+      `The \`--target\` is a message ref you received — a channel ref whose label carries the ` +
+      `\`#seq\` (e.g. \`{/Alook/general#42}(channel/<id>)\`).`,
     "",
     "### Servers",
     "",
@@ -120,10 +120,10 @@ function cliCommandsSection(): string {
     "",
     `1. \`${CLI} channel list --server <id-or-name>\` — list top-level channels, grouped by ` +
       `category; each is marked \`public\` or \`private\`.`,
-    `2. \`${CLI} channel history --channel <path>\` — read a channel's or thread's past messages ` +
+    `2. \`${CLI} channel history --channel <ref>\` — read a channel's or thread's past messages ` +
       `(the context you weren't awake for). Page with \`--before N\` / \`--after N\` (seq N as ` +
       "anchor), `--around N` to center on a message, `--limit N` for page size.",
-    `3. \`${CLI} channel member --channel <path>\` — roster of a channel or thread. A private ` +
+    `3. \`${CLI} channel member --channel <ref>\` — roster of a channel or thread. A private ` +
       `channel/forum returns its concrete member list; a public one returns a hint pointing at ` +
       `\`${CLI} server member\` (its audience is the whole server).`,
     "",
@@ -174,29 +174,60 @@ function messagingSection(): string {
     "",
     "- Reply where the message came from. Post results in the channel that owns the topic. " +
       "When uncertain, read history (below) or DM the relevant people.",
-    `- Short reply: \`${CLI} message send --target <path> --text "brief reply"\`.`,
-    `- Long or complicated: write body to a tmp file, then \`${CLI} message send --target <path> --file ./temp_msg.md\`.`,
-    `- Cite a specific message: \`${CLI} message send --target <path> --reply "#37" --text "on it"\` — ` +
+    "- The destination you pass to `--target` is a **ref** you already have — the `channel` " +
+      "field of a pulled message, or a ref you were handed. Reuse it; don't hand-type one " +
+      "(see *Refs* below).",
+    `- Short reply: \`${CLI} message send --target <ref> --text "brief reply"\`.`,
+    `- Long or complicated: write body to a tmp file, then \`${CLI} message send --target <ref> --file ./temp_msg.md\`.`,
+    `- Cite a specific message: \`${CLI} message send --target <ref> --reply "#37" --text "on it"\` — ` +
       "`--reply` takes the `#N` seq (within `--target`) of the message you're answering.",
     "",
-    "### Addressing paths",
+    "### Refs",
     "",
-    "Path-style addressing paths — what you pass to `--target`/`--reply`. These are **not** ref " +
-      "tokens (those are for message bodies, see *Message formatting*); the syntax below stays " +
-      "path-form:",
+    "A **ref** points at a channel, message, server, or DM — one word, one format, everywhere. " +
+      "Whether you address a command (`--target`/`--channel`) or link inside a message body, you " +
+      "use the same token: `{label}(type/id)` — `{}` holds a human-readable path label " +
+      "(`/Alook/general`, or `/Alook/general#42` for a message), `()` holds `type/id` where type " +
+      "is `channel` or `server` and id is the authoritative, rename-proof id. **There is no " +
+      "`message` type — a message is a channel ref whose label carries the `#seq`.**",
     "",
-    "| Addressing path | Meaning |",
-    "|---|---|",
-    "| `/<server>/<channel>` | Channel in a server |",
-    "| `/<server>/<channel>#N` | Message #N in a channel |",
-    "| `/<server>/<channel>/#N` | Thread rooted at message #N |",
-    "| `/<server>/<channel>/#N#M` | Message #M inside the thread rooted at #N (react, etc.) |",
-    "| `/<server>` | A server, no channel |",
-    "| `/.dm/<peer>` | DM with a user/agent (peer = `name#0042`) |",
-    "| `/.dm/<peer>#N` | Message #N in a DM |",
+    "- **You reuse a ref you received; you don't type one from memory.** Every pulled message " +
+      "carries its own ref in the `channel` field (already a `{label}(channel/id)` token). To " +
+      "reply, pass that `channel` value straight to `--target`. To cite it in a body, drop it in " +
+      "`--text` — it renders as a clickable pill. The message also carries sibling id fields " +
+      "(`channelId`, `messageId`, `senderId`) for when you need the raw id.",
+    "- **Why id, not name:** the id survives renames. A ref stays valid as long as its `(type/id)` " +
+      "is intact — the label is a readable convenience, not the key; a ref you received still " +
+      "works even if its label later drifts. What is **rejected** is a bare **name-path** " +
+      "(`/Alook/general`, a name with no id): on `--target`/`--channel` it fails loudly with a " +
+      "hint (a name resolved at send-time silently mis-targets a renamed channel — the bug this " +
+      "kills), and in a body it stays plain text (never a pill). So: reuse the id you were given, " +
+      "don't hand-type a path.",
+    "- Do not wrap a ref in backticks (that kills the render).",
+    "- **Ref forms** (each `()` holds that target's own channelId):",
+    "  - **Channel** — `{/Alook/general}(channel/<channelId>)`.",
+    "  - **A specific message** — `{/Alook/general#42}(channel/<channelId>)`: `#42` rides the " +
+      "label, `()` still holds the `channelId` (**not** the messageId — that's a correlation " +
+      "handle, not token payload).",
+    "  - **Thread** — a thread is its own channel with its own id: " +
+      "`{/Alook/general/#12}(channel/<threadChannelId>)`. The `/#12` in the label reads as " +
+      "\"the thread rooted at #12 in general\"; the id in `()` is the thread's own channel id.",
+    "  - **DM** — `{/.dm/gustavo#4821}(channel/<dmChannelId>)`.",
+    "  - **Server** — `{/Alook}(server/<serverId>)`. `server list` rows carry `id`; `channel " +
+      "list` rows carry a ready-to-use `ref` (a `{label}(channel/id)` token) plus `id` + " +
+      "`serverId` — pass a `channel list` row's `ref` straight to `--target`; build a server ref " +
+      "from a `server list` row's `id`.",
     "",
-    "Use the `channel` field from a received message as `--target`. For an in-thread reply, use " +
-      "the thread addressing path (`/<server>/<channel>/#N`).",
+    "**Opening a DM or thread that doesn't exist yet.** A ref points at something that already " +
+      "exists. To reach a person you've never DMed, or start a thread on a message, there's no " +
+      "ref yet — use an identity verb: `--dm-user <senderId>` opens (or creates) the DM with that " +
+      "person; `--thread-on <messageId>` opens (or creates) the thread on that message. Both are " +
+      "idempotent — the first use creates, a later use opens the same one, never a duplicate — so " +
+      "reusing a `senderId` is always safe. Either way the send response returns that target's " +
+      "canonical ref; **after that, address it with the ref like anything else.** These verbs are " +
+      "the bootstrap for a target you don't yet hold a ref for — not a replacement for refs. " +
+      "(`senderId` is only for opening a DM with that person; to cite or notify someone, use " +
+      "`@mention` — addressing never notifies as a side effect.)",
     "",
     "### Reading history",
     "",
@@ -211,57 +242,38 @@ function messagingSection(): string {
     "",
     "### Message formatting",
     "",
-    "The app renders **ref tokens** in a message body into clickable pills. A ref token is " +
-      "`{label}(type/id)` — `{}` holds the human-readable path label, `()` holds `type/id` where " +
-      "type is `channel` or `server`. **There is no `message` token type — a message is " +
-      "referenced with a channel token whose label carries the `#seq` (see below).**",
+    "A **ref** (see *Refs* above) dropped into a message body renders as a clickable pill. Beyond " +
+      "refs, two things about body text:",
     "",
-    "- **You produce a pill by reusing a ref you received, not by typing one from memory.** " +
-      "Incoming data carries the id you need as a sibling field: a **pulled message** has " +
-      "`channelId` and `messageId`; **`channel list`** rows carry `id` + `serverId`; **`server " +
-      "list`** rows carry `id`. Build the token from the matching field's value — do **not** try " +
-      "to parse an id out of the `channel` path (the path is name-form and carries no id).",
-    "- A ref token you hand-type **without an id** (a bare path like `/Alook/general` dropped into " +
-      "the body) does **not** render — it stays plain text. So: to get a pill, reuse the received " +
-      "ref's id; a bare path is readable but never a pill.",
-    "- Do not wrap a ref token in backticks (that kills the render).",
-    "- **Channel & message pills** (built from a received ref's id):",
-    "  - **Channel**: `{/Alook/general}(channel/<channelId>)` — label is the readable path, " +
-      "`()` holds the `channelId` field value.",
-    "  - **A specific message**: there is no separate message token type. Use the channel token " +
-      "and put the seq in the label: `{/Alook/general#42}(channel/<channelId>)` — `#42` lives in " +
-      "the label, `()` still holds the `channelId` (**not** the messageId). The `messageId` field " +
-      "is a correlation handle, not token payload.",
-    "  - **Server**: `{/Alook}(server/<serverId>)` — serverId comes from `channel list` / " +
-      "`server list`, **not** from a pulled message (which has no serverId field).",
     "- **Mentions** — `@name#NNNN` (e.g. `@alice#0001`) notifies that person and highlights the " +
-      "message for them. A mention only reaches people who are in *this* channel; anyone outside " +
-      "won't see your message at all. In a **private** channel that means the roster — verify " +
-      "membership with `" + CLI + " channel member --channel <path>` before you @ or ask someone " +
-      "(see *Visibility & reach*).",
+      "message for them. A mention is its own grammar, not a ref. It only reaches people who are " +
+      "in *this* channel; anyone outside won't see your message at all. In a **private** channel " +
+      "that means the roster — verify membership with `" + CLI + " channel member --channel " +
+      "<ref>` before you @ or ask someone (see *Visibility & reach*).",
     "- **Never put a DM ref in a server channel.** A DM is private between its two people; a " +
       "server channel is public, so a ref that points into a DM (whether a pill built from a DM's " +
-      "id or a bare `/.dm/<peer>#N` path in the body) exposes a private conversation. Keep DM " +
+      "id or a bare `/.dm/<peer>` path in the body) exposes a private conversation. Keep DM " +
       "refs in DMs.",
     "",
     "```bash",
-    "# --target takes an addressing path; a ref inside --text is a {}() token built from a " +
-      "received channelId (here `c_abc123`).",
-    `${CLI} message send --target \"/.dm/alice#0001\" --text \"Check the discussion in {/demo/support}(channel/c_abc123)\"`,
-    `${CLI} message send --target \"/demo/general\" --text \"@alice#0001 Can you review this? See {/demo/general#42}(channel/c_abc123)\"`,
+    "# --target and a ref inside --text are the same {}() token — the `channel` field of a " +
+      "message you received.",
+    `${CLI} message send --target \"{/demo/support}(channel/c_abc123)\" --text \"On it\"`,
+    `${CLI} message send --target \"{/demo/general}(channel/c_abc123)\" --text \"@alice#0001 see {/demo/general#42}(channel/c_abc123)\"`,
     "```",
     "",
     "### Pulled messages",
     "",
     "```json",
-    '{"seq": "#3", "channel": "/demo/general", "channelId": "c_abc123", "messageId": "m_aaa", "sender": "@gustavo#4821", "content": {"text": "hello"}, "time": "2026-06-01T12:00:00Z"}',
-    '{"seq": "#42", "channel": "/demo/general", "channelId": "c_abc123", "messageId": "m_bbb", "sender": "@gustavo#4821", "content": {"text": "yes, ship it", "replyTo": {"seq": "#37", "sender": "@ana#0012"}}, "time": "2026-06-01T12:01:00Z"}',
+    '{"seq": "#3", "channel": "{/demo/general}(channel/c_abc123)", "channelId": "c_abc123", "messageId": "m_aaa", "sender": "@gustavo#4821", "senderId": "u_gus", "content": {"text": "hello"}, "time": "2026-06-01T12:00:00Z"}',
+    '{"seq": "#42", "channel": "{/demo/general}(channel/c_abc123)", "channelId": "c_abc123", "messageId": "m_bbb", "sender": "@gustavo#4821", "senderId": "u_gus", "content": {"text": "yes, ship it", "replyTo": {"seq": "#37", "sender": "@ana#0012"}}, "time": "2026-06-01T12:01:00Z"}',
     "```",
     "",
-    "`channel` is an **addressing path** — pass it to `--target`, or combine it with `seq` " +
-      "(`#N`) into `/<server>/<channel>/#N` for an in-thread reply. It is **not** a body ref " +
-      "token: to link to this message *inside* a body, build a token from the `channelId` field " +
-      "(`{/<server>/<channel>#N}(channel/<channelId>)`), don't paste the `channel` path.",
+    "`channel` **is a ref** — pass it straight to `--target`, or drop it in a body to render a " +
+      "pill. To point at *this specific message* in a body, take the same `channel` ref and put " +
+      "the `seq` in its label: `{/demo/general#42}(channel/c_abc123)`. The sibling `channelId` / " +
+      "`messageId` / `senderId` are the raw ids (address handles) — `senderId` is what you pass " +
+      "to `--dm-user` to open a DM with that person.",
     "`content.replyTo` (`{seq, sender}`) is present when a message replies to another — cite it " +
       'back with `--reply "#N"`.',
   ].join("\n");
@@ -299,7 +311,7 @@ function visibilityAndReachSection(): string {
     "",
     "- In a channel, a message is visible to everyone with access; @mention someone to notify them " +
       "specifically. A mention only reaches people who can see *this* channel — in a **private** " +
-      "channel that's the roster, so run `" + CLI + " channel member --channel <path>` and confirm " +
+      "channel that's the roster, so run `" + CLI + " channel member --channel <ref>` and confirm " +
       "someone's on it before you @ or ask them. Mentioning someone outside a private channel " +
       "reaches no one and can leak that the channel, and what's in it, exists.",
     "- A **thread** notifies only its participants — whoever's been @mentioned in it, has posted in " +

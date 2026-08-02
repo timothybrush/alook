@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   createThreadChannel,
-  getChildChannelByName,
   dedupeChildChannelSlug,
 } from "../../src/db/queries/community/channel";
 
@@ -150,31 +149,6 @@ describe("createThreadChannel", () => {
     });
     await expect(createThreadChannel(db, "forum_post_1", "m_root", "u_1")).rejects.toThrow(/child channel/);
     expect(db.__insertValues).not.toHaveBeenCalled();
-  });
-});
-
-describe("getChildChannelByName", () => {
-  it("returns all matches (mapped rows) so the caller can detect ambiguity", async () => {
-    const db = createSelectDb([
-      { id: "post_1", name: "dupe", type: "forum_post", serverId: "srv_1", parentChannelId: "forum_1", forumTags: null },
-      { id: "post_2", name: "dupe", type: "forum_post", serverId: "srv_1", parentChannelId: "forum_1", forumTags: null },
-    ]);
-    const rows = await getChildChannelByName(db, "forum_1", "dupe");
-    expect(rows.map((r) => r.id)).toEqual(["post_1", "post_2"]);
-  });
-
-  it("returns [] when no post with that name exists under the forum", async () => {
-    const db = createSelectDb([]);
-    const rows = await getChildChannelByName(db, "forum_1", "ghost");
-    expect(rows).toEqual([]);
-  });
-
-  it("matches the post name with COLLATE NOCASE — same ruler as top-level resolve (ref/id §4)", async () => {
-    const db = createSelectDb([]);
-    await getChildChannelByName(db, "forum_1", "notes");
-    const chain = db.select.mock.results[0]!.value;
-    const [whereExpr] = chain.where.mock.calls[0]!;
-    expect(hasCollateNocase(whereExpr)).toBe(true);
   });
 });
 
