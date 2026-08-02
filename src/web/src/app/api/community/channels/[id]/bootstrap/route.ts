@@ -43,7 +43,11 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
   // read-state route's 404-vs-403 ordering without paying for it every open.
   const auth = await requireChannelMember(db, channelId, ctx.userId)
   if (!auth.ok) {
-    const channel = await queries.communityChannel.getChannel(db, channelId)
+    // `withD1Retry` (D1-armor state 2): 404-vs-403 disambiguation read — a
+    // transient would mislabel a real channel as 404; retry to truth.
+    const channel = await withD1Retry(() => queries.communityChannel.getChannel(db, channelId), {
+      route: "community/channels/bootstrap:get-channel",
+    })
     if (!channel) return writeError("channel not found", 404)
     return writeError(auth.error, auth.status)
   }
@@ -65,16 +69,27 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
   // newest page — NOT 404 (that would break channel-open entirely). This is the
   // one behavior the standalone messages route can't safely centralize.
   const anchorId = readState.lastReadMessageId
+  // `withD1Retry` (D1-armor state 2): anchor resolve — a transient false-miss
+  // would drop a valid read-pointer to the newest-page fallback (wrong open
+  // position); retry to truth.
   const anchor = anchorId
-    ? await queries.communityMessage.getMessageInScope(db, anchorId, { channelId })
+    ? await withD1Retry(() => queries.communityMessage.getMessageInScope(db, anchorId, { channelId }), {
+        route: "community/channels/bootstrap:anchor",
+      })
     : null
 
   if (anchor) {
-    const around = await queries.communityMessage.listMessagesAround(db, {
-      channelId,
-      anchor: { createdAt: anchor.createdAt, id: anchor.id },
-      limit: pageSize,
-    })
+    // `withD1Retry` (D1-armor state 2): no-fallback page read — a transient
+    // false-empty would open the channel to an empty/wrong window; retry.
+    const around = await withD1Retry(
+      () =>
+        queries.communityMessage.listMessagesAround(db, {
+          channelId,
+          anchor: { createdAt: anchor.createdAt, id: anchor.id },
+          limit: pageSize,
+        }),
+      { route: "community/channels/bootstrap:around" },
+    )
     const { items, hasMoreOlder, hasMoreNewer, olderCursor, newerCursor } = buildAnchorResponse(
       around.older,
       around.newer,
@@ -97,10 +112,12 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
   // Newest-page fallback: no read pointer, or the pointer's message is gone.
   // Mirrors the messages route's legacy branch (DESC + one-extra-row probe,
   // reversed to ASC) so the seeded page is a trusted newest-tail window.
-  const rows = await queries.communityMessage.listMessages(db, {
-    channelId,
-    limit: pageSize + 1,
-  })
+  // `withD1Retry` (D1-armor state 2): newest-page fallback read — a transient
+  // false-empty would open the channel empty; retry to truth.
+  const rows = await withD1Retry(
+    () => queries.communityMessage.listMessages(db, { channelId, limit: pageSize + 1 }),
+    { route: "community/channels/bootstrap:newest-page" },
+  )
   const { items, hasMore, cursor: nextCursor } = buildPaginatedResponse(rows, pageSize)
   const { messages, latestSeq } = await enrichMessages(db, ctx.userId, { channelId }, items.slice().reverse())
   return writeJSON({

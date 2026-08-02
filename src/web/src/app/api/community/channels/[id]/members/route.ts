@@ -33,9 +33,17 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
   // live /c UI reads `/participants` for these units; this branch is API/agent
   // parity so a direct GET of a post's `/members` agrees.
   if (isThread(channel.type) || isForumPost(channel.type)) {
-    const participants = await queries.communityThread.listThreadParticipants(db, channelId)
+    // `withD1Retry` (D1-armor state 2): no-fallback member-list reads — a
+    // transient false-empty would return a wrong/empty roster; retry to truth.
+    const participants = await withD1Retry(
+      () => queries.communityThread.listThreadParticipants(db, channelId),
+      { route: "channels/members/thread-participants" },
+    )
     const userIds = participants.map((p) => p.userId)
-    const rows = await queries.communityMember.getMembersByUserIds(db, channel.serverId, userIds)
+    const rows = await withD1Retry(
+      () => queries.communityMember.getMembersByUserIds(db, channel.serverId, userIds),
+      { route: "channels/members/thread-member-rows" },
+    )
     const rowByUser = new Map(rows.map((r) => [r.userId, r]))
     const members = participants
       .map((p) => {
@@ -53,14 +61,19 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
   // Channel / forum: the ACCESS dimension. Resolve the audience (public → all
   // server members; private → own roster ∪ creator). The anchor IS the roster
   // for these top-level units, so the roster creator is `anchor.creatorId`.
-  const scopeMembers = await queries.communityMembersResolver.resolveScopeMembers(db, {
-    scope: isForum(channel.type) ? "forum" : "channel",
-    scopeId: channelId,
-  })
-  const rows = await queries.communityMember.getMembersByUserIds(
-    db,
-    anchor.serverId,
-    scopeMembers.map((m) => m.userId),
+  // `withD1Retry` (D1-armor state 2): no-fallback audience + member-row reads —
+  // a transient false-empty would return a wrong/empty roster; retry to truth.
+  const scopeMembers = await withD1Retry(
+    () =>
+      queries.communityMembersResolver.resolveScopeMembers(db, {
+        scope: isForum(channel.type) ? "forum" : "channel",
+        scopeId: channelId,
+      }),
+    { route: "channels/members/scope-members" },
+  )
+  const rows = await withD1Retry(
+    () => queries.communityMember.getMembersByUserIds(db, anchor.serverId, scopeMembers.map((m) => m.userId)),
+    { route: "channels/members/scope-member-rows" },
   )
   const rowByUser = new Map(rows.map((r) => [r.userId, r]))
 
