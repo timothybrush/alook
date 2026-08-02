@@ -32,6 +32,7 @@
  */
 import ts from "typescript"
 import { readFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
 
 // `lookupOr503` is a COMPOSED carrier — a thin, UNCONDITIONAL wrapper that does
 // `withD1Retry(fn, RETRY_OPTS)` on the thunk it's handed (+ maps exhaustion to a
@@ -102,6 +103,99 @@ function classifyCall(call) {
   return null
 }
 
+/**
+ * Statement-BUILDERS are query fns that CONSTRUCT a Drizzle statement and
+ * `return` it un-executed, for a caller to compose into a `db.batch([...])`
+ * (or hand off via an `extraStatements` array). `bumpBotDailyActivityStatement`
+ * is the live example: `send/route.ts:209` passes it into createMessage's armored
+ * batch. The call `queries.communityBot.bumpBotDailyActivityStatement(db, …)`
+ * classifies as a "queries" point (root=queries, first-arg=db), but it is NOT an
+ * independent D1 exit — the exec UNIT is the batch that runs it, which census
+ * either sees directly or reaches inside `db/queries/**` (excluded as the retry
+ * unit). Retrying the builder-call would retry "build a statement", not a query.
+ *
+ * SOUNDNESS (Aigneis #282 — the predicate must never introduce a false-NEGATIVE
+ * that hides a real bare exec). The structural "returns a `db` chain, no internal
+ * await" property ALONE is NOT enough: a lazy READ query (`listMembers` =
+ * `return db.select()…`, awaited by its caller) has the exact same shape as a
+ * batch builder, and 77 query fns match it. Demoting those would hide real
+ * executing reads — the precise failure mode to avoid. So THREE facts are ALL
+ * required:
+ *   (a) NAME: the fn is suffixed `*Statement` / `*Builder` — the codebase's
+ *       DELIBERATE, documented marker that a fn returns an un-executed statement
+ *       for batch composition (Simone/Melly's "statement-builder"). No `list*` /
+ *       `get*` read carries it, so this can't over-match a read.
+ *   (b) DEFINITION guard: the suffixed fn really is pure (no internal `await`,
+ *       returns a `db`-rooted chain) — defends against a read mis-named with the
+ *       suffix; such a fn would still execute and must stay a real point.
+ *   (c) CALL-SITE: this call is NOT the operand of `await` — a non-awaited
+ *       builder call is being COMPOSED (array element / argument) and runs later
+ *       in a batch (a separately-visible exec point). An `await`ed builder call
+ *       executes the thenable HERE and stays a real point.
+ * SAFE failure direction: a future builder that DOESN'T follow the naming
+ * convention isn't demoted → census reports it UNATTRIBUTED (over-report), never
+ * hides it. Residual: no code does `const s = builder(); await s` (split
+ * execute) — none exists; the batch convention forbids that shape anyway.
+ */
+let _builderCache = null
+const BUILDER_SUFFIX = /(Statement|Builder)$/
+function deriveStatementBuilders(root) {
+  if (_builderCache) return _builderCache
+  const names = new Set()
+  const out = execFileSync("git", ["ls-files", "src/shared/src/db/queries"], {
+    cwd: root, encoding: "utf8",
+  })
+  for (const rel of out.trim().split("\n").filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))) {
+    const abs = `${root}/${rel}`
+    const sf = ts.createSourceFile(abs, readFileSync(abs, "utf8"), ts.ScriptTarget.Latest, true)
+    const visit = (node) => {
+      if (
+        ts.isFunctionDeclaration(node) &&
+        node.name &&
+        node.body &&
+        BUILDER_SUFFIX.test(node.name.text) &&
+        node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) &&
+        isPureStatementBuilder(node.body)
+      ) {
+        names.add(node.name.text)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sf)
+  }
+  _builderCache = names
+  return names
+}
+
+/** A function body that has NO `await` anywhere and `return`s a `db.*` chain. */
+function isPureStatementBuilder(body) {
+  let hasAwait = false
+  let returnsDbChain = false
+  const scan = (node) => {
+    if (ts.isAwaitExpression(node)) hasAwait = true
+    // Don't descend into nested function bodies — a builder may take/define a
+    // closure; its own body's await/return is what matters. (Drizzle builders
+    // don't nest fns today, but this keeps the check local and correct.)
+    if (
+      ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) || ts.isMethodDeclaration(node)
+    ) {
+      if (node !== body.parent) return
+    }
+    if (ts.isReturnStatement(node) && node.expression && rootIdentifier(node.expression) === "db") {
+      returnsDbChain = true
+    }
+    ts.forEachChild(node, scan)
+  }
+  scan(body)
+  return returnsDbChain && !hasAwait
+}
+
+/** Is `call` the direct operand of an `await`? (`await queries.x.builder(db)`) */
+function isAwaited(call) {
+  return call.parent && ts.isAwaitExpression(call.parent)
+}
+
 /** The carrier call `node` sits inside (as a descendant of its arguments), or null. */
 export function enclosingCarrier(node) {
   let cur = node.parent
@@ -134,10 +228,25 @@ export function execPoints(relPath, root) {
   const src = readFileSync(abs, "utf8")
   const sf = ts.createSourceFile(abs, src, ts.ScriptTarget.Latest, /*setParentNodes*/ true)
   const points = []
+  const builders = deriveStatementBuilders(root)
 
   const visit = (node) => {
     if (ts.isCallExpression(node)) {
       const kind = classifyCall(node)
+      // Statement-builder composition (`queries.ns.buildX(db,…)` un-awaited) is
+      // NOT an independent D1 exit — the exec unit is the batch that runs it.
+      // See `deriveStatementBuilders`. Both facts required: the callee is a
+      // derived pure builder AND this call isn't awaited (an awaited builder
+      // call executes the thenable here and stays a real point).
+      if (
+        kind === "queries" &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        builders.has(node.expression.name.text) &&
+        !isAwaited(node)
+      ) {
+        ts.forEachChild(node, visit)
+        return
+      }
       if (kind) {
         const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf))
         points.push({
