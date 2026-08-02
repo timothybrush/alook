@@ -51,15 +51,12 @@ import { execFileSync } from "node:child_process"
 // detector rather than growing this list by hand.
 export const CARRIERS = ["withD1Retry", "readOrStale", "idempotentWrite", "nonIdempotentWriteAllowed", "lookupOr503"]
 
-// `d1BareAllowed({ reason })` — a no-op marker wrapping a point that is
-// DELIBERATELY left un-armored (Melly #260): a transient-tolerant read whose
-// loss self-heals with no wrong-state (e.g. a typing fan-out read). Same spirit
-// as `nonIdempotentWriteAllowed({reason})` — the decision + reason live IN THE
-// CODE, machine-detectable, review-visible — never a side-list (a side-list is
-// human memory = the blind spot this whole effort removes). `enclosingCarrier`
-// reports it distinctly so the census buckets it as "intentionally-bare" (a
-// documented, non-blocking exception) rather than "armored" or "UNATTRIBUTED".
-export const BARE_MARKER = "d1BareAllowed"
+// NOTE: the `d1BareAllowed` bare-marker was removed (Gener-approved, D1 opt
+// review #439). It had zero uses and was never built as a runtime carrier: a
+// deliberately-bare D1 exit is not a legitimate state, because deploy/DO-reset
+// transients (which CF does NOT auto-retry — see resilience.ts) hit any
+// in-flight op, so nothing is safely bare. Reviving it requires re-arguing
+// "is this op truly bare-safe?" from scratch (Aigneis), not re-adding a marker.
 
 /** Leftmost identifier of a (possibly nested) property-access / call chain. */
 function rootIdentifier(node) {
@@ -290,7 +287,7 @@ export function enclosingCarrier(node) {
         : ts.isPropertyAccessExpression(cur.expression)
           ? cur.expression.name.text
           : null
-      if ((name && CARRIERS.includes(name)) || name === BARE_MARKER) {
+      if (name && CARRIERS.includes(name)) {
         // Confirm `node` is within the carrier's ARGUMENTS (its wrapped
         // closure), not merely a later sibling that shares an ancestor.
         if (cur.arguments.some((a) => a.pos <= node.pos && node.end <= a.end)) {

@@ -73,26 +73,26 @@ function readBaselineKeys() {
 }
 
 const baseline = readBaselineKeys()
-const buckets = { armored: [], intentionallyBare: [], baseline: [], UNASSIGNED: [] }
+const buckets = { armored: [], baseline: [], UNASSIGNED: [] }
 
 for (const file of scopeFiles()) {
   for (const p of execPoints(file, ROOT)) {
-    // `d1BareAllowed({reason})` marks a documented deliberately-bare point — an
-    // in-code, review-visible exception (Melly #260), not "armored".
-    if (p.armored === "d1BareAllowed") buckets.intentionallyBare.push(p)
-    else if (p.armored) buckets.armored.push(p)
+    // NOTE: the `d1BareAllowed` "intentionally-bare" bucket was removed
+    // (Gener-approved, D1 opt review #439): it had zero uses and was never
+    // built as a runtime carrier — a deliberately-bare exit is not a legitimate
+    // state (deploy/DO-reset transients hit any in-flight D1 op, so nothing is
+    // safely bare). Reviving it requires re-arguing "is this op truly
+    // bare-safe?" from scratch (Aigneis), not just re-adding the marker.
+    if (p.armored) buckets.armored.push(p)
     else if (baseline.has(pointKey(p))) buckets.baseline.push(p)
     else buckets.UNASSIGNED.push(p)
   }
 }
 
 const total =
-  buckets.armored.length + buckets.intentionallyBare.length +
-  buckets.baseline.length + buckets.UNASSIGNED.length
+  buckets.armored.length + buckets.baseline.length + buckets.UNASSIGNED.length
 console.log(`D1 census — ${total} execution points across the ② scope:`)
 console.log(`  armored (in a carrier):           ${buckets.armored.length}`)
-console.log(`  intentionally-bare (d1BareAllowed): ${buckets.intentionallyBare.length}`)
-for (const p of buckets.intentionallyBare) console.log(`      ${pointKey(p)}  ${p.kind}`)
 console.log(`  baseline (grandfathered bare):    ${buckets.baseline.length}`)
 for (const p of buckets.baseline) console.log(`      ${pointKey(p)}  ${p.kind}`)
 console.log(`  UNATTRIBUTED (blind spot):        ${buckets.UNASSIGNED.length}`)
