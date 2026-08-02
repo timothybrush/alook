@@ -10,6 +10,7 @@ import {
   createLogger,
   isUniqueConstraintError,
   idempotentWrite,
+  nonIdempotentWriteAllowed,
   withD1Retry,
 } from "@alook/shared"
 import type { MentionType } from "@alook/shared"
@@ -622,18 +623,30 @@ export async function createCommunityMessage(params: {
         if (!r2Key) {
           throw new Error(`attachment url outside /api/community/media/: ${att.url}`)
         }
-        const row = await queries.communityAttachment.createAttachment(db, {
-          messageId: created.id,
-          uploaderId: authorId,
-          targetId,
-          r2Key,
-          filename: att.filename,
-          position: idx,
-          contentType: att.contentType,
-          size: att.size,
-          width: att.width,
-          height: att.height,
-        })
+        // `nonIdempotentWriteAllowed` (D1-armor state 4b): unguarded INSERT (no
+        // unique / onConflict), so NOT retried — a blind retry would double-
+        // create. Harm is bounded + visible, not silent: the row is scoped to
+        // THIS just-created message (`messageId: created.id`, never cross-
+        // threaded), so a dup is a visible extra attachment on this one message
+        // (deletable), not a lost/mis-routed attachment. A transient here throws
+        // → the caller's send fails and retries, and the nonce dedup collapses
+        // the resend onto the same message (Aigneis/Melly #293-295).
+        const row = await nonIdempotentWriteAllowed(
+          { reason: "unguarded attachment INSERT scoped to this message (messageId=created.id, no cross-thread); dup is a visible deletable row, not silent; no natural dedupeKey (r2Key per-upload)", route: "message-create/create-attachment" },
+          () =>
+            queries.communityAttachment.createAttachment(db, {
+              messageId: created.id,
+              uploaderId: authorId,
+              targetId,
+              r2Key,
+              filename: att.filename,
+              position: idx,
+              contentType: att.contentType,
+              size: att.size,
+              width: att.width,
+              height: att.height,
+            }),
+        )
         return {
           id: row.id,
           filename: row.filename,
