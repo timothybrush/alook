@@ -24,10 +24,20 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
 
   let targetUserId = body.userId
   if (!targetUserId && body.username) {
-    const handle = parseNameAndTag(body.username)
+    // Capture the narrowed `username` in a const — the `withD1Retry` arrow
+    // closure below otherwise loses the `if (body.username)` narrowing and
+    // widens it back to `string | undefined`.
+    const username = body.username
+    const handle = parseNameAndTag(username)
+    // `withD1Retry` (D1-armor state 2): handle→user resolve — a transient would
+    // 404 a real target user; retry to truth.
     const targetUser = handle
-      ? await queries.user.getUserByNameAndDiscriminator(db, handle.name, handle.discriminator)
-      : await queries.user.getUserByNameCaseInsensitive(db, body.username)
+      ? await withD1Retry(() => queries.user.getUserByNameAndDiscriminator(db, handle.name, handle.discriminator), {
+          route: "friends/request/resolve-handle",
+        })
+      : await withD1Retry(() => queries.user.getUserByNameCaseInsensitive(db, username), {
+          route: "friends/request/resolve-username",
+        })
     if (!targetUser) return writeError("user not found", 404)
     targetUserId = targetUser.id
   }
@@ -40,7 +50,11 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeError("cannot send friend request to yourself", 400)
   }
 
-  const target = await queries.user.getUserInternal(db, targetUserId)
+  // `withD1Retry` (D1-armor state 2): target liveness gate — a transient would
+  // 404 a real user; retry to truth.
+  const target = await withD1Retry(() => queries.user.getUserInternal(db, targetUserId), {
+    route: "friends/request/target",
+  })
   if (!target || target.deletedAt !== null) return writeError("user not found", 404)
 
   // Owner ↔ own-bot is a synthetic friendship — no row can exist. 409 so the UI

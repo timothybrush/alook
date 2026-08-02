@@ -146,8 +146,17 @@ async function doEnqueueBotWakes(env: Env, opts: EnqueueBotWakesOpts): Promise<v
   // queue consumer re-runs the same gate at consume time anyway) rather
   // than losing every wake for the message.
   const scope: { channelId: string } = { channelId }
+  // `withD1Retry` (D1-armor state 2): the read-scope gate decides whether each
+  // bot is woken — a transient would drop that candidate's wake (the
+  // allSettled-rejected → warn+drop path below is the backstop, and the queue
+  // consumer re-runs `buildUnreadWakeCommand`'s gate at consume time, but retry
+  // to truth first so an absorbable blip doesn't needlessly drop a real wake).
   const gateResults = await Promise.allSettled(
-    candidates.map((c) => queries.communityMember.canBotReadWakeScope(db, c.botUserId, scope))
+    candidates.map((c) =>
+      withD1Retry(() => queries.communityMember.canBotReadWakeScope(db, c.botUserId, scope), {
+        route: "wake-producer/read-gate",
+      })
+    )
   )
   const gated = candidates.filter((c, i) => {
     const r = gateResults[i]!
@@ -169,10 +178,18 @@ async function doEnqueueBotWakes(env: Env, opts: EnqueueBotWakesOpts): Promise<v
   // no server/parent row → defaults to `all`), so a `nothing` set elsewhere
   // never suppresses a DM wake.
   const mentioned = new Set(opts.mentionedUserIds ?? [])
-  const levels = await queries.communityNotificationSetting.resolveEffectiveLevelForUsers(
-    db,
-    gated.map((c) => c.botUserId),
-    channelId,
+  // `withD1Retry` (D1-armor state 2): the mute-level read decides which bots
+  // this message wakes — a transient false-empty would misapply the mute gate
+  // (fall back to `all` → wake a bot that muted the channel, or the reverse);
+  // retry to truth. (Default `all` is for a genuinely-absent setting, not a blip.)
+  const levels = await withD1Retry(
+    () =>
+      queries.communityNotificationSetting.resolveEffectiveLevelForUsers(
+        db,
+        gated.map((c) => c.botUserId),
+        channelId,
+      ),
+    { route: "wake-producer/mute-levels" },
   )
   const woken = gated.filter((c) =>
     shouldDeliver(levels.get(c.botUserId) ?? "all", mentioned.has(c.botUserId)),

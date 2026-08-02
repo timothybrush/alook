@@ -17,7 +17,11 @@ export const DELETE = withAuth(async (_req, ctx) => {
     return writeError("friendship id is required", 400)
   }
 
-  const friendship = await queries.communityFriendship.getFriendship(db, id)
+  // `withD1Retry` (D1-armor state 2): friendship access-gate read — a transient
+  // would 404 a real friendship; retry to truth.
+  const friendship = await withD1Retry(() => queries.communityFriendship.getFriendship(db, id), {
+    route: "friends/remove/friendship",
+  })
   if (!friendship) {
     return writeError("friendship not found", 404)
   }
@@ -36,7 +40,11 @@ export const DELETE = withAuth(async (_req, ctx) => {
     // is owner-decision with decision='deny' (one path per role).
     let allowed = friendship.requesterId === ctx.userId
     if (!allowed) {
-      const requester = await queries.user.getUserInternal(db, friendship.requesterId)
+      // `withD1Retry` (D1-armor state 2): resolves the bot-owner cancel path — a
+      // transient would wrongly deny a legit owner cancel; retry to truth.
+      const requester = await withD1Retry(() => queries.user.getUserInternal(db, friendship.requesterId), {
+        route: "friends/remove/requester",
+      })
       if (requester?.isBot && requester.ownerUserId === ctx.userId) allowed = true
     }
     if (!allowed) {

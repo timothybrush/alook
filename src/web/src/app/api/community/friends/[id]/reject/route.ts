@@ -15,7 +15,11 @@ export const POST = withAuth(async (_req, ctx) => {
     return writeError("friendship id is required", 400)
   }
 
-  const friendship = await queries.communityFriendship.getFriendship(db, id)
+  // `withD1Retry` (D1-armor state 2): friendship access-gate read — a transient
+  // would 404 a real pending request; retry to truth.
+  const friendship = await withD1Retry(() => queries.communityFriendship.getFriendship(db, id), {
+    route: "friends/reject/friendship",
+  })
   if (!friendship) return writeError("friendship not found", 404)
   // Either side of a pending request can tear it down (addressee rejecting,
   // requester cancelling). The DB query is atomic on `status='pending'`.
