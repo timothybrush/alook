@@ -9,7 +9,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
   if (!folderId) return writeError("missing folder id", 400)
 
   const db = getDb(ctx.env.DB)
-  const folder = await queries.communityServerFolder.getFolder(db, folderId, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): folder ownership/existence gate — a
+  // transient would 404 the owner's own folder; retry to truth.
+  const folder = await withD1Retry(() => queries.communityServerFolder.getFolder(db, folderId, ctx.userId), {
+    route: "server-folders/patch/folder",
+  })
   if (!folder) return writeError("folder not found", 404)
 
   let body: { name?: string; serverIds?: string[] }
@@ -38,8 +42,12 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
       return writeError("serverIds must be an array", 400)
     }
     if (body.serverIds.length > 0) {
+      // `withD1Retry` (D1-armor state 2): membership validation gate — a
+      // transient false-empty would wrongly reject a member's own servers; retry.
       const memberServerIds = new Set(
-        await queries.communityMember.listMemberServerIds(db, ctx.userId),
+        await withD1Retry(() => queries.communityMember.listMemberServerIds(db, ctx.userId), {
+          route: "server-folders/patch/member-servers",
+        }),
       )
       const stranger = body.serverIds.find((id) => !memberServerIds.has(id))
       if (stranger) {
@@ -53,7 +61,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
     })
   }
 
-  const updated = await queries.communityServerFolder.getFolder(db, folderId, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): readback for the response after the item
+  // replace — a transient would drop the updated folder from the response; retry.
+  const updated = await withD1Retry(() => queries.communityServerFolder.getFolder(db, folderId, ctx.userId), {
+    route: "server-folders/patch/readback",
+  })
   return writeJSON(updated)
 })
 
@@ -62,7 +74,11 @@ export const DELETE = withAuth(async (_req, ctx) => {
   if (!folderId) return writeError("missing folder id", 400)
 
   const db = getDb(ctx.env.DB)
-  const folder = await queries.communityServerFolder.getFolder(db, folderId, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): folder ownership/existence gate — a
+  // transient would 404 the owner's own folder; retry to truth.
+  const folder = await withD1Retry(() => queries.communityServerFolder.getFolder(db, folderId, ctx.userId), {
+    route: "server-folders/delete/folder",
+  })
   if (!folder) return writeError("folder not found", 404)
 
   // `withD1Retry` (state 3): delete-by-key is idempotent.
