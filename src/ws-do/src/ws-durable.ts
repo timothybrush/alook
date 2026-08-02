@@ -5,6 +5,7 @@ import {
   createLogger,
   readOrStale,
   withD1Retry,
+  nonIdempotentWriteAllowed,
   COMMUNITY_MACHINE_HEARTBEAT_MS,
   COMMUNITY_MACHINE_OFFLINE_THRESHOLD_MS,
   HostReadyMessageSchema,
@@ -1002,13 +1003,29 @@ export class WebSocketDurableObject extends DurableObject<Env> {
           }),
         isMatch: (binding) => binding.machineId === identity.machineId,
         write: async (binding) => {
-          const inserted = await queries.communityBotAuditLog.insertBotActivityEventAndPrune(db, {
-            botId: frame.agentId,
-            sessionId: frame.sessionId ?? null,
-            launchId: frame.launchId ?? null,
-            kind: frame.event.kind,
-            payload,
-          })
+          // `nonIdempotentWriteAllowed` (D1-armor state 4b): the activity-audit
+          // insert (`db.batch([insert, prune])`) has no onConflict — a blind
+          // retry would double-insert an audit row. NOT retried: the double-
+          // insert harm is bounded to owner-only activity-log noise (no
+          // user-facing state — unlike a mention's unread count), and a lost
+          // row is already accepted by the `ws_frame_dropped_write` audit-loss
+          // SLO (the caller's catch). A transient throws → the SLO drop path
+          // (Aigneis/Blondie #320-322: audit write graded by double-insert harm,
+          // owner-only-trail + SLO-accepted → 4b, not a benign bare read).
+          const inserted = await nonIdempotentWriteAllowed(
+            {
+              reason: "activity-audit insert+prune, no onConflict; double-insert = owner-only log noise (no user-facing state); loss accepted by ws_frame_dropped_write SLO",
+              route: "ws-do/bot-audit-event/insert",
+            },
+            () =>
+              queries.communityBotAuditLog.insertBotActivityEventAndPrune(db, {
+                botId: frame.agentId,
+                sessionId: frame.sessionId ?? null,
+                launchId: frame.launchId ?? null,
+                kind: frame.event.kind,
+                payload,
+              }),
+          )
           if (!inserted) return
           await this.notifyUserDO(binding.ownerUserId, {
             type: WS_EVENTS.BOT_AUDIT_EVENT,

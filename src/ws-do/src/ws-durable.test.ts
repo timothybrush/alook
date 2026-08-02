@@ -267,6 +267,10 @@ vi.mock("@alook/shared", () => {
     // and lets its throw propagate (same boundary the tests inject errors at).
     // Real retry semantics are covered by the shared `resilience.test.ts` suite.
     withD1Retry: <T>(fn: () => Promise<T>, _opts?: unknown): Promise<T> => fn(),
+    // Passthrough `nonIdempotentWriteAllowed` — invoke the write fn once (no
+    // retry), matching its runtime `(opts, fn) => fn()` shape. The bot_audit_event
+    // insert is wrapped in it (D1-armor 4b).
+    nonIdempotentWriteAllowed: <T>(_opts: unknown, fn: () => Promise<T>): Promise<T> => fn(),
     COMMUNITY_MACHINE_HEARTBEAT_MS: 60_000,
     COMMUNITY_MACHINE_OFFLINE_THRESHOLD_MS: 120_000,
     SessionErrorFrameSchema,
