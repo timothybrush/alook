@@ -33,7 +33,22 @@
 import ts from "typescript"
 import { readFileSync } from "node:fs"
 
-export const CARRIERS = ["withD1Retry", "readOrStale", "idempotentWrite", "nonIdempotentWriteAllowed"]
+// `lookupOr503` is a COMPOSED carrier — a thin, UNCONDITIONAL wrapper that does
+// `withD1Retry(fn, RETRY_OPTS)` on the thunk it's handed (+ maps exhaustion to a
+// 503), in `lib/middleware/community-agent-runner-auth.ts`. A read passed to it
+// as `lookupOr503("step", () => queries.x(db))` IS armored, but withD1Retry
+// lives in the helper body — not a lexical ancestor of the queries call (the
+// call sits in the thunk, one frame away) — so `enclosingCarrier` can't see it
+// and would false-POSITIVE the read as bare. Registering the helper NAME (exact
+// match, NOT a "any thunk-taking helper" heuristic — that would false-NEGATIVE a
+// helper that takes a thunk but forgets to wrap it) resolves it safely: the
+// thunk's queries call is lexically inside the `lookupOr503(...)` arguments, so
+// the existing arg-containment check matches. GUARD: this is safe ONLY while
+// lookupOr503 stays an UNCONDITIONAL withD1Retry wrapper — if it ever branches to
+// skip the wrap, drop it here and inline instead. It is the ONLY such helper
+// repo-wide (Simone #281); a second one → build a general "composed-carrier"
+// detector rather than growing this list by hand.
+export const CARRIERS = ["withD1Retry", "readOrStale", "idempotentWrite", "nonIdempotentWriteAllowed", "lookupOr503"]
 
 // `d1BareAllowed({ reason })` — a no-op marker wrapping a point that is
 // DELIBERATELY left un-armored (Melly #260): a transient-tolerant read whose
