@@ -17,7 +17,11 @@ export const GET = withAuth(async (_req: NextRequest, ctx) => {
   const auth = await requireChannelMember(db, channelId, ctx.userId)
   if (!auth.ok) return writeError(auth.error, auth.status)
 
-  const rows = await queries.communityPin.listPins(db, channelId)
+  // `withD1Retry` (D1-armor state 2): no-fallback pin-list read — a transient
+  // false-empty would render an empty pins list; retry to truth.
+  const rows = await withD1Retry(() => queries.communityPin.listPins(db, channelId), {
+    route: "channels/pins/list",
+  })
   const pins = rows.map((r) => ({
     id: r.message.id,
     authorName: r.author.name,
@@ -34,7 +38,11 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
 
   const db = getDb(ctx.env.DB)
 
-  const channel = await queries.communityChannel.getChannel(db, channelId)
+  // `withD1Retry` (D1-armor state 2): channel existence/type gate — a transient
+  // would 404 a real channel; retry to truth.
+  const channel = await withD1Retry(() => queries.communityChannel.getChannel(db, channelId), {
+    route: "channels/pins/get-channel",
+  })
   if (!channel) return writeError("channel not found", 404)
 
   const pinnable = requirePinnableSurface(channel.type)
@@ -53,7 +61,11 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   if (!body.messageId) return writeError("missing messageId", 400)
 
   // Ensure the target message belongs to this channel.
-  const target = await queries.communityMessage.getMessage(db, body.messageId)
+  // `withD1Retry` (D1-armor state 2): target-message scope check gates the pin —
+  // a transient would 404 a real message; retry to truth.
+  const target = await withD1Retry(() => queries.communityMessage.getMessage(db, body.messageId), {
+    route: "channels/pins/target-message",
+  })
   if (!target || target.channelId !== channelId) {
     return writeError("message not found", 404)
   }

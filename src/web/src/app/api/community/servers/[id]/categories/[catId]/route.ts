@@ -22,7 +22,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
   const auth = await requireServerAdmin(db, serverId, ctx.userId)
   if (!auth.ok) return writeError(auth.error, auth.status)
 
-  const category = await queries.communityCategory.getCategory(db, categoryId)
+  // `withD1Retry` (D1-armor state 2): category access/existence gate — a
+  // transient would 404 a real category; retry to truth.
+  const category = await withD1Retry(() => queries.communityCategory.getCategory(db, categoryId), {
+    route: "categories/patch/get-category",
+  })
   if (!category || category.serverId !== serverId) return writeError("category not found", 404)
 
   // Only the name is mutable. Category privacy (public/private) is fixed at
@@ -97,14 +101,23 @@ export const DELETE = withAuth(async (_req: NextRequest, ctx) => {
   const auth = await requireServerAdmin(db, serverId, ctx.userId)
   if (!auth.ok) return writeError(auth.error, auth.status)
 
-  const category = await queries.communityCategory.getCategory(db, categoryId)
+  // `withD1Retry` (D1-armor state 2): category access/existence gate — a
+  // transient would 404 a real category; retry to truth.
+  const category = await withD1Retry(() => queries.communityCategory.getCategory(db, categoryId), {
+    route: "categories/delete/get-category",
+  })
   if (!category || category.serverId !== serverId) return writeError("category not found", 404)
 
   // Deleting a non-empty category would `set null` its channels' categoryId,
   // silently re-classifying private channels as public (visible to everyone)
   // while leaving stale channel_member rows. Block it; admin moves/deletes the
   // channels first.
-  const hasChannels = await queries.communityCategory.hasChannels(db, categoryId)
+  // `withD1Retry` (D1-armor state 2): this guard prevents a silent
+  // private→public reclassification — a transient false-empty would wrongly
+  // allow deleting a non-empty category; retry to truth.
+  const hasChannels = await withD1Retry(() => queries.communityCategory.hasChannels(db, categoryId), {
+    route: "categories/delete/has-channels",
+  })
   if (hasChannels) {
     return writeError("Move or delete its channels first", 409)
   }

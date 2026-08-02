@@ -46,11 +46,18 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
     ...new Set(childChannels.filter((r) => !r.parentMessageId).map((r) => r.id)),
   ]
 
-  const [parentMessages, creators, firstMessages] = await Promise.all([
-    queries.communityMessage.getMessagesByIds(db, parentIds),
-    queries.user.getUsersByIds(db, creatorIds),
-    queries.communityMessage.getFirstMessageByChannelIds(db, firstMessageChannelIds),
-  ])
+  // `withD1Retry` (D1-armor state 2): the 3 preview-enrichment reads — a
+  // transient false-empty would drop parent/creator/first-message previews from
+  // the thread list; retry the whole batch to truth.
+  const [parentMessages, creators, firstMessages] = await withD1Retry(
+    () =>
+      Promise.all([
+        queries.communityMessage.getMessagesByIds(db, parentIds),
+        queries.user.getUsersByIds(db, creatorIds),
+        queries.communityMessage.getFirstMessageByChannelIds(db, firstMessageChannelIds),
+      ]),
+    { route: "channels/threads/previews" },
+  )
 
   const parentMessageMap = new Map(parentMessages.map((m) => [m.id, m]))
   const creatorMap = new Map(creators.map((u) => [u.id, u]))
