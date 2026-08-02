@@ -60,7 +60,12 @@ export const DELETE = withAuth(async (_req: NextRequest, ctx) => {
     userId: targetUserId,
   } as const
   // Notify the removed user (drop the channel) plus the remaining audience.
-  const recipients = await queries.communityChannel.getPrivateChannelAudienceUserIds(db, channelId)
+  // `withD1Retry` (D1-armor state 2): audience read drives the member-remove
+  // fan-out — a transient would miss recipients; retry to truth.
+  const recipients = await withD1Retry(
+    () => queries.communityChannel.getPrivateChannelAudienceUserIds(db, channelId),
+    { route: "channels/members/remove-audience" },
+  )
   await Promise.all(
     [...new Set([...recipients, targetUserId])].map((uid) => broadcastToUserSafe(uid, event))
   )

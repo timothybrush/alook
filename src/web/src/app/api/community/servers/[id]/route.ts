@@ -163,7 +163,11 @@ export const DELETE = withAuth(async (_req, ctx) => {
 
   const db = getDb(ctx.env.DB)
 
-  const member = await queries.communityMember.getMember(db, serverId, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): membership+role access gate — a transient
+  // would 403 a real member (mis-judged permission state); retry to truth.
+  const member = await withD1Retry(() => queries.communityMember.getMember(db, serverId, ctx.userId), {
+    route: "servers/detail/member",
+  })
   if (!member) return writeError("not a member of this server", 403)
   if (!isServerOwner(member.role)) {
     return writeError("only the owner can delete the server", 403)

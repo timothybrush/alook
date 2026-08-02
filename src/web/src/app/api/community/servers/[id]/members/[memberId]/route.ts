@@ -46,7 +46,12 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
 
   // Scope to the target server's members so cross-server memberId can never
   // be modified through this endpoint.
-  const target = await queries.communityMember.getMemberById(db, memberId, { serverId })
+  // `withD1Retry` (D1-armor state 2): member lookup gates the modify — a
+  // transient would 404 a real member (mis-judged state); retry to truth.
+  const target = await withD1Retry(
+    () => queries.communityMember.getMemberById(db, memberId, { serverId }),
+    { route: "servers/member-modify/target" },
+  )
   if (!target) return writeError("member not found", 404)
 
   if (isServerOwner(target.role) && !isServerOwner(caller.role)) {
@@ -93,7 +98,12 @@ export const DELETE = withAuth(async (_req, ctx) => {
     return writeError("cannot kick yourself, use leave instead", 400)
   }
 
-  const target = await queries.communityMember.getMemberById(db, memberId, { serverId })
+  // `withD1Retry` (D1-armor state 2): member lookup gates the delete — a
+  // transient would 404 a real member (mis-judged state); retry to truth.
+  const target = await withD1Retry(
+    () => queries.communityMember.getMemberById(db, memberId, { serverId }),
+    { route: "servers/member-delete/target" },
+  )
   if (!target) return writeError("member not found", 404)
 
   if (isServerOwner(target.role)) {

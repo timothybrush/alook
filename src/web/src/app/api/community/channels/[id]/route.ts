@@ -85,7 +85,9 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
       targetPrivate = !!category.private
     }
     const currentPrivate = access.value.anchor.categoryId
-      ? await queries.communityChannel.isChannelPrivate(db, channelId)
+      ? await withD1Retry(() => queries.communityChannel.isChannelPrivate(db, channelId), {
+          route: "channels/patch/current-private",
+        })
       : false
     if (targetPrivate !== currentPrivate) {
       return writeError("Can't move a channel across a public/private boundary", 400)
@@ -139,7 +141,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
   }
   if (!updated) return writeError("channel not found", 404)
 
-  const isPrivate = await queries.communityChannel.isChannelPrivate(db, channelId)
+  // `withD1Retry` (D1-armor state 2): privacy drives the update fan-out audience
+  // — a transient would mis-scope the fan-out; retry to truth.
+  const isPrivate = await withD1Retry(() => queries.communityChannel.isChannelPrivate(db, channelId), {
+    route: "channels/patch/is-private",
+  })
   if (isPrivate) {
     await fanOutToChannel(channelId, {
       type: WS_EVENTS.CHANNEL_UPDATE,
@@ -188,9 +194,16 @@ export const DELETE = withAuth(async (_req: NextRequest, ctx) => {
   // Resolve the private-channel audience BEFORE deleting (the member rows
   // cascade away with the channel row), so the delete event still reaches
   // exactly the people who could see it.
-  const isPrivate = await queries.communityChannel.isChannelPrivate(db, channelId)
+  // `withD1Retry` (D1-armor state 2): privacy + audience drive who receives the
+  // channel-delete event — a transient would leak/miss the delete fan-out
+  // (wrong audience); retry to truth.
+  const isPrivate = await withD1Retry(() => queries.communityChannel.isChannelPrivate(db, channelId), {
+    route: "channels/delete/is-private",
+  })
   const audience = isPrivate
-    ? await queries.communityChannel.getPrivateChannelAudienceUserIds(db, channelId)
+    ? await withD1Retry(() => queries.communityChannel.getPrivateChannelAudienceUserIds(db, channelId), {
+        route: "channels/delete/audience",
+      })
     : null
 
   // `withD1Retry` (D1-armor state 3): delete-by-id is idempotent (0-rows → 404).

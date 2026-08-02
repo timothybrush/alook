@@ -123,7 +123,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     return writeError("userId is required", 400)
   }
 
-  const targetMember = await queries.communityMember.getMember(db, channel.serverId, targetUserId)
+  // `withD1Retry` (D1-armor state 2): server-membership gate — a transient would
+  // 400 a real member (mis-judged state); retry to truth.
+  const targetMember = await withD1Retry(
+    () => queries.communityMember.getMember(db, channel.serverId, targetUserId),
+    { route: "channels/members/target-member" },
+  )
   if (!targetMember) return writeError("user is not a member of this server", 400)
 
   // `withD1Retry` (D1-armor state 3): createChannelMember is
@@ -144,7 +149,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
     channelId,
     userId: targetUserId,
   } as const
-  const recipients = await queries.communityChannel.getPrivateChannelAudienceUserIds(db, channelId)
+  // `withD1Retry` (D1-armor state 2): audience read drives the member-add
+  // fan-out — a transient would miss recipients; retry to truth.
+  const recipients = await withD1Retry(
+    () => queries.communityChannel.getPrivateChannelAudienceUserIds(db, channelId),
+    { route: "channels/members/add-audience" },
+  )
   await Promise.all([...new Set([...recipients, targetUserId])].map((uid) => broadcastToUserSafe(uid, event)))
 
   logAudit(db, {
