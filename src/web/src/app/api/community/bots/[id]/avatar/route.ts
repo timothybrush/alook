@@ -38,7 +38,11 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   if (!botId) return writeError("missing bot id", 400)
 
   const db = getDb(ctx.env.DB)
-  const bot = await queries.communityBot.getBotOwnedBy(db, botId, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): ownership door-read; a transient would
+  // 404 the owner's own bot (mis-judged permission state); retry to truth.
+  const bot = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, botId, ctx.userId), {
+    route: "bots/avatar/ownership",
+  })
   if (!bot) return writeError("bot not found", 404)
 
   const result = await handleBotAvatarUpload(req, ctx.env, botId)

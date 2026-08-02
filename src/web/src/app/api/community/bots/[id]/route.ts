@@ -23,7 +23,11 @@ import { fanOutToServerMembers } from "@/lib/community/fanout"
 export const GET = withAuth(async (_req, ctx) => {
   const db = getDb(ctx.env.DB)
   const id = ctx.params?.id as string
-  const bot = await queries.communityBot.getBotOwnedBy(db, id, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): ownership door-read (GET); a transient
+  // would 404 the owner's own bot; retry to truth.
+  const bot = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, id, ctx.userId), {
+    route: "bots/get/ownership",
+  })
   if (!bot) return writeError("bot not found", 404)
   return writeJSON({ bot })
 })
@@ -34,7 +38,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
   if (err) return err
   const db = getDb(ctx.env.DB)
 
-  const before = await queries.communityBot.getBotOwnedBy(db, id, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): ownership door-read (PATCH); a transient
+  // would 404 the owner's own bot; retry to truth.
+  const before = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, id, ctx.userId), {
+    route: "bots/patch/ownership",
+  })
   if (!before) return writeError("bot not found", 404)
 
   const nameChanged = body.name !== undefined && body.name !== before.name
@@ -59,7 +67,13 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
   // retry sees `before === updated`, computes no change, and never pushes,
   // leaving the daemon's running system prompt permanently stale.
   const willPush = (nameChanged || descriptionChanged) && !!before.machineId
-  const owner = willPush ? await queries.user.getUserPublic(db, before.ownerUserId) : null
+  // `withD1Retry` (D1-armor state 2): owner resolve gates the daemon push (and a
+  // 500 if unresolvable) — a transient would false-500 a legit update; retry.
+  const owner = willPush
+    ? await withD1Retry(() => queries.user.getUserPublic(db, before.ownerUserId), {
+        route: "bots/patch/owner",
+      })
+    : null
   if (willPush && !owner) {
     return writeError("bot owner not resolvable — refusing to push a bot update with unknown ownership", 500)
   }
@@ -108,7 +122,11 @@ export const PATCH = withAuth(async (req: NextRequest, ctx) => {
       return writeError("bot has no runtime binding — pair it to a machine before setting a model", 409)
     }
 
-    const wakeCtx = await queries.communityBot.getBotWakeContext(db, id)
+    // `withD1Retry` (D1-armor state 2): wake-context read for the config push;
+    // a transient would skip a legit push (mis-judged state); retry to truth.
+    const wakeCtx = await withD1Retry(() => queries.communityBot.getBotWakeContext(db, id), {
+      route: "bots/patch/wake-context",
+    })
     if (wakeCtx.state === "ready") {
       const config = makeRuntimeConfig({
         runtime: wakeCtx.runtime,
@@ -192,15 +210,20 @@ export const DELETE = withAuth(async (_req, ctx) => {
   // Fetch binding first so we can push bot:removed to the daemon after the
   // delete commits. If ownership check fails, softDeleteBot returns false and
   // this data is untouched — no cross-owner leak.
-  const before = await queries.communityBot.getBotOwnedBy(db, id, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): ownership door-read (DELETE); a transient
+  // would 404 the owner's own bot; retry to truth.
+  const before = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, id, ctx.userId), {
+    route: "bots/delete/ownership",
+  })
   if (!before) return writeError("bot not found", 404)
 
   // Snapshot server memberships BEFORE the delete removes them, so we can fan
   // out MEMBER_LEAVE per (server, botId) after the delete commits.
-  const priorMemberships = await queries.communityBot.listBotServerMemberships(
-    db,
-    id,
-    ctx.userId,
+  // `withD1Retry` (D1-armor state 2): no-fallback read driving MEMBER_LEAVE
+  // fan-out — a transient would miss the fan-out; retry to truth.
+  const priorMemberships = await withD1Retry(
+    () => queries.communityBot.listBotServerMemberships(db, id, ctx.userId),
+    { route: "bots/delete/memberships" },
   )
 
   // `withD1Retry` (state 3): soft-delete sets deletedAt (idempotent — re-running

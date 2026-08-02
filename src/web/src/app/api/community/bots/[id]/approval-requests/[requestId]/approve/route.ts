@@ -17,10 +17,18 @@ export const POST = withAuth(async (_req, ctx) => {
   const requestId = ctx.params?.requestId as string
   const db = getDb(ctx.env.DB)
 
-  const bot = await queries.communityBot.getBotOwnedBy(db, botId, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): ownership door-read — a transient would
+  // 404 the owner's own bot (mis-judged permission state); retry to truth.
+  const bot = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, botId, ctx.userId), {
+    route: "bots/approval-approve/ownership",
+  })
   if (!bot) return writeError("bot not found", 404)
 
-  const request = await queries.communityBot.getApprovalRequest(db, requestId)
+  // `withD1Retry` (D1-armor state 2): the approval-request read gates the
+  // approve action — a transient would 404 a real pending request; retry to truth.
+  const request = await withD1Retry(() => queries.communityBot.getApprovalRequest(db, requestId), {
+    route: "bots/approval-approve/request",
+  })
   if (!request || request.botId !== botId) {
     return writeError("approval request not found", 404)
   }
@@ -32,10 +40,11 @@ export const POST = withAuth(async (_req, ctx) => {
   }
 
   if (!request.serverId) return writeError("malformed request", 400)
-  const alreadyMember = await queries.communityMember.getMember(
-    db,
-    request.serverId,
-    botId,
+  // `withD1Retry` (D1-armor state 2): membership pre-check — a transient would
+  // misjudge whether the bot is already a member; retry to truth.
+  const alreadyMember = await withD1Retry(
+    () => queries.communityMember.getMember(db, request.serverId!, botId),
+    { route: "bots/approval-approve/already-member" },
   )
   if (!alreadyMember) {
     // `withD1Retry` (state 3): addMember is replay-safe here — the alreadyMember

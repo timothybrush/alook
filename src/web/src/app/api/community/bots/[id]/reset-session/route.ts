@@ -19,12 +19,20 @@ export const POST = withAuth(async (_req, ctx) => {
   const id = ctx.params?.id as string
   const db = getDb(ctx.env.DB)
 
-  const bot = await queries.communityBot.getBotOwnedBy(db, id, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): ownership door-read; a transient would
+  // 404 the owner's own bot (mis-judged permission state); retry to truth.
+  const bot = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, id, ctx.userId), {
+    route: "bots/reset-session/ownership",
+  })
   if (!bot) return writeError("bot not found", 404)
 
   if (!bot.machineId) return writeError("bot has no active binding", 409)
 
-  const wakeCtx = await queries.communityBot.getBotWakeContext(db, id)
+  // `withD1Retry` (D1-armor state 2): the wake-context read gates the reset — a
+  // transient would 409 a reset that should proceed (mis-judged state); retry.
+  const wakeCtx = await withD1Retry(() => queries.communityBot.getBotWakeContext(db, id), {
+    route: "bots/reset-session/wake-context",
+  })
   if (wakeCtx.state !== "ready") return writeError(wakeCtx.state, 409)
 
   const config = makeRuntimeConfig({

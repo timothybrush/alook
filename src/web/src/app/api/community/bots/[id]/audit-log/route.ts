@@ -25,7 +25,11 @@ export const GET = withAuth(async (req: NextRequest, ctx) => {
   const db = getDb(ctx.env.DB)
 
   // Ownership + soft-delete gate — matches `getBotOwnedBy` predicate.
-  const bot = await queries.communityBot.getBotOwnedBy(db, id, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): access/ownership door-read — a transient
+  // would 404 the owner's own bot (mis-judged permission state); retry to truth.
+  const bot = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, id, ctx.userId), {
+    route: "bots/audit-log/ownership",
+  })
   if (!bot) return writeError("bot not found", 404)
 
   const url = new URL(req.url)

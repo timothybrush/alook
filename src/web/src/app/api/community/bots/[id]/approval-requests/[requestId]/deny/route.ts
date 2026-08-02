@@ -15,10 +15,18 @@ export const POST = withAuth(async (_req, ctx) => {
   const requestId = ctx.params?.requestId as string
   const db = getDb(ctx.env.DB)
 
-  const bot = await queries.communityBot.getBotOwnedBy(db, botId, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): ownership door-read — a transient would
+  // 404 the owner's own bot (mis-judged permission state); retry to truth.
+  const bot = await withD1Retry(() => queries.communityBot.getBotOwnedBy(db, botId, ctx.userId), {
+    route: "bots/approval-deny/ownership",
+  })
   if (!bot) return writeError("bot not found", 404)
 
-  const request = await queries.communityBot.getApprovalRequest(db, requestId)
+  // `withD1Retry` (D1-armor state 2): the approval-request read gates the deny
+  // action — a transient would 404 a real pending request; retry to truth.
+  const request = await withD1Retry(() => queries.communityBot.getApprovalRequest(db, requestId), {
+    route: "bots/approval-deny/request",
+  })
   if (!request || request.botId !== botId) {
     return writeError("approval request not found", 404)
   }
