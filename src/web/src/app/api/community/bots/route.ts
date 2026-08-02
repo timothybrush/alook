@@ -47,7 +47,12 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   const db = getDb(ctx.env.DB)
 
   // Cap check — anti-abuse floor, not a UX cap.
-  const n = await queries.communityBot.countLiveBotsForOwner(db, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): the cap check gates bot creation — a
+  // transient false-read could wrongly 409 (or wrongly allow past the cap);
+  // retry to truth.
+  const n = await withD1Retry(() => queries.communityBot.countLiveBotsForOwner(db, ctx.userId), {
+    route: "bots/create/cap-count",
+  })
   if (n >= COMMUNITY_BOT_LIMIT_PER_OWNER) {
     return writeError("BOT_LIMIT_REACHED", 409)
   }
@@ -56,10 +61,11 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   // AND currently healthy. Unhealthy runtimes (e.g. broken binary caught by
   // spawn ENOENT and marked by the daemon) are rejected here so a UX picker
   // race doesn't create a bot bound to something that will always fail.
-  const machine = await queries.communityBot.getMachineForOwner(
-    db,
-    body.machineId,
-    ctx.userId,
+  // `withD1Retry` (D1-armor state 2): machine-ownership gate for the bind — a
+  // transient would 404 the owner's own machine (mis-judged state); retry.
+  const machine = await withD1Retry(
+    () => queries.communityBot.getMachineForOwner(db, body.machineId, ctx.userId),
+    { route: "bots/create/machine-ownership" },
   )
   if (!machine) return writeError("machine not found", 404)
   // getMachineForOwner canonicalizes `availableRuntimes` to include status/lastError
@@ -118,7 +124,11 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   // has a row), and pushing a bot:added with empty owner fields would
   // silently strip the "You are owned by …" privacy paragraph from the
   // agent's system prompt.
-  const owner = await queries.user.getUserPublic(db, ctx.userId)
+  // `withD1Retry` (D1-armor state 2): owner resolve gates the bot:added push (a
+  // false-miss would 500 a legit create + strip the owner paragraph); retry.
+  const owner = await withD1Retry(() => queries.user.getUserPublic(db, ctx.userId), {
+    route: "bots/create/owner",
+  })
   if (!owner) return writeError("owner not resolvable — retry after re-authenticating", 500)
 
   // Same-owner sibling auto-friendship fanout. After createBot commits, insert a
@@ -128,14 +138,25 @@ export const POST = withAuth(async (req: NextRequest, ctx) => {
   // bot exists and is usable; siblings can reconcile via the CLI later. See
   // plans/agent-friendship-approval-gate.md §Bot creation.
   try {
-    const siblings = await queries.communityBot.listBotsForOwner(db, ctx.userId)
+    // `withD1Retry` (D1-armor state 2): sibling list drives the friendship
+    // backfill — a transient false-empty would silently skip sibling
+    // auto-friendships; retry to truth.
+    const siblings = await withD1Retry(() => queries.communityBot.listBotsForOwner(db, ctx.userId), {
+      route: "bots/create/siblings",
+    })
     for (const sibling of siblings) {
       if (sibling.id === created.botId) continue
       try {
-        const res = await queries.communityFriendship.ensureSiblingBotFriendship(db, {
-          botA: created.botId,
-          botB: sibling.id,
-        })
+        // `withD1Retry` (D1-armor state 3): idempotent (get-first +
+        // onConflictDoNothing on uq_friendship_active); retry the transient.
+        const res = await withD1Retry(
+          () =>
+            queries.communityFriendship.ensureSiblingBotFriendship(db, {
+              botA: created.botId,
+              botB: sibling.id,
+            }),
+          { route: "bots/create/sibling-friendship" },
+        )
         if (res.blocked) {
           logAudit(db, {
             serverId: null,
