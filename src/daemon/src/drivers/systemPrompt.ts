@@ -203,7 +203,14 @@ function messagingSection(): string {
       "hint (a name resolved at send-time silently mis-targets a renamed channel — the bug this " +
       "kills), and in a body it stays plain text (never a pill). So: reuse the id you were given, " +
       "don't hand-type a path.",
-    "- Do not wrap a ref in backticks (that kills the render).",
+    "- **Type a ref bare — never wrap it.** In *this document* a token is shown inside backticks " +
+      "to mark \"this is a token\"; that formatting belongs to the doc, not to your output. When " +
+      "you put a ref in a message you send, type the token **bare** — no backticks, no quotes " +
+      "around it. Backticks make the app render it as a code span (and it stays literal text), so " +
+      "the pill never forms; the renderer only turns a **bare** token into a pill. Writing a " +
+      "message body:",
+    "    - wrong — backtick-wrapped, renders as code, no pill: `{/Alook/general}(channel/id)`",
+    "    - right — bare, renders as a pill: {/Alook/general}(channel/id)",
     "- **Ref forms** (each `()` holds that target's own channelId):",
     "  - **Channel** — `{/Alook/general}(channel/<channelId>)`.",
     "  - **A specific message** — `{/Alook/general#42}(channel/<channelId>)`: `#42` rides the " +
@@ -250,10 +257,13 @@ function messagingSection(): string {
       "in *this* channel; anyone outside won't see your message at all. In a **private** channel " +
       "that means the roster — verify membership with `" + CLI + " channel member --channel " +
       "<ref>` before you @ or ask someone (see *Visibility & reach*).",
-    "- **Never put a DM ref in a server channel.** A DM is private between its two people; a " +
-      "server channel is public, so a ref that points into a DM (whether a pill built from a DM's " +
-      "id or a bare `/.dm/<peer>` path in the body) exposes a private conversation. Keep DM " +
-      "refs in DMs.",
+    "- **Never put a DM ref in a server channel.** Two reasons. (1) A DM is private between its " +
+      "two people; a server channel is public, so a ref that points into a DM (whether a pill " +
+      "built from a DM's id or a bare `/.dm/<peer>` path in the body) exposes a private " +
+      "conversation. (2) It wouldn't even work for others: a DM ref's `()` is *that DM channel's " +
+      "own id* — a channel no one else is in — so for any other reader it resolves to nothing " +
+      "(the label says a peer, the id points at a channel they can't see). A DM ref is only " +
+      "meaningful inside that DM itself. Keep DM refs in DMs.",
     "",
     "```bash",
     "# --target and a ref inside --text are the same {}() token — the `channel` field of a " +
@@ -261,6 +271,13 @@ function messagingSection(): string {
     `${CLI} message send --target \"{/demo/support}(channel/c_abc123)\" --text \"On it\"`,
     `${CLI} message send --target \"{/demo/general}(channel/c_abc123)\" --text \"@alice#0001 see {/demo/general#42}(channel/c_abc123)\"`,
     "```",
+    "",
+    "The ref inside that `--text` sits in the sentence **bare** — nothing wrapping it — and that " +
+      "is exactly what renders as a pill. Written out, the body of that message reads:",
+    "",
+    "    Fixed it — see {/demo/general#42}(channel/c_abc123) for the details.",
+    "",
+    "No backticks, no quotes around the token — bare is what makes it a pill.",
     "",
     "### Pulled messages",
     "",
