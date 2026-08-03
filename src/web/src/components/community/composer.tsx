@@ -468,7 +468,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       onDrop={handleDrop}
     >
       <CommunityMentionList state={mentionPopup} />
-      <ChannelRefList state={channelRefPopup} />
+      <ChannelRefList state={channelRefPopup} context={context} />
 
       {/* reply context bar — attached above the input */}
       {replyingTo && (
@@ -690,7 +690,28 @@ function channelRefItemsEqual(a: ChannelRefCandidate[], b: ChannelRefCandidate[]
 
 // Portal-rendered `/`-ref popup. Mirrors `CommunityMentionList` — anchored
 // above the caret via clientRect(), highlighted row synced to hover.
-function ChannelRefList({ state }: { state: ChannelRefPopupState }) {
+/**
+ * Whether a `/`-channel-ref row shows its "serverName /" prefix. INVARIANT:
+ * this is a pure function of the composer CONTEXT and nothing else — in
+ * particular it is INDEPENDENT of how many servers the candidate list spans.
+ *
+ * In a DM you're outside any server, so a bare channel name ("general") is
+ * inherently ambiguous ("general in which server?") — the prefix supplies the
+ * missing server ownership, and that gap exists whether you're in 1 server or
+ * 20. Inside a server channel/thread you already ARE in that server, so the
+ * prefix is pure redundancy → hidden.
+ *
+ * Do NOT reintroduce a server-count / `spansMultipleServers` gate here: the
+ * prior code showed the prefix only when the candidate list crossed ≥2 servers
+ * (`items.some(serverId !== items[0].serverId)`), so a single-server user saw
+ * NO prefix in their DMs — the exact bug this replaced. The trigger is the DM
+ * context (the real axis), never a data-shape proxy that merely correlates.
+ */
+export function channelRefShowServerPrefix(context: MentionContext): boolean {
+  return context === "dm"
+}
+
+function ChannelRefList({ state, context }: { state: ChannelRefPopupState; context: MentionContext }) {
   const listRef = useRef<HTMLDivElement>(null)
   const { items, selectedIndex, command, rect } = state
 
@@ -700,10 +721,7 @@ function ChannelRefList({ state }: { state: ChannelRefPopupState }) {
 
   if (!rect || items.length === 0 || !command) return null
 
-  // The list spans multiple servers (the DM case) when any two candidates
-  // differ on serverId — only then does each row show its "serverName /"
-  // prefix, so same-server lists stay clean.
-  const spansMultipleServers = items.some((it) => it.serverId !== items[0]?.serverId)
+  const showServerPrefix = channelRefShowServerPrefix(context)
 
   const vp = viewportSize()
 
@@ -718,7 +736,7 @@ function ChannelRefList({ state }: { state: ChannelRefPopupState }) {
             key={item.id}
             item={item}
             selected={i === selectedIndex}
-            showServerPrefix={spansMultipleServers}
+            showServerPrefix={showServerPrefix}
             onSelect={() => command(toChannelRefCommandProps(item))}
           />
         ))}
@@ -728,7 +746,7 @@ function ChannelRefList({ state }: { state: ChannelRefPopupState }) {
   )
 }
 
-function ChannelRefRow({ item, selected, showServerPrefix, onSelect }: {
+export function ChannelRefRow({ item, selected, showServerPrefix, onSelect }: {
   item: ChannelRefCandidate
   selected: boolean
   showServerPrefix: boolean
