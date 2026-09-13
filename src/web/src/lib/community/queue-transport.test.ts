@@ -52,11 +52,13 @@ describe("createDevHttpQueueTransport", () => {
   const mockGlobalFetch = vi.fn<(...args: unknown[]) => Promise<Response>>()
 
   beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "development")
     vi.clearAllMocks()
     globalThis.fetch = mockGlobalFetch as unknown as typeof fetch
   })
 
   afterAll(() => {
+    vi.unstubAllEnvs()
     globalThis.fetch = originalFetch
   })
 

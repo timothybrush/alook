@@ -4,37 +4,22 @@ import {
   isChannelType,
   channelCreation,
   MAX_CHANNEL_NAME_LENGTH,
+  MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_CHANNEL_TOPIC_LENGTH,
   WS_EVENTS,
   slugify,
   PARTICIPANT_SOURCE,
-  createLogger,
   type ChannelType,
   type StoredChannelType,
   type Database,
 } from "@alook/shared"
-import { broadcastToUserSafe, fanOutToServerMembers, fanOutToChannel } from "@/lib/community/fanout"
+import { fanOutToServerMembers, fanOutToChannel } from "@/lib/community/fanout"
 import { createWithCollisionPolicy } from "@/lib/community/create-collision"
 import { requireServerMember, requireChannelMember } from "@/lib/community/permissions"
 import { requireMessageBearingSurface } from "@/lib/community/channel-write-guard"
 import { guardDmOpen } from "@/lib/community/dm-guard"
 import { createCommunityMessage, type IncomingMessageBody } from "@/lib/community/message-handler"
-import { attachmentThumbnailUrl, attachmentUrl } from "@/lib/community/storage"
-
-const log = createLogger({ service: "community-create-channels" })
-
-/* istanbul ignore next -- real workerd compensation oracle covers revision fanout */
-async function hardDeleteMessageAndBroadcastReadState(db: Database, messageId: string) {
-  const result = await queries.communityMessage.hardDeleteMessage(db, messageId)
-  await Promise.all((result?.readStateRevisions ?? []).map((revision) =>
-    broadcastToUserSafe(revision.userId, {
-      type: WS_EVENTS.READ_STATE_ADVANCED,
-      revision: revision.revision,
-      inboxChanged: true,
-    })
-  ))
-  return result
-}
+import { nanoid } from "nanoid"
 
 /**
  * Single-source creation cores for the `POST /channels` create door (route/disc
@@ -252,6 +237,14 @@ export async function createThreadForUser(
   const existingThread = await queries.communityChannel.getThreadChannelByParentMessage(db, message.channelId, messageId)
   if (existingThread) return { ok: true, value: existingThread }
 
+  const seedRows: { userId: string; source: typeof PARTICIPANT_SOURCE.SPOKE | typeof PARTICIPANT_SOURCE.ADDED }[] = [
+    { userId: actorUserId, source: PARTICIPANT_SOURCE.SPOKE },
+  ]
+  if (message.authorId !== actorUserId) {
+    const authorStillMember = await requireChannelMember(db, message.channelId, message.authorId)
+    if (authorStillMember.ok) seedRows.push({ userId: message.authorId, source: PARTICIPANT_SOURCE.ADDED })
+  }
+
   let createdByThisAttempt = false
   const threadResult = await createWithCollisionPolicy(channelCreation("thread"), {
     attempt: async () => {
@@ -262,6 +255,7 @@ export async function createThreadForUser(
         name,
         type: "thread",
         creatorId: actorUserId,
+        initialParticipants: seedRows,
       })
       createdByThisAttempt = true
       return created
@@ -272,20 +266,8 @@ export async function createThreadForUser(
   // this policy (it creates or re-selects, else throws); map to 404 defensively.
   if (!threadResult.ok) return { ok: false, status: 404, error: "thread not found" }
   const childChannel = threadResult.value
-  // Seed the NOTIFY set on a fresh create only: creator (spoke) + original author
-  // (added, if still a member — else a private channel's thread could leak to
-  // someone who lost access). Idempotent per (channel,user) via onConflictDoNothing.
   if (createdByThisAttempt) {
-    const seedRows: { userId: string; source: typeof PARTICIPANT_SOURCE.SPOKE | typeof PARTICIPANT_SOURCE.ADDED }[] = [
-      { userId: actorUserId, source: PARTICIPANT_SOURCE.SPOKE },
-    ]
-    if (message.authorId !== actorUserId) {
-      const authorStillMember = await requireChannelMember(db, message.channelId, message.authorId)
-      if (authorStillMember.ok) seedRows.push({ userId: message.authorId, source: PARTICIPANT_SOURCE.ADDED })
-    }
-    await queries.communityThread.addThreadParticipants(db, childChannel.id, seedRows)
-
-    await fanOutToChannel(message.channelId, {
+    void fanOutToChannel(message.channelId, {
       type: WS_EVENTS.CHILD_CHANNEL_CREATE,
       parentChannelId: message.channelId,
       channel: {
@@ -329,9 +311,14 @@ export async function createMessageWithThread(params: {
   clientNonce?: string
   expectedSeq?: number
   source?: "cli" | "daemon-http" | "web"
+  extraStatements?: unknown[]
 }): Promise<CreateMessageWithThreadResult> {
   const { db, authorId, parentChannelId, serverId } = params
-
+  if ((params.pendingAttachmentIdsToRebind?.length ?? 0) > MAX_ATTACHMENTS_PER_MESSAGE) {
+    return { ok: false, status: 400, error: `too many attachments (max ${MAX_ATTACHMENTS_PER_MESSAGE})` }
+  }
+  const content = typeof params.body.content === "string" ? params.body.content : ""
+  const threadName = (params.threadName?.trim() || content.trim() || "thread").slice(0, MAX_CHANNEL_NAME_LENGTH)
   const created = await createCommunityMessage({
     db,
     authorId,
@@ -343,167 +330,24 @@ export async function createMessageWithThread(params: {
     clientNonce: params.clientNonce,
     expectedSeq: params.expectedSeq,
     suppressBroadcast: params.suppressBroadcast,
-    deferBroadcast: true,
+    suppressThreadFanout: params.suppressThreadFanout,
+    extraStatements: params.extraStatements,
+    forumThread: {
+      id: nanoid(),
+      serverId,
+      name: threadName,
+      pendingAttachmentIds: params.pendingAttachmentIdsToRebind ?? [],
+    },
   })
   if (!created.ok) return { ok: false, status: created.status, error: created.error }
-  const messageId = created.row.id
+  const childChannel = await queries.communityChannel.getThreadChannelByParentMessage(db, parentChannelId, created.row.id)
+  if (!childChannel) throw new Error("committed forum opener is missing its thread")
 
-  if (created.deduped) {
-    const thread = await queries.communityChannel.getThreadChannelByParentMessage(
-      db,
-      parentChannelId,
-      messageId,
-    )
-    if (!thread) throw new Error("deduped forum opener is missing its thread")
-    // Structure replay is already complete. Do not touch attachment rows here:
-    // they may be pending on this thread (reply previously failed) or already
-    // bound to the deduped reply (whole command previously succeeded).
-    const storedAttachments = await queries.communityAttachment.listMessageAttachments(db, messageId)
-    const toCreatedAttachment = (row: (typeof storedAttachments)[number]) => ({
-      id: row.id,
-      filename: row.filename,
-      url: attachmentUrl(row.targetId, row.id),
-      ...(row.thumbnailR2Key ? { thumbnailUrl: attachmentThumbnailUrl(row.targetId, row.id) } : {}),
-      contentType: row.contentType,
-      size: row.size,
-      width: row.width,
-      height: row.height,
-    })
-    return {
-      ok: true,
-      message: created.row,
-      attachments: storedAttachments.map(toCreatedAttachment),
-      thread,
-      deduped: true,
-    }
+  return {
+    ok: true,
+    message: created.row,
+    attachments: created.attachments,
+    thread: childChannel,
+    ...(created.deduped ? { deduped: true } : {}),
   }
-
-  // Always truncated to MAX_CHANNEL_NAME_LENGTH — the thread's `name` column
-  // is a channel-naming field (display-only, but still bounded like every
-  // other channel name), regardless of how long the caller-supplied
-  // threadName or the opener's own content happens to be (e.g. a post's
-  // title can be up to MAX_MESSAGE_CONTENT_LENGTH — do not let that length
-  // leak into this field uncapped).
-  const threadName = (params.threadName?.trim() || created.row.content?.trim() || "thread").slice(0, MAX_CHANNEL_NAME_LENGTH)
-
-  let threadResult: Awaited<ReturnType<typeof createWithCollisionPolicy<Awaited<ReturnType<typeof queries.communityChannel.createChannel>>>>>
-  try {
-    threadResult = await createWithCollisionPolicy(channelCreation("thread"), {
-      attempt: () => queries.communityChannel.createChannel(db, {
-        serverId,
-        parentChannelId,
-        parentMessageId: messageId,
-        name: threadName,
-        type: "thread",
-        creatorId: authorId,
-      }),
-      refetchWinner: () => queries.communityChannel.getThreadChannelByParentMessage(db, parentChannelId, messageId),
-    })
-  } catch (err) {
-    // Compensate: the message was inserted but its thread never opened — no
-    // caller may see a message that's supposed to have a thread but doesn't.
-    // If the compensating hardDelete ALSO throws (same D1 outage the
-    // thread-open was recovering from), log BOTH and re-throw the ORIGINAL
-    // thread-open error — it's the one the caller cares about; matches
-    // message-handler.ts's attachment-reserve rollback shape exactly (never
-    // let a secondary rollback failure mask the real cause, and never fail
-    // silently — Aigneis #670/#680).
-    try {
-      await hardDeleteMessageAndBroadcastReadState(db, messageId)
-    } catch (rollbackErr) {
-      log.error("thread_open_rollback_failed", {
-        messageId,
-        threadOpenErr: err instanceof Error ? err.message : String(err),
-        rollbackErr: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-      })
-    }
-    throw err
-  }
-  if (!threadResult.ok) {
-    try {
-      /* istanbul ignore next -- retained thread-open compensation journey */
-      await hardDeleteMessageAndBroadcastReadState(db, messageId)
-    } catch (rollbackErr) {
-      log.error("thread_open_rollback_failed", {
-        messageId,
-        threadOpenErr: threadResult.error,
-        rollbackErr: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-      })
-    }
-    return { ok: false, status: 404, error: "thread not found" }
-  }
-  const childChannel = threadResult.value
-  const isFreshCreate = childChannel.creatorId === authorId
-
-  const compensateFreshStructure = async (cause: unknown) => {
-    if (isFreshCreate) {
-      try {
-        await queries.communityChannel.deleteChannel(db, childChannel.id)
-      } catch (rollbackErr) {
-        log.error("thread_rollback_delete_channel_failed", {
-          messageId,
-          cause: cause instanceof Error ? cause.message : String(cause),
-          rollbackErr: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-        })
-      }
-      try {
-        await hardDeleteMessageAndBroadcastReadState(db, messageId)
-      } catch (rollbackErr) {
-        log.error("thread_rollback_delete_opener_failed", {
-          messageId,
-          cause: cause instanceof Error ? cause.message : String(cause),
-          rollbackErr: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
-        })
-      }
-    }
-  }
-
-  if (isFreshCreate) {
-    try {
-      await queries.communityThread.addThreadParticipants(db, childChannel.id, [
-        { userId: authorId, source: PARTICIPANT_SOURCE.SPOKE },
-      ])
-    } catch (err) {
-      await compensateFreshStructure(err)
-      throw err
-    }
-  }
-
-  let rebound: boolean
-  try {
-    rebound = await queries.communityAttachment.rebindPendingAttachmentsToChild(db, {
-      ids: params.pendingAttachmentIdsToRebind ?? [],
-      uploaderId: authorId,
-      parentTargetId: parentChannelId,
-      childTargetId: childChannel.id,
-    })
-  } catch (err) {
-    await compensateFreshStructure(err)
-    throw err
-  }
-  if (!rebound) {
-    await compensateFreshStructure("attachment rebind rejected")
-    return { ok: false, status: 400, error: "attachment not found or not attachable to this thread" }
-  }
-
-  if (isFreshCreate) {
-    await created.broadcast?.()
-
-    if (!params.suppressThreadFanout) {
-      await fanOutToChannel(parentChannelId, {
-        type: WS_EVENTS.CHILD_CHANNEL_CREATE,
-        parentChannelId,
-        channel: {
-          id: childChannel.id,
-          name: childChannel.name,
-          type: "thread" as const,
-          creatorId: authorId,
-          createdAt: childChannel.createdAt,
-        },
-        parentMessageId: messageId,
-      })
-    }
-  }
-
-  return { ok: true, message: created.row, attachments: created.attachments, thread: childChannel }
 }
