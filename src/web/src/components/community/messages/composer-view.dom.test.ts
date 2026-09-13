@@ -294,18 +294,16 @@ describe("ComposerView", () => {
     expect(preview.textContent).toBe("Replying to Ada · Second target")
   })
 
-  it("renders the explicit send control after emoji with exact eligibility and styling", async () => {
+  it("renders only the send control on the right for touch chat", async () => {
     const onSend = vi.fn()
     const renderer = render(createElement(
       ComposerView,
       baseProps({ showSend: true, sendDisabled: true, onSend }),
     ))
     const input = renderer.container.querySelector(`[data-testid="${tid.composerInput}"]`)!
-    expect(input.className).toContain("pl-12 pr-24")
-    expect(input.className).not.toContain("px-12")
-    expect(
-      renderer.container.querySelector("[data-emoji-picker] button")?.className,
-    ).toContain("right-12")
+    expect(input.className).toContain("px-12")
+    expect(input.parentElement?.className).toContain("rounded-[24px]")
+    expect(renderer.container.querySelector("[data-emoji-picker]")).toBeNull()
     const send = renderer.container.querySelector<HTMLButtonElement>(
       `[data-testid="${tid.composerSend}"]`,
     )!
@@ -314,26 +312,26 @@ describe("ComposerView", () => {
     expect(send.disabled).toBe(true)
     expect(send.className).toContain("right-2")
     expect(send.className).toContain("size-8")
-    expect(send.className).toContain("rounded-[8px]")
+    expect(send.className).toContain("rounded-full")
     expect(send.className).toContain("disabled:bg-transparent")
     expect(send.className).toContain("disabled:text-muted-foreground")
     expect(send.className).toContain("enabled:hover:bg-primary/90")
     expect(send.className).toContain("enabled:active:bg-primary/80")
-    expect(send.className).not.toContain("rounded-full")
     const icon = send.querySelector("svg")!
     expect(icon.getAttribute("viewBox")).toBe("0 0 24 24")
     expect(icon.getAttribute("aria-hidden")).toBe("true")
     expect(icon.getAttribute("class")).toBe("size-5")
-    const path = icon.querySelector("path")!
-    expect(path.getAttribute("d")).toBe(
-      "M12.8147 12.1969L5.28344 13.4521C5.10705 13.4815 4.95979 13.6029 4.89723 13.7704L2.29933 20.7278C2.05066 21.3673 2.72008 21.9773 3.33375 21.6705L21.3337 12.6705C21.8865 12.3941 21.8865 11.6052 21.3337 11.3288L3.33375 2.32885C2.72008 2.02201 2.05066 2.63206 2.29933 3.2715L4.89723 10.2289C4.95979 10.3964 5.10705 10.5178 5.28344 10.5472L12.8147 11.8024C12.9236 11.8205 12.9972 11.9236 12.9791 12.0325C12.965 12.1168 12.899 12.1829 12.8147 12.1969Z",
-    )
-    expect(path.getAttribute("fill")).toBe("currentColor")
+    expect(icon.getAttribute("fill")).toBe("none")
+    expect(icon.getAttribute("stroke")).toBe("currentColor")
+    expect(icon.getAttribute("stroke-width")).toBe("1.5")
+    expect(icon.getAttribute("stroke-linecap")).toBe("round")
+    expect(icon.getAttribute("stroke-linejoin")).toBe("round")
+    expect(icon.querySelectorAll("path")).toHaveLength(2)
     expect(
       [...renderer.container.querySelectorAll("button")]
         .map((node) => node.getAttribute("aria-label"))
         .filter(Boolean),
-    ).toEqual(["Add file", "Emoji picker", "Send message"])
+    ).toEqual(["Add file", "Send message"])
 
     renderer.rerender(createElement(
       ComposerView,
@@ -356,41 +354,21 @@ describe("ComposerView", () => {
     ).toContain("px-12")
   })
 
-  it("pins the vendored Fluent asset to its exact MIT attribution", () => {
-    const license = readFileSync(
-      resolve(
-        process.cwd(),
-        process.cwd().endsWith("/src/web") ? "" : "src/web",
-        "src/components/community/messages/FLUENT_SEND_FILLED_LICENSE.md",
-      ),
-      "utf8",
-    )
-    expect(license).toContain(
-      "4d685f77b2cb8f3f412a74ec8d920c8c91149528/assets/Send/SVG/ic_fluent_send_24_filled.svg",
-    )
-    expect(license).toContain("Copyright (c) 2020 Microsoft Corporation")
-    expect(license).toContain("MIT License")
-    expect(license).toContain(
-      "The above copyright notice and this permission notice shall be included",
-    )
-  })
-
   it("keeps the exact ComposerSkeleton footprint", async () => {
     const renderer = render(createElement(ComposerSkeleton))
     const skeletons = renderer.container.querySelectorAll("[data-skeleton]")
-    expect(skeletons).toHaveLength(4)
+    expect(skeletons).toHaveLength(3)
     expect([...skeletons].map((node) => node.className)).toEqual([
       "h-6 w-2/5 rounded",
       "absolute left-2 bottom-2 size-8 rounded-full",
-      "absolute right-12 bottom-2 size-8 rounded-full sm:right-2",
-      "absolute right-2 bottom-2 size-8 rounded-full sm:hidden",
+      "absolute right-2 bottom-2 size-8 rounded-full",
     ])
     expect(renderer.container.firstElementChild?.tagName).toBe("DIV")
     expect(renderer.container.firstElementChild?.className).toBe(
       "relative pl-[max(0.75rem,var(--app-safe-area-left))] pr-[max(0.75rem,var(--app-safe-area-right))] pb-[calc(0.75rem+var(--app-safe-area-bottom))] pt-0 sm:px-3 sm:pb-3",
     )
     expect(renderer.container.innerHTML).toContain(
-      "relative rounded-xl bg-muted py-3 pl-12 pr-24 shadow-(--e1) ring-1 ring-border/40 sm:px-12",
+      "relative rounded-xl [@media(hover:none)]:rounded-[24px] bg-muted py-3 px-12 shadow-(--e1) ring-1 ring-border/40",
     )
   })
 })

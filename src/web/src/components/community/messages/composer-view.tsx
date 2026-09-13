@@ -29,7 +29,7 @@ import {
   CommunityMentionList,
 } from "./composer-suggestion-popups"
 import type { ComposerReplyTarget } from "./composer-types"
-import { FluentSendFilledIcon } from "./fluent-send-filled-icon"
+import { SendStrokeRoundedIcon } from "./send-stroke-rounded-icon"
 
 const COMPOSER_OUTER_CLASS =
   "relative pl-[max(0.75rem,var(--app-safe-area-left))] pr-[max(0.75rem,var(--app-safe-area-right))] pb-[calc(0.75rem+var(--app-safe-area-bottom))] pt-0 sm:px-3 sm:pb-3"
@@ -90,6 +90,10 @@ export function ComposerView({
   const replyPreview = replyingTo
     ? stripInlineMarkup(replyingTo.text).replace(/\s+/g, " ").trim()
     : null
+
+  const composerRadius = replyingTo || pendingFiles.length > 0
+    ? showSend ? "rounded-b-[24px]" : "rounded-b-xl"
+    : showSend ? "rounded-[24px]" : "rounded-xl"
 
   return (
     <div
@@ -173,11 +177,11 @@ export function ComposerView({
           isForumThreadBody
             ? "bg-transparent ring-0"
             : "bg-muted shadow-(--e1) ring-1 ring-border/40 transition-shadow focus-within:ring-2 focus-within:ring-ring/60"
-        } ${replyingTo || pendingFiles.length > 0 ? "rounded-b-xl" : "rounded-xl"}`}
+        } ${composerRadius}`}
       >
         {dragging && (
           <div
-            className={`pointer-events-none absolute inset-0 z-10 grid place-items-center border-2 border-dashed border-ring bg-background/80 ${replyingTo || pendingFiles.length > 0 ? "rounded-b-xl" : "rounded-xl"}`}
+            className={`pointer-events-none absolute inset-0 z-10 grid place-items-center border-2 border-dashed border-ring bg-background/80 ${composerRadius}`}
           >
             <p className="text-sm font-medium text-muted-foreground">
               Drop files here
@@ -196,9 +200,7 @@ export function ComposerView({
           className={`chat-composer relative py-3 ${
             isForumThreadBody
               ? "px-2"
-              : showSend
-                ? "pl-12 pr-24"
-                : "px-12"
+              : "px-12"
           }`}
           data-testid={tid.composerInput}
         >
@@ -218,10 +220,10 @@ export function ComposerView({
             <PlusCircle className="size-5" />
           </button>
         )}
-        {!hideEmoji && (
+        {!hideEmoji && !showSend && (
           <EmojiPickerPopover side="top" align="end" onPick={onEmojiPick}>
             <button
-              className={`absolute bottom-2 grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground ${showSend ? "right-12" : "right-2"}`}
+              className="absolute right-2 bottom-2 grid size-8 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
               aria-label="Emoji picker"
             >
               <Smile className="size-5" />
@@ -232,12 +234,12 @@ export function ComposerView({
           <button
             type="button"
             data-testid={tid.composerSend}
-            className="absolute right-2 bottom-2 grid size-8 place-items-center rounded-[8px] bg-primary text-primary-foreground enabled:hover:bg-primary/90 enabled:active:bg-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-transparent disabled:text-muted-foreground"
+            className="absolute right-2 bottom-2 grid size-8 place-items-center rounded-full bg-primary text-primary-foreground enabled:hover:bg-primary/90 enabled:active:bg-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:bg-transparent disabled:text-muted-foreground"
             aria-label="Send message"
             disabled={sendDisabled}
             onClick={onSend}
           >
-            <FluentSendFilledIcon className="size-5" />
+            <SendStrokeRoundedIcon className="size-5" />
           </button>
         )}
       </div>
@@ -248,11 +250,10 @@ export function ComposerView({
 export function ComposerSkeleton() {
   return (
     <div className={COMPOSER_OUTER_CLASS}>
-      <div className="relative rounded-xl bg-muted py-3 pl-12 pr-24 shadow-(--e1) ring-1 ring-border/40 sm:px-12">
+      <div className="relative rounded-xl [@media(hover:none)]:rounded-[24px] bg-muted py-3 px-12 shadow-(--e1) ring-1 ring-border/40">
         <Skeleton className="h-6 w-2/5 rounded" />
         <Skeleton className="absolute left-2 bottom-2 size-8 rounded-full" />
-        <Skeleton className="absolute right-12 bottom-2 size-8 rounded-full sm:right-2" />
-        <Skeleton className="absolute right-2 bottom-2 size-8 rounded-full sm:hidden" />
+        <Skeleton className="absolute right-2 bottom-2 size-8 rounded-full" />
       </div>
     </div>
   )
