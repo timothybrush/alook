@@ -93,6 +93,7 @@ export function CommunityInboxSurface({
       {mobile ? (
         <PopoverPortal>
           <PopoverPositioner
+            className="community-inbox-drawer-viewport"
             anchor={anchorRef}
             positionMethod="fixed"
             side="top"
@@ -110,7 +111,7 @@ export function CommunityInboxSurface({
               finalFocus={() => (
                 suppressFocusReturnRef.current ? false : triggerRef.current
               )}
-              className="w-(--anchor-width) origin-bottom border-0 bg-transparent p-0 shadow-none"
+              className="community-inbox-drawer w-(--anchor-width) origin-bottom border-0 bg-transparent p-0 shadow-none"
             >
               <PopoverTitle className="sr-only">Inbox</PopoverTitle>
               <div
