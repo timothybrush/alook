@@ -22,7 +22,7 @@ export function renderMessageListView(
           onClose={controller.closeShare}
         />
       )}
-      <div data-message-scroller-boundary className="relative min-h-0 flex-1">
+      <div data-message-scroller-boundary className="relative isolate min-h-0 flex-1">
         {controller.initialPosition.contentInteractive && (
           <ComposerAccessoryRail
             typingNames={props.typingUsers ?? []}
@@ -38,7 +38,7 @@ export function renderMessageListView(
         <div
           ref={controller.scrollRef}
           data-testid={tid.messageScroller}
-          className="h-full overflow-x-clip overflow-y-auto thin-scrollbar"
+          className="relative z-10 h-full overflow-x-clip overflow-y-auto thin-scrollbar"
         >
           <div
             data-message-list-content
@@ -47,7 +47,7 @@ export function renderMessageListView(
             inert={!controller.initialPosition.showSkeleton && !controller.initialPosition.contentInteractive}
             className={`flex min-h-full flex-col justify-end px-4 pb-14 pt-8 sm:pb-18 ${
               controller.initialPosition.phase === "revealing"
-                ? "opacity-100 transition-opacity duration-100 ease-out motion-reduce:transition-opacity"
+                ? "opacity-100 transition-opacity duration-300 ease-linear motion-reduce:transition-opacity"
                 : controller.initialPosition.showSkeleton || controller.initialPosition.contentVisible
                   ? "opacity-100"
                   : "pointer-events-none opacity-0"
@@ -107,10 +107,10 @@ export function MessageListSkeleton({ variant = "channel" }: { variant?: "channe
       data-message-list-skeleton
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      <div data-message-scroller-boundary className="relative min-h-0 flex-1">
+      <div data-message-scroller-boundary className="relative isolate min-h-0 flex-1">
         <div
           data-testid={tid.messageScroller}
-          className="h-full overflow-x-clip overflow-y-auto thin-scrollbar"
+          className="relative z-10 h-full overflow-x-clip overflow-y-auto thin-scrollbar"
         >
           <div
             data-message-list-content
