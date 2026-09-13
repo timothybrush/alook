@@ -60,6 +60,7 @@ async function expectHoverKeyboardSend({
   await expect(editable).toBeVisible({ timeout: 20_000 })
   await expect(editable).toHaveAttribute("enterkeyhint", "send")
   await expect(send).toHaveCount(0)
+  await expect(page.getByTestId(tid.composerInput).locator("..").getByRole("button", { name: "Emoji picker" })).toBeVisible()
 
   await editable.evaluate((element) => {
     ;(element as HTMLElement).dataset.e2eEditorIdentity = "stable"
@@ -140,7 +141,14 @@ async function expectExplicitTouchSend({
   await expect(send).toBeDisabled()
   await expect(send).toHaveCSS("width", "32px")
   await expect(send).toHaveCSS("height", "32px")
-  await expect(send).toHaveCSS("border-radius", "8px")
+  await expect.poll(() => send.evaluate((button) => {
+    const size = button.getBoundingClientRect()
+    return Number.parseFloat(getComputedStyle(button).borderRadius) >= size.width / 2
+  })).toBe(true)
+  const composer = page.getByTestId(tid.composerInput).locator("..")
+  await expect(composer).toHaveCSS("border-radius", "24px")
+  await expect(composer.getByRole("button", { name: "Emoji picker" })).toHaveCount(0)
+  const singleLineHeight = await composer.evaluate((element) => element.getBoundingClientRect().height)
   await expect(send).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
   await expect(send.locator("svg")).toHaveAttribute("viewBox", "0 0 24 24")
 
@@ -182,6 +190,9 @@ async function expectExplicitTouchSend({
   await page.keyboard.press("Enter")
   await editable.pressSequentially(secondLine)
   await expect(editable.locator("p")).toHaveCount(2)
+  await expect(composer).toHaveCSS("border-radius", "24px")
+  await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height))
+    .toBeGreaterThan(singleLineHeight)
   await expect(editable).toContainText(firstLine)
   await expect(editable).toContainText(secondLine)
   await expect(send).toBeEnabled()
